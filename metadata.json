@@ -1,0 +1,6 @@
+{
+  "name": "TG Links",
+  "description": "Monetized URL Shortener platform where users earn money from link views. Features multi-step ad gating, detailed analytics, withdrawal tracking, and direct integration with multiple AdLinkFly APIs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

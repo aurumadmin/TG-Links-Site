@@ -1,0 +1,78 @@
+{
+  "users": [
+    {
+      "id": "admin-1",
+      "email": "freefiregtamcpe@gmail.com",
+      "role": "admin",
+      "balance": 100,
+      "totalEarned": 100,
+      "withdrawalMethod": "PayPal",
+      "withdrawalAccount": "admin_paypal@example.com",
+      "createdAt": "2026-07-15T15:41:09.261Z",
+      "banned": false,
+      "password": "Thunderffyt123@"
+    },
+    {
+      "id": "admin-2",
+      "email": "teamthunderofficialyt@gmail.com",
+      "role": "admin",
+      "balance": 0,
+      "totalEarned": 0,
+      "withdrawalMethod": "PayPal",
+      "withdrawalAccount": "teamthunder@example.com",
+      "createdAt": "2026-07-15T15:41:09.261Z",
+      "banned": false,
+      "password": "Thunderffyt123@"
+    }
+  ],
+  "links": [
+    {
+      "id": "l-j9i8iox",
+      "code": "5rnu6D",
+      "originalUrl": "https://www.youtube.com/",
+      "userId": "guest",
+      "userEmail": "guest",
+      "cpm": 5,
+      "clicks": 1,
+      "earnings": 0.005,
+      "createdAt": "2026-07-15T15:42:20.950Z",
+      "status": "active"
+    }
+  ],
+  "adFlyShorteners": [],
+  "clicksLog": [
+    {
+      "id": "c-lguv6su",
+      "linkId": "l-j9i8iox",
+      "userId": "guest",
+      "timestamp": "2026-07-15T15:42:44.597Z",
+      "ip": "2405:201:a43e:b870:f99e:fe1e:5e10:f7a8, 169.254.169.126",
+      "earning": 0.005,
+      "country": "Global"
+    }
+  ],
+  "withdrawals": [],
+  "settings": {
+    "siteName": "TG LINKS",
+    "siteTitle": "Shorten Links and Earn Money",
+    "siteDescription": "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
+    "globalCpm": 5,
+    "minWithdrawal": 2,
+    "withdrawalMethods": [
+      "PayPal",
+      "Payeer",
+      "Bitcoin",
+      "Bank Transfer",
+      "UPI"
+    ],
+    "adPagesCount": 1,
+    "bannerAd728x90": "<div class=\"w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center\">\n  <span class=\"text-xs uppercase tracking-widest font-bold opacity-75\">Sponsor Banner (728x90)</span>\n  <span class=\"font-medium text-sm md:text-base mt-1\">Ready to scale your online presence? Partner with TG Links today!</span>\n</div>",
+    "bannerAd300x250": "<div class=\"w-[300px] h-[250px] bg-gradient-to-br from-purple-500 to-pink-500 flex flex-col items-center justify-center border border-purple-300 text-white rounded-lg shadow-sm p-6 text-center mx-auto\">\n  <span class=\"text-xs uppercase tracking-widest font-bold opacity-75\">Premium Space (300x250)</span>\n  <span class=\"font-semibold text-lg mt-2\">Get 50% Off VPS Hosting</span>\n  <p class=\"text-xs opacity-90 mt-2\">High-speed SSD, unmetered bandwidth, and 24/7 dedicated tech support.</p>\n  <button class=\"mt-4 px-4 py-2 bg-white text-purple-700 text-xs font-bold rounded shadow hover:bg-opacity-90 transition\">Learn More</button>\n</div>",
+    "bannerAd320x50": "<div class=\"w-80 h-12 bg-gradient-to-r from-teal-500 to-emerald-600 flex items-center justify-between border border-teal-300 text-white rounded-lg shadow-sm px-4 mx-auto\">\n  <span class=\"text-xs font-bold uppercase tracking-wide\">Ad: Secure VPN</span>\n  <span class=\"text-xs bg-white text-teal-800 px-2 py-1 rounded font-semibold hover:bg-opacity-95 cursor-pointer\">Get 3 Months Free</span>\n</div>",
+    "popunderCode": "<script>\n  console.log(\"Popunder advertisement code loaded for Redirection Page\");\n</script>",
+    "globalHeaderCode": "<script>\n  console.log(\"Global site verification script loaded in site header\");\n</script>",
+    "faviconUrl": "",
+    "logoUrl": "",
+    "enableOwnAds": true
+  }
+}
