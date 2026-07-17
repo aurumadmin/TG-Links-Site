@@ -13,17 +13,54 @@ import {
 
 const PORT = 3000;
 const isVercel = !!process.env.VERCEL;
-const BASE_DB_FILE = path.join(process.cwd(), "data.json");
-const DB_FILE = isVercel ? "/tmp/data.json" : BASE_DB_FILE;
 
-if (isVercel) {
+// We check multiple locations to locate the read-only template data.json in serverless or bundled environments
+const potentialTemplates = [
+  path.join(process.cwd(), "data.json"),
+  path.join(process.cwd(), "..", "data.json"),
+  path.resolve("data.json"),
+  path.resolve("../data.json")
+];
+
+let BASE_DB_FILE = path.join(process.cwd(), "data.json");
+for (const p of potentialTemplates) {
+  try {
+    if (fs.existsSync(p)) {
+      BASE_DB_FILE = p;
+      break;
+    }
+  } catch (e) {
+    // Ignore potential permission errors checking exists
+  }
+}
+
+// Dynamically determine the database file path based on write accessibility
+let DB_FILE = BASE_DB_FILE;
+
+try {
+  if (fs.existsSync(BASE_DB_FILE)) {
+    // Check if writable
+    fs.accessSync(BASE_DB_FILE, fs.constants.W_OK);
+  } else {
+    // Attempt to write a tiny test file to verify write access to directory
+    const testFile = path.join(process.cwd(), ".db-write-test");
+    fs.writeFileSync(testFile, "1");
+    fs.unlinkSync(testFile);
+  }
+} catch (e) {
+  // If not writable, fall back to /tmp directory which is always writable on serverless platforms
+  DB_FILE = "/tmp/data.json";
+}
+
+// Copy template data.json to writable path if needed
+if (DB_FILE === "/tmp/data.json") {
   try {
     if (!fs.existsSync(DB_FILE) && fs.existsSync(BASE_DB_FILE)) {
       fs.copyFileSync(BASE_DB_FILE, DB_FILE);
-      console.log("[TG Links] Successfully copied initial data.json to /tmp/data.json on Vercel");
+      console.log("[TG Links] Copied initial database template from", BASE_DB_FILE, "to", DB_FILE);
     }
   } catch (err) {
-    console.error("[TG Links] Failed to copy initial data.json to /tmp:", err);
+    console.error("[TG Links] Failed to copy initial database to /tmp:", err);
   }
 }
 
@@ -389,7 +426,7 @@ function setupRoutes() {
   
   app.post("/api/auth/register", (req, res) => {
     try {
-      const { email, password } = req.body;
+      const { email, password } = req.body || {};
       if (!email || !password) {
         return res.status(400).json({ error: "Email and password are required" });
       }
@@ -430,7 +467,7 @@ function setupRoutes() {
 
   app.post("/api/auth/login", (req, res) => {
     try {
-      const { email, password } = req.body;
+      const { email, password } = req.body || {};
       if (!email || !password) {
         return res.status(400).json({ error: "Email and password are required" });
       }
