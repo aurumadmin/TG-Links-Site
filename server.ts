@@ -12,7 +12,21 @@ import {
 } from "./src/types";
 
 const PORT = 3000;
-const DB_FILE = path.join(process.cwd(), "data.json");
+const isVercel = process.env.VERCEL === "1";
+const BASE_DB_FILE = path.join(process.cwd(), "data.json");
+const DB_FILE = isVercel ? "/tmp/data.json" : BASE_DB_FILE;
+
+if (isVercel) {
+  try {
+    if (!fs.existsSync(DB_FILE) && fs.existsSync(BASE_DB_FILE)) {
+      fs.copyFileSync(BASE_DB_FILE, DB_FILE);
+      console.log("[TG Links] Successfully copied initial data.json to /tmp/data.json on Vercel");
+    }
+  } catch (err) {
+    console.error("[TG Links] Failed to copy initial data.json to /tmp:", err);
+  }
+}
+
 const app = express();
 
 // Define Admin list
@@ -270,7 +284,7 @@ function saveDb(data: any) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-async function startServer() {
+function setupRoutes() {
   app.set("trust proxy", true);
 
   // Enable dynamic Cross-Origin Resource Sharing (CORS) for external static hosts (like Cloudflare Pages)
@@ -1244,13 +1258,19 @@ async function startServer() {
   // --- VITE MIDDLEWARE HANDLING ---
   
   if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+    import("vite").then(({ createServer: createViteServer }) => {
+      createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      }).then((vite) => {
+        app.use(vite.middlewares);
+      }).catch(err => {
+        console.error("Vite server error:", err);
+      });
+    }).catch(err => {
+      console.error("Failed to dynamically import Vite:", err);
     });
-    app.use(vite.middlewares);
-  } else {
+  } else if (process.env.VERCEL !== "1") {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
@@ -1265,8 +1285,7 @@ async function startServer() {
   }
 }
 
-if (process.env.VERCEL !== "1") {
-  startServer();
-}
+// Synchronously setup routes on the app object
+setupRoutes();
 
 export default app;
