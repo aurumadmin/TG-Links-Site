@@ -10,11 +10,13 @@ export function getApiBase() {
   // Auto-detect environments
   const currentOrigin = typeof window !== "undefined" ? window.location.origin : "";
   
-  // If we are on local development or the direct Cloud Run instance, use relative /api or configured env
+  // If we are on local development, direct Cloud Run, Vercel, or any same-origin deployment
   if (
     currentOrigin.includes("localhost") || 
     currentOrigin.includes("127.0.0.1") || 
-    currentOrigin.includes("run.app")
+    currentOrigin.includes("run.app") ||
+    currentOrigin.includes("vercel.app") ||
+    (currentOrigin && !currentOrigin.includes("pages.dev") && !currentOrigin.includes("workers.dev"))
   ) {
     const baseUrl = (import.meta as any).env?.VITE_API_URL || "";
     const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
