@@ -12,7 +12,7 @@ import {
 } from "./src/types";
 
 const PORT = 3000;
-const isVercel = process.env.VERCEL === "1";
+const isVercel = !!process.env.VERCEL;
 const BASE_DB_FILE = path.join(process.cwd(), "data.json");
 const DB_FILE = isVercel ? "/tmp/data.json" : BASE_DB_FILE;
 
@@ -175,83 +175,138 @@ async function getExternalShortenedUrl(originalUrl: string, db: any): Promise<{ 
 
 // Helper to load/save database
 function loadDb() {
-  if (!fs.existsSync(DB_FILE)) {
-    // Initial Seed Data
-    const initialDb = {
-      users: [
-        {
-          id: "admin-1",
-          email: "freefiregtamcpe@gmail.com",
-          role: "admin",
-          balance: 100.0,
-          totalEarned: 100.0,
-          withdrawalMethod: "PayPal",
-          withdrawalAccount: "admin_paypal@example.com",
-          createdAt: new Date().toISOString(),
-          banned: false,
-          password: "Thunderffyt123@", // Default password
-          apiToken: "d2c8261beff4b98ff674d7f306f2fe205bb5c25d"
-        },
-        {
-          id: "admin-2",
-          email: "teamthunderofficialyt@gmail.com",
-          role: "admin",
-          balance: 0.0,
-          totalEarned: 0.0,
-          withdrawalMethod: "PayPal",
-          withdrawalAccount: "teamthunder@example.com",
-          createdAt: new Date().toISOString(),
-          banned: false,
-          password: "Thunderffyt123@", // Default password
-          apiToken: "c1b7250aeef3b88ee673d7e29ea5dc14aa4b14e1"
-        }
-      ],
-      links: [],
-      adFlyShorteners: [],
-      clicksLog: [],
-      withdrawals: [],
-      settings: {
-        siteName: "TG LINKS",
-        siteTitle: "Shorten Links and Earn Money",
-        siteDescription: "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
-        globalCpm: 5.0, // $5 per 1000 clicks
-        minWithdrawal: 2.0,
-        withdrawalMethods: ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
-        adPagesCount: 1,
-        bannerAd728x90: `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center">
+  let initialDbSeedNeeded = false;
+  let dbContent = "";
+  
+  try {
+    if (!fs.existsSync(DB_FILE)) {
+      initialDbSeedNeeded = true;
+    } else {
+      dbContent = fs.readFileSync(DB_FILE, "utf-8").trim();
+      if (!dbContent) {
+        initialDbSeedNeeded = true;
+      }
+    }
+  } catch (err) {
+    console.error("[TG Links] Error checking/reading database file:", err);
+    initialDbSeedNeeded = true;
+  }
+
+  // Define Initial Seed Data
+  const initialDb = {
+    users: [
+      {
+        id: "admin-1",
+        email: "freefiregtamcpe@gmail.com",
+        role: "admin",
+        balance: 100.0,
+        totalEarned: 100.0,
+        withdrawalMethod: "PayPal",
+        withdrawalAccount: "admin_paypal@example.com",
+        createdAt: new Date().toISOString(),
+        banned: false,
+        password: "Thunderffyt123@", // Default password
+        apiToken: "d2c8261beff4b98ff674d7f306f2fe205bb5c25d"
+      },
+      {
+        id: "admin-2",
+        email: "teamthunderofficialyt@gmail.com",
+        role: "admin",
+        balance: 0.0,
+        totalEarned: 0.0,
+        withdrawalMethod: "PayPal",
+        withdrawalAccount: "teamthunder@example.com",
+        createdAt: new Date().toISOString(),
+        banned: false,
+        password: "Thunderffyt123@", // Default password
+        apiToken: "c1b7250aeef3b88ee673d7e29ea5dc14aa4b14e1"
+      }
+    ],
+    links: [],
+    adFlyShorteners: [],
+    clicksLog: [],
+    withdrawals: [],
+    settings: {
+      siteName: "TG LINKS",
+      siteTitle: "Shorten Links and Earn Money",
+      siteDescription: "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
+      globalCpm: 5.0, // $5 per 1000 clicks
+      minWithdrawal: 2.0,
+      withdrawalMethods: ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
+      adPagesCount: 1,
+      bannerAd728x90: `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center">
   <span class="text-xs uppercase tracking-widest font-bold opacity-75">Sponsor Banner (728x90)</span>
   <span class="font-medium text-sm md:text-base mt-1">Ready to scale your online presence? Partner with TG Links today!</span>
 </div>`,
-        bannerAd300x250: `<div class="w-[300px] h-[250px] bg-gradient-to-br from-purple-500 to-pink-500 flex flex-col items-center justify-center border border-purple-300 text-white rounded-lg shadow-sm p-6 text-center mx-auto">
+      bannerAd300x250: `<div class="w-[300px] h-[250px] bg-gradient-to-br from-purple-500 to-pink-500 flex flex-col items-center justify-center border border-purple-300 text-white rounded-lg shadow-sm p-6 text-center mx-auto">
   <span class="text-xs uppercase tracking-widest font-bold opacity-75">Premium Space (300x250)</span>
   <span class="font-semibold text-lg mt-2">Get 50% Off VPS Hosting</span>
   <p class="text-xs opacity-90 mt-2">High-speed SSD, unmetered bandwidth, and 24/7 dedicated tech support.</p>
   <button class="mt-4 px-4 py-2 bg-white text-purple-700 text-xs font-bold rounded shadow hover:bg-opacity-90 transition">Learn More</button>
 </div>`,
-        bannerAd320x50: `<div class="w-80 h-12 bg-gradient-to-r from-teal-500 to-emerald-600 flex items-center justify-between border border-teal-300 text-white rounded-lg shadow-sm px-4 mx-auto">
+      bannerAd320x50: `<div class="w-80 h-12 bg-gradient-to-r from-teal-500 to-emerald-600 flex items-center justify-between border border-teal-300 text-white rounded-lg shadow-sm px-4 mx-auto">
   <span class="text-xs font-bold uppercase tracking-wide">Ad: Secure VPN</span>
   <span class="text-xs bg-white text-teal-800 px-2 py-1 rounded font-semibold hover:bg-opacity-95 cursor-pointer">Get 3 Months Free</span>
 </div>`,
-        popunderCode: `<script>
+      popunderCode: `<script>
   console.log("Popunder advertisement code loaded for Redirection Page");
 </script>`,
-        globalHeaderCode: `<script>
+      globalHeaderCode: `<script>
   console.log("Global site verification script loaded in site header");
 </script>`,
-        faviconUrl: "",
-        logoUrl: "",
-        enableOwnAds: true,
-        enableNeonAdGate: false,
-        neonTodayAdCode: `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`
-      }
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2));
+      faviconUrl: "",
+      logoUrl: "",
+      enableOwnAds: true,
+      enableNeonAdGate: false,
+      neonTodayAdCode: `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`
+    }
+  };
+
+  if (initialDbSeedNeeded) {
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2));
+    } catch (err) {
+      console.error("[TG Links] Failed to write initial database:", err);
+    }
     return initialDb;
   }
 
-  const db = JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
+  let db: any;
+  try {
+    db = JSON.parse(dbContent);
+  } catch (err) {
+    console.error("[TG Links] Failed to parse database JSON, falling back to seed:", err);
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2));
+    } catch (e) {
+      console.error("[TG Links] Failed to rewrite database file:", e);
+    }
+    return initialDb;
+  }
+
   let changed = false;
   
+  if (!db.users) {
+    db.users = initialDb.users;
+    changed = true;
+  }
+  if (!db.links) {
+    db.links = [];
+    changed = true;
+  }
+  if (!db.adFlyShorteners) {
+    db.adFlyShorteners = [];
+    changed = true;
+  }
+  if (!db.clicksLog) {
+    db.clicksLog = [];
+    changed = true;
+  }
+  if (!db.withdrawals) {
+    db.withdrawals = [];
+    changed = true;
+  }
+
   if (db.settings) {
     if (db.settings.enableNeonAdGate === undefined) {
       db.settings.enableNeonAdGate = false;
@@ -265,6 +320,9 @@ function loadDb() {
       db.settings.neonTodayAdCode = `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`;
       changed = true;
     }
+  } else {
+    db.settings = initialDb.settings;
+    changed = true;
   }
 
   db.users = db.users.map((u: any) => {
@@ -274,14 +332,23 @@ function loadDb() {
     }
     return u;
   });
+
   if (changed) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+    } catch (err) {
+      console.error("[TG Links] Failed to update database on disk:", err);
+    }
   }
   return db;
 }
 
 function saveDb(data: any) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error("[TG Links] Failed to save database file:", err);
+  }
 }
 
 function setupRoutes() {
@@ -321,62 +388,72 @@ function setupRoutes() {
   // --- AUTH ENDPOINTS ---
   
   app.post("/api/auth/register", (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+
+      const db = loadDb();
+      const existing = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+      if (existing) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+
+      // Determine role based on admin emails list
+      const isAdmin = ADMIN_EMAILS.includes(email.toLowerCase());
+      
+      const newUser: User & { password: string } = {
+        id: "u-" + Math.random().toString(36).substring(2, 9),
+        email: email.toLowerCase(),
+        role: isAdmin ? "admin" : "user",
+        balance: 0.0,
+        totalEarned: 0.0,
+        withdrawalMethod: "",
+        withdrawalAccount: "",
+        createdAt: new Date().toISOString(),
+        banned: false,
+        password: password,
+        apiToken: generateApiToken()
+      };
+
+      db.users.push(newUser);
+      saveDb(db);
+
+      const { password: _, ...userSafe } = newUser;
+      res.json({ user: userSafe });
+    } catch (err: any) {
+      console.error("[TG Links] Registration Error:", err);
+      res.status(500).json({ error: `Registration error: ${err.message}`, stack: err.stack });
     }
-
-    const db = loadDb();
-    const existing = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
-    if (existing) {
-      return res.status(400).json({ error: "Email already registered" });
-    }
-
-    // Determine role based on admin emails list
-    const isAdmin = ADMIN_EMAILS.includes(email.toLowerCase());
-    
-    const newUser: User & { password: string } = {
-      id: "u-" + Math.random().toString(36).substring(2, 9),
-      email: email.toLowerCase(),
-      role: isAdmin ? "admin" : "user",
-      balance: 0.0,
-      totalEarned: 0.0,
-      withdrawalMethod: "",
-      withdrawalAccount: "",
-      createdAt: new Date().toISOString(),
-      banned: false,
-      password: password,
-      apiToken: generateApiToken()
-    };
-
-    db.users.push(newUser);
-    saveDb(db);
-
-    const { password: _, ...userSafe } = newUser;
-    res.json({ user: userSafe });
   });
 
   app.post("/api/auth/login", (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+
+      const db = loadDb();
+      const user = db.users.find(
+        (u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
+      );
+
+      if (!user) {
+        return res.status(400).json({ error: "Invalid email or password" });
+      }
+
+      if (user.banned) {
+        return res.status(403).json({ error: "This account has been banned" });
+      }
+
+      const { password: _, ...userSafe } = user;
+      res.json({ user: userSafe });
+    } catch (err: any) {
+      console.error("[TG Links] Login Error:", err);
+      res.status(500).json({ error: `Login error: ${err.message}`, stack: err.stack });
     }
-
-    const db = loadDb();
-    const user = db.users.find(
-      (u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-    );
-
-    if (!user) {
-      return res.status(400).json({ error: "Invalid email or password" });
-    }
-
-    if (user.banned) {
-      return res.status(403).json({ error: "This account has been banned" });
-    }
-
-    const { password: _, ...userSafe } = user;
-    res.json({ user: userSafe });
   });
 
   app.get("/api/auth/me", (req, res) => {
