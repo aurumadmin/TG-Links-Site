@@ -413,11 +413,23 @@ function setupRoutes() {
 
   // Enable dynamic Cross-Origin Resource Sharing (CORS) for external static hosts (like Cloudflare Pages)
   app.use((req, res, next) => {
-    const origin = req.headers.origin || "*";
-    res.setHeader("Access-Control-Allow-Origin", origin);
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    } else {
+      const host = req.get("host");
+      if (host) {
+        // Fallback to same-origin protocol and host to avoid wildcard issue
+        const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
+        res.setHeader("Access-Control-Allow-Origin", `${protocol}://${host}`);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+      } else {
+        res.setHeader("Access-Control-Allow-Origin", "*");
+      }
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
     
     if (req.method === "OPTIONS") {
       return res.sendStatus(204);
