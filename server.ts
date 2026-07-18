@@ -11,7 +11,7 @@ import {
   SystemSettings 
 } from "./src/types";
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isVercel = !!process.env.VERCEL;
 
 // We check multiple locations to locate the read-only template data.json in serverless or bundled environments
