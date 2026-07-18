@@ -326,22 +326,42 @@ function loadDb() {
   if (!db.users) {
     db.users = initialDb.users;
     changed = true;
+  } else {
+    const originalLength = db.users.length;
+    db.users = db.users.filter(Boolean);
+    if (db.users.length !== originalLength) changed = true;
   }
   if (!db.links) {
     db.links = [];
     changed = true;
+  } else {
+    const originalLength = db.links.length;
+    db.links = db.links.filter(Boolean);
+    if (db.links.length !== originalLength) changed = true;
   }
   if (!db.adFlyShorteners) {
     db.adFlyShorteners = [];
     changed = true;
+  } else {
+    const originalLength = db.adFlyShorteners.length;
+    db.adFlyShorteners = db.adFlyShorteners.filter(Boolean);
+    if (db.adFlyShorteners.length !== originalLength) changed = true;
   }
   if (!db.clicksLog) {
     db.clicksLog = [];
     changed = true;
+  } else {
+    const originalLength = db.clicksLog.length;
+    db.clicksLog = db.clicksLog.filter(Boolean);
+    if (db.clicksLog.length !== originalLength) changed = true;
   }
   if (!db.withdrawals) {
     db.withdrawals = [];
     changed = true;
+  } else {
+    const originalLength = db.withdrawals.length;
+    db.withdrawals = db.withdrawals.filter(Boolean);
+    if (db.withdrawals.length !== originalLength) changed = true;
   }
 
   if (db.settings) {
@@ -362,7 +382,7 @@ function loadDb() {
     changed = true;
   }
 
-  db.users = db.users.map((u: any) => {
+  db.users = (db.users || []).filter(Boolean).map((u: any) => {
     if (!u.apiToken) {
       u.apiToken = generateApiToken();
       changed = true;
@@ -422,6 +442,46 @@ function setupRoutes() {
     return db.users.find((u: any) => u.id === userId && !u.banned) || null;
   };
 
+  // --- DIAGNOSTICS ENDPOINT ---
+  app.get("/api/debug-db", (req, res) => {
+    const diagnostics: any = {
+      timestamp: new Date().toISOString(),
+      isVercel: !!process.env.VERCEL,
+      node_env: process.env.NODE_ENV,
+      cwd: process.cwd(),
+      BASE_DB_FILE,
+      DB_FILE,
+      base_exists: false,
+      db_exists: false,
+    };
+
+    try {
+      diagnostics.base_exists = fs.existsSync(BASE_DB_FILE);
+    } catch (e: any) {
+      diagnostics.base_exists_error = e.message;
+    }
+
+    try {
+      diagnostics.db_exists = fs.existsSync(DB_FILE);
+    } catch (e: any) {
+      diagnostics.db_exists_error = e.message;
+    }
+
+    try {
+      const db = loadDb();
+      diagnostics.load_db_success = true;
+      diagnostics.db_keys = Object.keys(db);
+      diagnostics.users_count = db.users ? db.users.length : 0;
+      diagnostics.admins = db.users ? db.users.filter((u: any) => u.role === "admin").map((u: any) => ({ email: u.email, id: u.id })) : [];
+    } catch (e: any) {
+      diagnostics.load_db_success = false;
+      diagnostics.load_db_error = e.message;
+      diagnostics.load_db_stack = e.stack;
+    }
+
+    res.json(diagnostics);
+  });
+
   // --- AUTH ENDPOINTS ---
   
   app.post("/api/auth/register", (req, res) => {
@@ -432,7 +492,7 @@ function setupRoutes() {
       }
 
       const db = loadDb();
-      const existing = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+      const existing = db.users.find((u: any) => u && u.email && u.email.toLowerCase() === email.toLowerCase());
       if (existing) {
         return res.status(400).json({ error: "Email already registered" });
       }
@@ -474,7 +534,7 @@ function setupRoutes() {
 
       const db = loadDb();
       const user = db.users.find(
-        (u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
+        (u: any) => u && u.email && u.email.toLowerCase() === email.toLowerCase() && u.password === password
       );
 
       if (!user) {
@@ -1213,7 +1273,7 @@ function setupRoutes() {
     const { role, balance, customCpm, banned } = req.body;
     const db = loadDb();
 
-    const user = db.users.find((u: any) => u.id === id);
+    const user = db.users.find((u: any) => u && u.id === id);
     if (!user) return res.status(404).json({ error: "User not found" });
 
     if (role !== undefined) user.role = role;
@@ -1229,7 +1289,7 @@ function setupRoutes() {
   app.delete("/api/admin/users/:id", requireAdmin, (req, res) => {
     const { id } = req.params;
     const db = loadDb();
-    const userIdx = db.users.findIndex((u: any) => u.id === id);
+    const userIdx = db.users.findIndex((u: any) => u && u.id === id);
     if (userIdx === -1) return res.status(404).json({ error: "User not found" });
 
     db.users.splice(userIdx, 1);
