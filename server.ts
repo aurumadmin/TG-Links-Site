@@ -36,33 +36,52 @@ for (const p of potentialTemplates) {
   }
 }
 
-// Dynamically determine the database file path based on write accessibility
-let DB_FILE = BASE_DB_FILE;
+// Dynamically determine the database file path based on write accessibility or environment configuration
+let DB_FILE = process.env.DB_PATH || BASE_DB_FILE;
 
-try {
-  if (fs.existsSync(BASE_DB_FILE)) {
-    // Check if writable
-    fs.accessSync(BASE_DB_FILE, fs.constants.W_OK);
-  } else {
-    // Attempt to write a tiny test file to verify write access to directory
-    const testFile = path.join(process.cwd(), ".db-write-test");
-    fs.writeFileSync(testFile, "1");
-    fs.unlinkSync(testFile);
-  }
-} catch (e) {
-  // If not writable, fall back to /tmp directory which is always writable on serverless platforms
-  DB_FILE = "/tmp/data.json";
-}
-
-// Copy template data.json to writable path if needed
-if (DB_FILE === "/tmp/data.json") {
+if (process.env.DB_PATH) {
+  console.log("[TG Links] Custom database path requested via DB_PATH:", process.env.DB_PATH);
+  // Ensure parent directory exists
+  const parentDir = path.dirname(process.env.DB_PATH);
   try {
-    if (!fs.existsSync(DB_FILE) && fs.existsSync(BASE_DB_FILE)) {
-      fs.copyFileSync(BASE_DB_FILE, DB_FILE);
-      console.log("[TG Links] Copied initial database template from", BASE_DB_FILE, "to", DB_FILE);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+    // Copy base database to custom DB path if it does not exist
+    if (!fs.existsSync(process.env.DB_PATH) && fs.existsSync(BASE_DB_FILE)) {
+      fs.copyFileSync(BASE_DB_FILE, process.env.DB_PATH);
+      console.log("[TG Links] Copied initial database template from", BASE_DB_FILE, "to custom DB_PATH", process.env.DB_PATH);
     }
   } catch (err) {
-    console.error("[TG Links] Failed to copy initial database to /tmp:", err);
+    console.error("[TG Links] Error preparing custom DB_PATH directory/file:", err);
+  }
+} else {
+  // Standard dynamic fallback for serverless or container environments
+  try {
+    if (fs.existsSync(BASE_DB_FILE)) {
+      // Check if writable
+      fs.accessSync(BASE_DB_FILE, fs.constants.W_OK);
+    } else {
+      // Attempt to write a tiny test file to verify write access to directory
+      const testFile = path.join(process.cwd(), ".db-write-test");
+      fs.writeFileSync(testFile, "1");
+      fs.unlinkSync(testFile);
+    }
+  } catch (e) {
+    // If not writable, fall back to /tmp directory which is always writable on serverless platforms
+    DB_FILE = "/tmp/data.json";
+  }
+
+  // Copy template data.json to writable path if needed
+  if (DB_FILE === "/tmp/data.json") {
+    try {
+      if (!fs.existsSync(DB_FILE) && fs.existsSync(BASE_DB_FILE)) {
+        fs.copyFileSync(BASE_DB_FILE, DB_FILE);
+        console.log("[TG Links] Copied initial database template from", BASE_DB_FILE, "to", DB_FILE);
+      }
+    } catch (err) {
+      console.error("[TG Links] Failed to copy initial database to /tmp:", err);
+    }
   }
 }
 
