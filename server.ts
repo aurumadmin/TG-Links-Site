@@ -709,36 +709,21 @@ function setupRoutes() {
       }
     }
 
-    // Intercept res.json and res.send to ensure pending Google Drive writes complete before returning
-    const originalJson = res.json;
+    // Intercept res.send to ensure pending Google Drive writes complete before returning.
+    // Since Express's res.json() internally calls res.send(), intercepting only res.send is sufficient and prevents recursion.
     const originalSend = res.send;
 
-    res.json = function(body) {
+    res.send = function(...args: any[]) {
       // Only delay the response if a database write occurred DURING this specific request
       if (syncPromise !== res.locals.gdriveStartPromise) {
         syncPromise.then(() => {
-          originalJson.call(this, body);
-        }).catch(err => {
-          console.error("[TG Links] Error waiting for syncPromise in res.json:", err);
-          originalJson.call(this, body);
-        });
-      } else {
-        originalJson.call(this, body);
-      }
-      return this;
-    };
-
-    res.send = function(body) {
-      // Only delay the response if a database write occurred DURING this specific request
-      if (syncPromise !== res.locals.gdriveStartPromise) {
-        syncPromise.then(() => {
-          originalSend.call(this, body);
+          originalSend.apply(this, args);
         }).catch(err => {
           console.error("[TG Links] Error waiting for syncPromise in res.send:", err);
-          originalSend.call(this, body);
+          originalSend.apply(this, args);
         });
       } else {
-        originalSend.call(this, body);
+        originalSend.apply(this, args);
       }
       return this;
     };
