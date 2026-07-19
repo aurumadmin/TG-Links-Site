@@ -62,6 +62,9 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
   // New payment method state
   const [newPaymentMethod, setNewPaymentMethod] = useState("");
 
+  // Google Drive Database Sync State
+  const [gdriveInfo, setGdriveInfo] = useState<{ enabled: boolean; fileId: string; serviceAccountEmail: string } | null>(null);
+
   // Settings feedback
   const [settingsSuccess, setSettingsSuccess] = useState("");
   const [settingsError, setSettingsError] = useState("");
@@ -82,6 +85,9 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
       setLinksList(links.links);
       setWithdrawalsList(withdrawals.withdrawals);
       setSysSettings(settings.settings);
+      if (settings.gdrive) {
+        setGdriveInfo(settings.gdrive);
+      }
       setExternalApis(apis.shorteners);
     } catch (err) {
       console.error("Failed to load admin panel data:", err);
@@ -901,6 +907,76 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* GOOGLE DRIVE DATABASE SYNC STATUS */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                </div>
+                <h3 className="font-extrabold text-white text-base">Google Drive Cloud Database Persistence</h3>
+              </div>
+
+              {gdriveInfo?.enabled ? (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                    <Check className="w-5 h-5" />
+                    <span>Real-Time Cloud Storage Active</span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Your database is successfully connected and writing changes dynamically to your Google Drive account. This bypasses Vercel's read-only/ephemeral storage limits to prevent any data loss!
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2 border-t border-emerald-500/10">
+                    <div>
+                      <span className="block text-slate-500 font-bold uppercase tracking-wider text-[10px]">Active Service Account</span>
+                      <code className="text-emerald-300 font-mono select-all bg-emerald-950/40 px-2 py-1.5 rounded block mt-1 break-all">{gdriveInfo.serviceAccountEmail}</code>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500 font-bold uppercase tracking-wider text-[10px]">Google Drive File ID</span>
+                      <code className="text-emerald-300 font-mono select-all bg-emerald-950/40 px-2 py-1.5 rounded block mt-1 break-all">{gdriveInfo.fileId || "Locating/Creating..."}</code>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-2">
+                    <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                      <AlertCircle className="w-5 h-5" />
+                      <span>Local Storage Only (No Cloud Persistence)</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      The database is currently operating in local fallback mode. Because Vercel's serverless containers are ephemeral, local files will be lost frequently on container recycling or cold-starts!
+                    </p>
+                  </div>
+
+                  <div className="p-5 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
+                    <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest block">How to configure Google Drive Persistence on Vercel:</span>
+                    <ol className="list-decimal pl-4 text-xs text-slate-400 space-y-2.5">
+                      <li>
+                        <strong className="text-slate-200">Create a Google Cloud Project</strong>: Go to the <a href="https://console.cloud.google.com" target="_blank" className="text-indigo-400 hover:underline inline-flex items-center gap-0.5" referrerPolicy="no-referrer">Google Cloud Console</a>, create a project, and enable the <strong className="text-slate-200">Google Drive API</strong>.
+                      </li>
+                      <li>
+                        <strong className="text-slate-200">Generate a Service Account Key</strong>: Create a Service Account under "IAM & Admin &rarr; Service Accounts", click "Keys &rarr; Add Key &rarr; Create New Key", and download it as a <strong className="text-slate-200">JSON</strong> file.
+                      </li>
+                      <li>
+                        <strong className="text-slate-200">Set Environment Variables in Vercel Dashboard</strong>:
+                        <ul className="list-disc pl-4 mt-1.5 space-y-1.5 text-slate-500">
+                          <li>
+                            <code className="text-slate-300 font-mono bg-slate-900 px-1.5 py-0.5 rounded">GOOGLE_SERVICE_ACCOUNT_KEY</code>: Copy and paste the entire content of your Service Account JSON key.
+                          </li>
+                          <li>
+                            <code className="text-slate-300 font-mono bg-slate-900 px-1.5 py-0.5 rounded">GOOGLE_DRIVE_FILE_ID</code> (Optional): A pre-existing Google Drive File ID. Leave blank to let the system automatically create <code className="text-slate-300">tglinks_db.json</code>.
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <strong className="text-slate-200">Grant Google Drive Permissions (If folder specified)</strong>: If using a shared folder, share that folder with the Service Account email so it has write permission.
+                      </li>
+                    </ol>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* AD CONFIGURATION OPTIONS */}

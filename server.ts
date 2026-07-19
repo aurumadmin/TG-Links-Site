@@ -1,6 +1,8 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
+import fetch from "node-fetch";
 
 import { 
   User, 
@@ -210,8 +212,247 @@ async function getExternalShortenedUrl(originalUrl: string, db: any): Promise<{ 
   return null;
 }
 
+// --- GOOGLE DRIVE DATABASE SYNC INTEGRATION ---
+let gdriveSyncEnabled = false;
+let gdriveFileId = process.env.GOOGLE_DRIVE_FILE_ID || "";
+let serviceAccountEmail = "";
+let syncPromise: Promise<any> = Promise.resolve();
+let cachedDbInMemory: any = null;
+
+// Helper to sign service account JWT using RS256 with Node's crypto library
+function signServiceAccountJwt(key: any, scope: string): string {
+  const header = {
+    alg: "RS256",
+    typ: "JWT"
+  };
+  
+  const now = Math.floor(Date.now() / 1000);
+  const claimSet = {
+    iss: key.client_email,
+    scope: scope,
+    aud: "https://oauth2.googleapis.com/token",
+    exp: now + 3600,
+    iat: now
+  };
+  
+  const base64Header = Buffer.from(JSON.stringify(header)).toString("base64url");
+  const base64ClaimSet = Buffer.from(JSON.stringify(claimSet)).toString("base64url");
+  
+  let privateKey = key.private_key || "";
+  if (typeof privateKey === "string") {
+    privateKey = privateKey.replace(/\\n/g, "\n");
+  }
+
+  const sign = crypto.createSign("RSA-SHA256");
+  sign.update(`${base64Header}.${base64ClaimSet}`);
+  const signature = sign.sign(privateKey, "base64url");
+  
+  return `${base64Header}.${base64ClaimSet}.${signature}`;
+}
+
+// Get access token for service account
+async function getServiceAccountToken(): Promise<string> {
+  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!rawKey) {
+    throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY env variable is not set");
+  }
+  
+  let key: any;
+  try {
+    key = JSON.parse(rawKey.trim());
+  } catch (err) {
+    throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY is not valid JSON: " + (err as Error).message);
+  }
+  
+  serviceAccountEmail = key.client_email || "";
+  const jwt = signServiceAccountJwt(key, "https://www.googleapis.com/auth/drive");
+  
+  const params = new URLSearchParams();
+  params.append("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer");
+  params.append("assertion", jwt);
+  
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: params.toString()
+  });
+  
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google OAuth token exchange failed: ${text}`);
+  }
+  
+  const data: any = await res.json();
+  return data.access_token;
+}
+
+// Initialize sync if key is provided
+if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+  gdriveSyncEnabled = true;
+  console.log("[TG Links] Google Drive sync is enabled (detected service account key)");
+  try {
+    const key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY.trim());
+    serviceAccountEmail = key.client_email || "";
+    console.log("[TG Links] Google Service Account email:", serviceAccountEmail);
+  } catch (e) {}
+}
+
+async function loadDbFromGoogleDrive(): Promise<any> {
+  if (!gdriveSyncEnabled) return null;
+  
+  try {
+    const token = await getServiceAccountToken();
+    
+    // If we don't have a file ID, let's search for a file named "tglinks_db.json"
+    if (!gdriveFileId) {
+      console.log("[TG Links] Google Drive File ID not specified. Searching for 'tglinks_db.json'...");
+      const searchRes = await fetch(
+        "https://www.googleapis.com/drive/v3/files?q=name='tglinks_db.json'+and+trashed=false&fields=files(id)",
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      
+      if (searchRes.ok) {
+        const searchData: any = await searchRes.json();
+        if (searchData.files && searchData.files.length > 0) {
+          gdriveFileId = searchData.files[0].id;
+          console.log("[TG Links] Found existing Google Drive database file ID:", gdriveFileId);
+        }
+      }
+    }
+    
+    // If still no file ID, we will create the file in saveDbToGoogleDrive when it writes
+    if (!gdriveFileId) {
+      console.log("[TG Links] No existing database file found on Google Drive. Will create one on next save.");
+      return null;
+    }
+    
+    // Fetch file content
+    console.log(`[TG Links] Downloading database from Google Drive file: ${gdriveFileId}...`);
+    const downloadRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${gdriveFileId}?alt=media`,
+      {
+        headers: { Authorization: `Bearer ${token}` }
+      }
+    );
+    
+    if (!downloadRes.ok) {
+      if (downloadRes.status === 404) {
+        console.warn("[TG Links] Google Drive database file not found (404), resetting file ID");
+        gdriveFileId = "";
+        return null;
+      }
+      const errText = await downloadRes.text();
+      throw new Error(`Failed to download database file (HTTP ${downloadRes.status}): ${errText}`);
+    }
+    
+    const dbContent = await downloadRes.text();
+    const parsed = JSON.parse(dbContent.trim());
+    console.log("[TG Links] Successfully synchronized database from Google Drive!");
+    cachedDbInMemory = parsed;
+    
+    // Write locally as backup
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2));
+    } catch (e) {}
+    
+    return parsed;
+  } catch (err: any) {
+    console.error("[TG Links] Error synchronizing database from Google Drive:", err.message);
+    throw err;
+  }
+}
+
+async function saveDbToGoogleDrive(data: any): Promise<void> {
+  if (!gdriveSyncEnabled) return;
+  
+  try {
+    const token = await getServiceAccountToken();
+    const bodyStr = JSON.stringify(data, null, 2);
+    
+    if (gdriveFileId) {
+      // Update existing file
+      console.log(`[TG Links] Uploading database updates to Google Drive: ${gdriveFileId}...`);
+      const updateRes = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${gdriveFileId}?uploadType=media`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: bodyStr
+        }
+      );
+      
+      if (!updateRes.ok) {
+        const errText = await updateRes.text();
+        throw new Error(`Failed to update Google Drive file: ${errText}`);
+      }
+      console.log("[TG Links] Successfully uploaded database updates to Google Drive!");
+    } else {
+      // Create new file
+      console.log("[TG Links] Creating new database file 'tglinks_db.json' on Google Drive...");
+      
+      // Step 1: Create file metadata
+      const createMetaRes = await fetch(
+        "https://www.googleapis.com/drive/v3/files",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: "tglinks_db.json",
+            mimeType: "application/json"
+          })
+        }
+      );
+      
+      if (!createMetaRes.ok) {
+        const errText = await createMetaRes.text();
+        throw new Error(`Failed to create file metadata: ${errText}`);
+      }
+      
+      const fileMeta: any = await createMetaRes.json();
+      gdriveFileId = fileMeta.id;
+      console.log(`[TG Links] Created file ID: ${gdriveFileId}. Now uploading content...`);
+      
+      // Step 2: Upload content to the newly created file
+      const uploadRes = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${gdriveFileId}?uploadType=media`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: bodyStr
+        }
+      );
+      
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        throw new Error(`Failed to upload file content: ${errText}`);
+      }
+      console.log("[TG Links] Successfully created and saved database to Google Drive!");
+    }
+  } catch (err: any) {
+    console.error("[TG Links] Error saving database to Google Drive:", err.message);
+    throw err;
+  }
+}
+
 // Helper to load/save database
 function loadDb() {
+  if (cachedDbInMemory) {
+    return cachedDbInMemory;
+  }
+
   let initialDbSeedNeeded = false;
   let dbContent = "";
   
@@ -397,39 +638,77 @@ function loadDb() {
       console.error("[TG Links] Failed to update database on disk:", err);
     }
   }
+  cachedDbInMemory = db;
   return db;
 }
 
 function saveDb(data: any) {
+  cachedDbInMemory = data;
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error("[TG Links] Failed to save database file:", err);
+  }
+
+  if (gdriveSyncEnabled) {
+    // Chain background sync
+    syncPromise = syncPromise.then(() => saveDbToGoogleDrive(data)).catch((err) => {
+      console.error("[TG Links] Background Google Drive sync failed:", err);
+    });
   }
 }
 
 function setupRoutes() {
   app.set("trust proxy", true);
 
-  // Enable dynamic Cross-Origin Resource Sharing (CORS) for external static hosts (like Cloudflare Pages)
-  app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (origin) {
-      res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-    } else {
-      const host = req.get("host");
-      if (host) {
-        // Fallback to same-origin protocol and host to avoid wildcard issue
-        const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
-        res.setHeader("Access-Control-Allow-Origin", `${protocol}://${host}`);
-        res.setHeader("Access-Control-Allow-Credentials", "true");
-      } else {
-        res.setHeader("Access-Control-Allow-Origin", "*");
+  // Google Drive Sync Middleware
+  app.use(async (req, res, next) => {
+    // If Google Drive Sync is enabled and our cache is empty (e.g. cold start), block and fetch it first
+    if (gdriveSyncEnabled && !cachedDbInMemory) {
+      console.log("[TG Links] Cold start detected, loading database from Google Drive before processing request...");
+      try {
+        await loadDbFromGoogleDrive();
+      } catch (err: any) {
+        console.error("[TG Links] Failed to load database from Google Drive on cold start:", err.message);
       }
     }
+
+    // Intercept res.json and res.send to ensure pending Google Drive writes complete before returning
+    const originalJson = res.json;
+    const originalSend = res.send;
+
+    res.json = function(body) {
+      syncPromise.then(() => {
+        originalJson.call(this, body);
+      }).catch(err => {
+        console.error("[TG Links] Error waiting for syncPromise in res.json:", err);
+        originalJson.call(this, body);
+      });
+      return this;
+    };
+
+    res.send = function(body) {
+      syncPromise.then(() => {
+        originalSend.call(this, body);
+      }).catch(err => {
+        console.error("[TG Links] Error waiting for syncPromise in res.send:", err);
+        originalSend.call(this, body);
+      });
+      return this;
+    };
+
+    next();
+  });
+
+  // Enable dynamic Cross-Origin Resource Sharing (CORS) for external static hosts (like Cloudflare Pages)
+  app.use((req, res, next) => {
+    const origin = req.headers.origin || "*";
+    res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (origin !== "*") {
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
     
     if (req.method === "OPTIONS") {
       return res.sendStatus(204);
@@ -465,6 +744,9 @@ function setupRoutes() {
       DB_FILE,
       base_exists: false,
       db_exists: false,
+      gdrive_sync_enabled: gdriveSyncEnabled,
+      gdrive_file_id: gdriveFileId,
+      service_account_email: serviceAccountEmail,
     };
 
     try {
@@ -1365,7 +1647,14 @@ function setupRoutes() {
 
   app.get("/api/admin/settings", requireAdmin, (req, res) => {
     const db = loadDb();
-    res.json({ settings: db.settings });
+    res.json({ 
+      settings: db.settings,
+      gdrive: {
+        enabled: gdriveSyncEnabled,
+        fileId: gdriveFileId,
+        serviceAccountEmail
+      }
+    });
   });
 
   app.post("/api/admin/settings", requireAdmin, (req, res) => {
