@@ -219,6 +219,27 @@ let serviceAccountEmail = "";
 let syncPromise: Promise<any> = Promise.resolve();
 let cachedDbInMemory: any = null;
 
+// Clean fetch helper with a strict timeout to prevent hanging the event loop
+async function fetchWithTimeout(url: string, options: any = {}, timeoutMs: number = 3500): Promise<any> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal as any
+    });
+    clearTimeout(timeoutId);
+    return res;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  }
+}
+
 // Helper to sign service account JWT using RS256 with Node's crypto library
 function signServiceAccountJwt(key: any, scope: string): string {
   const header = {
@@ -271,13 +292,13 @@ async function getServiceAccountToken(): Promise<string> {
   params.append("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer");
   params.append("assertion", jwt);
   
-  const res = await fetch("https://oauth2.googleapis.com/token", {
+  const res = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
     },
     body: params.toString()
-  });
+  }, 3500);
   
   if (!res.ok) {
     const text = await res.text();
@@ -308,11 +329,12 @@ async function loadDbFromGoogleDrive(): Promise<any> {
     // If we don't have a file ID, let's search for a file named "tglinks_db.json"
     if (!gdriveFileId) {
       console.log("[TG Links] Google Drive File ID not specified. Searching for 'tglinks_db.json'...");
-      const searchRes = await fetch(
+      const searchRes = await fetchWithTimeout(
         "https://www.googleapis.com/drive/v3/files?q=name='tglinks_db.json'+and+trashed=false&fields=files(id)",
         {
           headers: { Authorization: `Bearer ${token}` }
-        }
+        },
+        3500
       );
       
       if (searchRes.ok) {
@@ -332,11 +354,12 @@ async function loadDbFromGoogleDrive(): Promise<any> {
     
     // Fetch file content
     console.log(`[TG Links] Downloading database from Google Drive file: ${gdriveFileId}...`);
-    const downloadRes = await fetch(
+    const downloadRes = await fetchWithTimeout(
       `https://www.googleapis.com/drive/v3/files/${gdriveFileId}?alt=media`,
       {
         headers: { Authorization: `Bearer ${token}` }
-      }
+      },
+      4000
     );
     
     if (!downloadRes.ok) {
@@ -350,6 +373,11 @@ async function loadDbFromGoogleDrive(): Promise<any> {
     }
     
     const dbContent = await downloadRes.text();
+    if (!dbContent || !dbContent.trim()) {
+      console.warn("[TG Links] Google Drive database file is empty.");
+      return null;
+    }
+
     const parsed = JSON.parse(dbContent.trim());
     console.log("[TG Links] Successfully synchronized database from Google Drive!");
     cachedDbInMemory = parsed;
@@ -376,7 +404,7 @@ async function saveDbToGoogleDrive(data: any): Promise<void> {
     if (gdriveFileId) {
       // Update existing file
       console.log(`[TG Links] Uploading database updates to Google Drive: ${gdriveFileId}...`);
-      const updateRes = await fetch(
+      const updateRes = await fetchWithTimeout(
         `https://www.googleapis.com/upload/drive/v3/files/${gdriveFileId}?uploadType=media`,
         {
           method: "PATCH",
@@ -385,7 +413,8 @@ async function saveDbToGoogleDrive(data: any): Promise<void> {
             "Content-Type": "application/json"
           },
           body: bodyStr
-        }
+        },
+        5000
       );
       
       if (!updateRes.ok) {
@@ -398,7 +427,7 @@ async function saveDbToGoogleDrive(data: any): Promise<void> {
       console.log("[TG Links] Creating new database file 'tglinks_db.json' on Google Drive...");
       
       // Step 1: Create file metadata
-      const createMetaRes = await fetch(
+      const createMetaRes = await fetchWithTimeout(
         "https://www.googleapis.com/drive/v3/files",
         {
           method: "POST",
@@ -410,7 +439,8 @@ async function saveDbToGoogleDrive(data: any): Promise<void> {
             name: "tglinks_db.json",
             mimeType: "application/json"
           })
-        }
+        },
+        3500
       );
       
       if (!createMetaRes.ok) {
@@ -423,7 +453,7 @@ async function saveDbToGoogleDrive(data: any): Promise<void> {
       console.log(`[TG Links] Created file ID: ${gdriveFileId}. Now uploading content...`);
       
       // Step 2: Upload content to the newly created file
-      const uploadRes = await fetch(
+      const uploadRes = await fetchWithTimeout(
         `https://www.googleapis.com/upload/drive/v3/files/${gdriveFileId}?uploadType=media`,
         {
           method: "PATCH",
@@ -432,7 +462,8 @@ async function saveDbToGoogleDrive(data: any): Promise<void> {
             "Content-Type": "application/json"
           },
           body: bodyStr
-        }
+        },
+        5000
       );
       
       if (!uploadRes.ok) {
@@ -449,25 +480,35 @@ async function saveDbToGoogleDrive(data: any): Promise<void> {
 
 // Helper to load/save database
 function loadDb() {
-  if (cachedDbInMemory) {
-    return cachedDbInMemory;
-  }
-
+  let db: any = null;
   let initialDbSeedNeeded = false;
-  let dbContent = "";
-  
-  try {
-    if (!fs.existsSync(DB_FILE)) {
+
+  if (cachedDbInMemory) {
+    db = cachedDbInMemory;
+  } else {
+    let dbContent = "";
+    try {
+      if (!fs.existsSync(DB_FILE)) {
+        initialDbSeedNeeded = true;
+      } else {
+        dbContent = fs.readFileSync(DB_FILE, "utf-8").trim();
+        if (!dbContent) {
+          initialDbSeedNeeded = true;
+        }
+      }
+    } catch (err) {
+      console.error("[TG Links] Error checking/reading database file:", err);
       initialDbSeedNeeded = true;
-    } else {
-      dbContent = fs.readFileSync(DB_FILE, "utf-8").trim();
-      if (!dbContent) {
+    }
+
+    if (!initialDbSeedNeeded) {
+      try {
+        db = JSON.parse(dbContent);
+      } catch (err) {
+        console.error("[TG Links] Failed to parse database JSON, falling back to seed:", err);
         initialDbSeedNeeded = true;
       }
     }
-  } catch (err) {
-    console.error("[TG Links] Error checking/reading database file:", err);
-    initialDbSeedNeeded = true;
   }
 
   // Define Initial Seed Data
@@ -540,25 +581,13 @@ function loadDb() {
     }
   };
 
-  if (initialDbSeedNeeded) {
+  if (initialDbSeedNeeded || !db) {
     try {
       fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2));
     } catch (err) {
       console.error("[TG Links] Failed to write initial database:", err);
     }
-    return initialDb;
-  }
-
-  let db: any;
-  try {
-    db = JSON.parse(dbContent);
-  } catch (err) {
-    console.error("[TG Links] Failed to parse database JSON, falling back to seed:", err);
-    try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2));
-    } catch (e) {
-      console.error("[TG Links] Failed to rewrite database file:", e);
-    }
+    cachedDbInMemory = initialDb;
     return initialDb;
   }
 
@@ -663,8 +692,15 @@ function setupRoutes() {
 
   // Google Drive Sync Middleware
   app.use(async (req, res, next) => {
+    if (!gdriveSyncEnabled) {
+      return next();
+    }
+
+    // Capture initial syncPromise state for the current request
+    res.locals.gdriveStartPromise = syncPromise;
+
     // If Google Drive Sync is enabled and our cache is empty (e.g. cold start), block and fetch it first
-    if (gdriveSyncEnabled && !cachedDbInMemory) {
+    if (!cachedDbInMemory) {
       console.log("[TG Links] Cold start detected, loading database from Google Drive before processing request...");
       try {
         await loadDbFromGoogleDrive();
@@ -678,22 +714,32 @@ function setupRoutes() {
     const originalSend = res.send;
 
     res.json = function(body) {
-      syncPromise.then(() => {
+      // Only delay the response if a database write occurred DURING this specific request
+      if (syncPromise !== res.locals.gdriveStartPromise) {
+        syncPromise.then(() => {
+          originalJson.call(this, body);
+        }).catch(err => {
+          console.error("[TG Links] Error waiting for syncPromise in res.json:", err);
+          originalJson.call(this, body);
+        });
+      } else {
         originalJson.call(this, body);
-      }).catch(err => {
-        console.error("[TG Links] Error waiting for syncPromise in res.json:", err);
-        originalJson.call(this, body);
-      });
+      }
       return this;
     };
 
     res.send = function(body) {
-      syncPromise.then(() => {
+      // Only delay the response if a database write occurred DURING this specific request
+      if (syncPromise !== res.locals.gdriveStartPromise) {
+        syncPromise.then(() => {
+          originalSend.call(this, body);
+        }).catch(err => {
+          console.error("[TG Links] Error waiting for syncPromise in res.send:", err);
+          originalSend.call(this, body);
+        });
+      } else {
         originalSend.call(this, body);
-      }).catch(err => {
-        console.error("[TG Links] Error waiting for syncPromise in res.send:", err);
-        originalSend.call(this, body);
-      });
+      }
       return this;
     };
 
