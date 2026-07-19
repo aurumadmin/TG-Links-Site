@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install all dependencies (including devDependencies for compilation)
-RUN npm ci
+RUN npm install
 
 # Copy the rest of your application code
 COPY . .
@@ -29,7 +29,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/data.json ./data.json
 
 # Install only production dependencies (no devDependencies)
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Expose port 3000
 EXPOSE 3000
