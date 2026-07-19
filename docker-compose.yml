@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  tglinks:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tglinks-app:latest
+    container_name: tglinks-container
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/data/data.json
+      # Replace with your actual domain or VPS IP (e.g., https://links.mydomain.com)
+      - APP_URL=http://localhost:3000
+    volumes:
+      # This mounts a local directory named 'tglinks-data' on your VPS host
+      # into the container's '/data' directory, keeping your database safe.
+      - ./tglinks-data:/data
