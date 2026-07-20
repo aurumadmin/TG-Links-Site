@@ -11,6 +11,31 @@ const ensureAbsoluteUrl = (url: string) => {
   return url;
 };
 
+const redirectWithoutReferrer = (url: string) => {
+  const target = ensureAbsoluteUrl(url);
+  if (!target) return;
+  
+  try {
+    const meta = document.createElement("meta");
+    meta.name = "referrer";
+    meta.content = "no-referrer";
+    document.getElementsByTagName("head")[0].appendChild(meta);
+  } catch (e) {
+    console.error("Failed to inject referrer meta tag", e);
+  }
+
+  const a = document.createElement("a");
+  a.href = target;
+  a.rel = "noreferrer";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  
+  setTimeout(() => {
+    window.location.href = target;
+  }, 100);
+};
+
 interface RedirectPageProps {
   code: string;
 }
@@ -231,16 +256,16 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult.isVpnOrProxy) {
           setRedirecting(true);
           if (res.link?.adFlyShortenedUrl) {
-            window.location.href = ensureAbsoluteUrl(res.link.adFlyShortenedUrl);
+            redirectWithoutReferrer(res.link.adFlyShortenedUrl);
           } else {
             try {
               const clickRes = await fetchApi("/links/click", {
                 method: "POST",
                 body: JSON.stringify({ code })
               });
-              window.location.href = ensureAbsoluteUrl(clickRes.originalUrl);
+              redirectWithoutReferrer(clickRes.originalUrl);
             } catch {
-              window.location.href = ensureAbsoluteUrl(res.link.originalUrl);
+              redirectWithoutReferrer(res.link.originalUrl);
             }
           }
         }
@@ -364,16 +389,16 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       // Final step: Get Link!
       setRedirecting(true);
       if (linkData?.adFlyShortenedUrl) {
-        window.location.href = ensureAbsoluteUrl(linkData.adFlyShortenedUrl);
+        redirectWithoutReferrer(linkData.adFlyShortenedUrl);
       } else {
         try {
           const res = await fetchApi("/links/click", {
             method: "POST",
             body: JSON.stringify({ code })
           });
-          window.location.href = ensureAbsoluteUrl(res.originalUrl);
+          redirectWithoutReferrer(res.originalUrl);
         } catch (err) {
-          window.location.href = ensureAbsoluteUrl(linkData.originalUrl);
+          redirectWithoutReferrer(linkData.originalUrl);
         }
       }
     }

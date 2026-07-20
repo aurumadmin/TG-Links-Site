@@ -1345,6 +1345,7 @@ function setupRoutes() {
       targetUrl = "https://" + targetUrl;
     }
 
+    res.setHeader("Referrer-Policy", "no-referrer");
     res.redirect(targetUrl);
   });
 
