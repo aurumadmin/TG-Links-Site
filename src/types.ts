@@ -98,6 +98,13 @@ export interface SystemSettings {
   offerWallUrl2?: string;
   offerWallUrl3?: string;
   offerWallUrl4?: string;
+  enableThunderRedirect?: boolean;
+  adTopLeftCode?: string;
+  adTopCenterCode?: string;
+  adTopRightCode?: string;
+  adLeftCode?: string;
+  adBottomCenterCode?: string;
+  adRightCode?: string;
 }
 
 export interface DashboardStats {

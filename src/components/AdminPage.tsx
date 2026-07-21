@@ -1136,7 +1136,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                   Enable a multi-step offer wall on the first redirection gate. This forces visitors to click up to 4 configured direct-link ads and remain on each ad page for 10 seconds before they can advance to subsequent steps or unlock their destination URL.
                 </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Enable Offer Wall Ads</label>
                     <select
@@ -1146,6 +1146,18 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                     >
                       <option value="false" className="bg-slate-950 text-white">Disabled</option>
                       <option value="true" className="bg-slate-950 text-white">Enabled (Gate Page 1 only)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Thunder-Appz Redirection</label>
+                    <select
+                      value={sysSettings.enableThunderRedirect ? "true" : "false"}
+                      onChange={(e) => setSysSettings({ ...sysSettings, enableThunderRedirect: e.target.value === "true" })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-indigo-400 font-semibold"
+                    >
+                      <option value="false" className="bg-slate-950 text-white text-slate-300">Disabled (Direct Redirection)</option>
+                      <option value="true" className="bg-slate-950 text-white text-indigo-400 font-bold">Enabled (Route via thunder-appz)</option>
                     </select>
                   </div>
 
@@ -1305,6 +1317,74 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                   onChange={(e) => setSysSettings({ ...sysSettings, bannerAd320x50: e.target.value })}
                   className="block w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
                 />
+              </div>
+
+              <h4 className="font-bold text-white text-xs uppercase tracking-wider border-t border-slate-850 pt-4 mt-4">Offer Wall / Redirect Page Specific Placements (Different Sizes)</h4>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD TOP LEFT HTML / Banner</label>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.adTopLeftCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adTopLeftCode: e.target.value })}
+                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD TOP CENTER HTML / Banner</label>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.adTopCenterCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adTopCenterCode: e.target.value })}
+                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD TOP RIGHT HTML / Banner</label>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.adTopRightCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adTopRightCode: e.target.value })}
+                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD LEFT HTML / Banner</label>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.adLeftCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adLeftCode: e.target.value })}
+                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD BOTTOM CENTER HTML / Banner</label>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.adBottomCenterCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adBottomCenterCode: e.target.value })}
+                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD RIGHT HTML / Banner</label>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.adRightCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adRightCode: e.target.value })}
+                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
+                  />
+                </div>
               </div>
             </div>
           </form>

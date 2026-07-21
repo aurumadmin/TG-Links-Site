@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { fetchApi } from "../lib/api";
-import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck } from "lucide-react";
+import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck, Play, Pause } from "lucide-react";
 import { motion } from "motion/react";
 
 const ensureAbsoluteUrl = (url: string) => {
@@ -11,11 +11,70 @@ const ensureAbsoluteUrl = (url: string) => {
   return url;
 };
 
-const redirectWithoutReferrer = (url: string) => {
+const redirectWithoutReferrer = (url: string, enableThunderRedirect?: boolean) => {
   const target = ensureAbsoluteUrl(url);
   if (!target) return;
   
-  window.location.href = target;
+  if (enableThunderRedirect) {
+    window.location.href = `https://thunder-appz.eu.org/r?to=${encodeURIComponent(target)}`;
+    return;
+  }
+  
+  try {
+    const meta = document.createElement("meta");
+    meta.name = "referrer";
+    meta.content = "no-referrer";
+    document.getElementsByTagName("head")[0].appendChild(meta);
+  } catch (e) {
+    console.error("Failed to inject referrer meta tag", e);
+  }
+
+  const a = document.createElement("a");
+  a.href = target;
+  a.rel = "noreferrer";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  
+  setTimeout(() => {
+    window.location.href = target;
+  }, 100);
+};
+
+const AdBlock = ({ htmlCode, placeholder }: { htmlCode?: string; placeholder: string }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!htmlCode || !containerRef.current) return;
+    
+    // Clear old contents
+    containerRef.current.innerHTML = "";
+    
+    try {
+      const range = document.createRange();
+      range.selectNode(containerRef.current);
+      const documentFragment = range.createContextualFragment(htmlCode);
+      containerRef.current.appendChild(documentFragment);
+    } catch (e) {
+      console.error("Failed to parse and execute ad HTML script block", e);
+      containerRef.current.innerHTML = htmlCode;
+    }
+  }, [htmlCode]);
+
+  if (!htmlCode) {
+    return (
+      <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition flex items-center justify-center min-h-[44px]">
+        {placeholder}
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      ref={containerRef} 
+      className="w-full flex justify-center items-center overflow-hidden rounded-xl bg-slate-950/40 border border-slate-800/40 p-2 min-h-[50px] shadow-inner"
+    />
+  );
 };
 
 interface RedirectPageProps {
@@ -51,6 +110,51 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [offerTimer, setOfferTimer] = useState<number>(10);
   const [offerTimerActive, setOfferTimerActive] = useState<boolean>(false);
   const [offerClicked, setOfferClicked] = useState<boolean[]>([false, false, false, false]);
+  const [isWindowFocused, setIsWindowFocused] = useState<boolean>(document.hasFocus());
+  const [justClicked, setJustClicked] = useState<boolean>(false);
+
+  // Window Focus/Blur tracking for Offer Wall Timer pause/resume
+  useEffect(() => {
+    if (!settings?.enableOfferWall || currentStep !== 1) return;
+
+    const handleWindowFocus = () => {
+      setIsWindowFocused(true);
+      if (!justClicked) {
+        setOfferTimerActive(false);
+      }
+    };
+
+    const handleWindowBlur = () => {
+      setIsWindowFocused(false);
+      if (activeOfferIndex !== null && !offerCompleted[activeOfferIndex] && offerClicked[activeOfferIndex]) {
+        setOfferTimerActive(true);
+      }
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("blur", handleWindowBlur);
+
+    const focusInterval = setInterval(() => {
+      const hasFocus = document.hasFocus();
+      setIsWindowFocused(hasFocus);
+      
+      if (hasFocus) {
+        if (!justClicked) {
+          setOfferTimerActive(false);
+        }
+      } else {
+        if (activeOfferIndex !== null && !offerCompleted[activeOfferIndex] && offerClicked[activeOfferIndex]) {
+          setOfferTimerActive(true);
+        }
+      }
+    }, 400);
+
+    return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("blur", handleWindowBlur);
+      clearInterval(focusInterval);
+    };
+  }, [settings, currentStep, activeOfferIndex, offerCompleted, offerClicked, justClicked]);
 
   // Security Checks State
   const [checkingSecurity, setCheckingSecurity] = useState(true);
@@ -245,16 +349,16 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult.isVpnOrProxy) {
           setRedirecting(true);
           if (res.link?.adFlyShortenedUrl) {
-            redirectWithoutReferrer(res.link.adFlyShortenedUrl);
+            redirectWithoutReferrer(res.link.adFlyShortenedUrl, res.settings?.enableThunderRedirect);
           } else {
             try {
               const clickRes = await fetchApi("/links/click", {
                 method: "POST",
                 body: JSON.stringify({ code })
               });
-              redirectWithoutReferrer(clickRes.originalUrl);
+              redirectWithoutReferrer(clickRes.originalUrl, res.settings?.enableThunderRedirect);
             } catch {
-              redirectWithoutReferrer(res.link.originalUrl);
+              redirectWithoutReferrer(res.link.originalUrl, res.settings?.enableThunderRedirect);
             }
           }
         }
@@ -373,14 +477,29 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       settings?.offerWallUrl3,
       settings?.offerWallUrl4
     ];
-    const adUrl = ensureAbsoluteUrl(urls[index] || "https://www.google.com");
+    let adUrl = ensureAbsoluteUrl(urls[index] || "https://www.google.com");
+    
+    if (settings?.enableThunderRedirect) {
+      adUrl = `https://thunder-appz.eu.org/r?to=${encodeURIComponent(adUrl)}`;
+    }
     
     // Open ad URL in a new tab
     window.open(adUrl, "_blank");
 
-    // Start timer for this index
+    // Temporarily disable the immediate auto-pause on click focus event
+    setJustClicked(true);
+    setTimeout(() => {
+      setJustClicked(false);
+    }, 1500);
+
+    // Start/Resume timer for this index
     setActiveOfferIndex(index);
-    setOfferTimer(settings?.offerWallSeconds === undefined ? 10 : settings?.offerWallSeconds);
+    
+    const defaultSec = settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds;
+    if (activeOfferIndex !== index || offerTimer <= 0 || offerTimer > defaultSec) {
+      setOfferTimer(defaultSec);
+    }
+
     setOfferTimerActive(true);
     setOfferClicked((old) => {
       const updated = [...old];
@@ -433,16 +552,16 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       // Final step: Get Link!
       setRedirecting(true);
       if (linkData?.adFlyShortenedUrl) {
-        redirectWithoutReferrer(linkData.adFlyShortenedUrl);
+        redirectWithoutReferrer(linkData.adFlyShortenedUrl, settings?.enableThunderRedirect);
       } else {
         try {
           const res = await fetchApi("/links/click", {
             method: "POST",
             body: JSON.stringify({ code })
           });
-          redirectWithoutReferrer(res.originalUrl);
+          redirectWithoutReferrer(res.originalUrl, settings?.enableThunderRedirect);
         } catch (err) {
-          redirectWithoutReferrer(linkData.originalUrl);
+          redirectWithoutReferrer(linkData.originalUrl, settings?.enableThunderRedirect);
         }
       }
     }
@@ -639,15 +758,9 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* AD PLACEMENT TOP BUTTONS */}
                   <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
-                      AD TOP LEFT
-                    </div>
-                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
-                      AD TOP CENTER
-                    </div>
-                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
-                      AD TOP RIGHT
-                    </div>
+                    <AdBlock htmlCode={settings?.adTopLeftCode} placeholder="AD TOP LEFT" />
+                    <AdBlock htmlCode={settings?.adTopCenterCode} placeholder="AD TOP CENTER" />
+                    <AdBlock htmlCode={settings?.adTopRightCode} placeholder="AD TOP RIGHT" />
                   </div>
 
                   {/* OFFERS LIST */}
@@ -656,21 +769,24 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                       const isCompleted = offerCompleted[idx];
                       const isCurrentActive = idx === 0 || offerCompleted[idx - 1]; // unlocked if first or previous is completed
                       const isTicking = offerTimerActive && activeOfferIndex === idx;
+                      const isPaused = offerClicked[idx] && !isCompleted && !isTicking && activeOfferIndex === idx && offerTimer > 0;
                       
                       return (
                         <div 
-                          key={idx}
-                          className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border transition-all ${
+                           key={idx}
+                           className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border transition-all ${
                             isCompleted 
                               ? "bg-emerald-950/20 border-emerald-500/20" 
                               : isCurrentActive 
-                                ? "bg-slate-900 border-indigo-500/30 shadow-md shadow-indigo-500/5" 
+                                ? isPaused
+                                  ? "bg-slate-900 border-amber-500/30 shadow-md shadow-amber-500/5"
+                                  : "bg-slate-900 border-indigo-500/30 shadow-md shadow-indigo-500/5" 
                                 : "bg-slate-900/40 border-slate-850 opacity-45 pointer-events-none"
                           }`}
                         >
                           <div className="space-y-1 mb-3 sm:mb-0">
                             <div className="flex items-center gap-2">
-                              <span className={`text-sm font-black uppercase tracking-wider ${isCompleted ? "text-emerald-400" : isCurrentActive ? "text-indigo-400" : "text-slate-500"}`}>
+                              <span className={`text-sm font-black uppercase tracking-wider ${isCompleted ? "text-emerald-400" : isPaused ? "text-amber-400" : isCurrentActive ? "text-indigo-400" : "text-slate-500"}`}>
                                 Step {idx + 1}
                               </span>
                               {isCompleted && (
@@ -683,24 +799,39 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                                   TIMER TICKING
                                 </span>
                               )}
+                              {isPaused && (
+                                <span className="bg-amber-500/15 text-amber-400 text-[9px] font-bold px-2 py-0.5 rounded border border-amber-500/20 animate-pulse">
+                                  TIMER PAUSED
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs text-slate-300 leading-relaxed max-w-md">
-                              Please open the offer and wait <span className="font-bold text-white">{settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds} seconds</span> to unlock the next step.
+                              {isPaused ? (
+                                <span className="text-amber-400 font-medium">
+                                  ⚠️ Timer paused! Please click "Resume Offer" and remain on the ad page to continue the countdown.
+                                </span>
+                              ) : (
+                                <>
+                                  Please open the offer and wait <span className="font-bold text-white">{settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds} seconds</span> to unlock the next step.
+                                </>
+                              )}
                             </p>
                           </div>
 
                           <div>
                             <button
-                              disabled={!isCurrentActive || isCompleted || isTicking}
+                              disabled={!isCurrentActive || isCompleted}
                               onClick={() => handleViewOffer(idx)}
                               className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wide transition flex items-center justify-center gap-1.5 min-w-[140px] ${
                                 isCompleted
                                   ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
                                   : isTicking
-                                    ? "bg-indigo-600/25 text-indigo-400 border border-indigo-500/30 animate-pulse cursor-not-allowed"
-                                    : isCurrentActive
-                                      ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/15 active:scale-95"
-                                      : "bg-slate-900 text-slate-500 border border-slate-800"
+                                    ? "bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-400 border border-indigo-500/30 animate-pulse active:scale-95 cursor-pointer"
+                                    : isPaused
+                                      ? "bg-amber-600 hover:bg-amber-700 text-white shadow-lg shadow-amber-600/15 active:scale-95 animate-pulse"
+                                      : isCurrentActive
+                                        ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/15 active:scale-95"
+                                        : "bg-slate-900 text-slate-500 border border-slate-800"
                               }`}
                             >
                               {isCompleted ? (
@@ -711,7 +842,12 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                               ) : isTicking ? (
                                 <>
                                   <Hourglass className="w-3.5 h-3.5 animate-spin" />
-                                  {offerTimer}s Left
+                                  Re-open ({offerTimer}s)
+                                </>
+                              ) : isPaused ? (
+                                <>
+                                  <Play className="w-3.5 h-3.5 animate-pulse" />
+                                  Resume ({offerTimer}s)
                                 </>
                               ) : (
                                 <>
@@ -727,15 +863,9 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* AD PLACEMENT BOTTOM BUTTONS */}
                   <div className="grid grid-cols-3 gap-3 pt-2">
-                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
-                      AD LEFT
-                    </div>
-                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
-                      AD BOTTOM CENTER
-                    </div>
-                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
-                      AD RIGHT
-                    </div>
+                    <AdBlock htmlCode={settings?.adLeftCode} placeholder="AD LEFT" />
+                    <AdBlock htmlCode={settings?.adBottomCenterCode} placeholder="AD BOTTOM CENTER" />
+                    <AdBlock htmlCode={settings?.adRightCode} placeholder="AD RIGHT" />
                   </div>
 
                   {/* CONTINUE / PROCEED BUTTON */}

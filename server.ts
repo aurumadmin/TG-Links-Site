@@ -1305,7 +1305,14 @@ function setupRoutes() {
         offerWallUrl1: db.settings.offerWallUrl1,
         offerWallUrl2: db.settings.offerWallUrl2,
         offerWallUrl3: db.settings.offerWallUrl3,
-        offerWallUrl4: db.settings.offerWallUrl4
+        offerWallUrl4: db.settings.offerWallUrl4,
+        enableThunderRedirect: db.settings.enableThunderRedirect,
+        adTopLeftCode: db.settings.adTopLeftCode,
+        adTopCenterCode: db.settings.adTopCenterCode,
+        adTopRightCode: db.settings.adTopRightCode,
+        adLeftCode: db.settings.adLeftCode,
+        adBottomCenterCode: db.settings.adBottomCenterCode,
+        adRightCode: db.settings.adRightCode
       }
     });
   });
