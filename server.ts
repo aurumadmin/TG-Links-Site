@@ -122,6 +122,13 @@ function getRequestProtocol(req: express.Request): string {
 }
 
 function getRequestHost(req: express.Request): string {
+  const hostHeader = req.get("host") || "";
+  const isProd = !hostHeader.includes("localhost") && !hostHeader.includes("127.0.0.1") && !hostHeader.includes("ais-dev") && !hostHeader.includes("ais-pre");
+  
+  if (isProd) {
+    return "tglinks.eu.cc";
+  }
+
   const forwardedHost = req.headers["x-forwarded-host"];
   if (forwardedHost) {
     if (Array.isArray(forwardedHost)) {
@@ -129,7 +136,7 @@ function getRequestHost(req: express.Request): string {
     }
     return forwardedHost.split(",")[0].trim();
   }
-  return req.get("host") || "arolinks.com";
+  return hostHeader || "tglinks.eu.cc";
 }
 
 function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): number {
@@ -157,8 +164,14 @@ function getCurrentCpmForLink(link: any, db: any): number {
 }
 
 // Helper to syndicate a link with an external AdLinkFly shortener API dynamically
-async function getExternalShortenedUrl(originalUrl: string, db: any): Promise<{ id: string; url: string } | null> {
-  const enabledApis = (db.adFlyShorteners || []).filter((api: any) => api.enabled);
+async function getExternalShortenedUrl(originalUrl: string, db: any, user?: any): Promise<{ id: string; url: string } | null> {
+  const isFaucetUser = user?.enableFaucetMode === true;
+  const enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
+    if (!api.enabled) return false;
+    // Faucet users only use Faucet APIs, standard users only use standard APIs
+    const apiIsFaucet = !!api.isFaucetApi;
+    return apiIsFaucet === isFaucetUser;
+  });
   if (enabledApis.length === 0) return null;
 
   // Sort by priority descending (highest priority first). If equal, randomize order slightly
@@ -331,13 +344,13 @@ async function getServiceAccountToken(): Promise<string> {
 }
 
 // Initialize sync if key is provided
+// Initialize sync if key is provided
 if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
-  gdriveSyncEnabled = true;
-  console.log("[TG Links] Google Drive sync is enabled (detected service account key)");
+  gdriveSyncEnabled = false; // Explicitly disabled per user request
+  console.log("[TG Links] Google Drive cloud database persistence is disabled per user request");
   try {
     const key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY.trim());
     serviceAccountEmail = key.client_email || "";
-    console.log("[TG Links] Google Service Account email:", serviceAccountEmail);
   } catch (e) {}
 }
 
@@ -1069,7 +1082,7 @@ function setupRoutes() {
 
     const intermediateUrl = `${protocol}://${host}/go-final/${code}`;
 
-    const external = await getExternalShortenedUrl(intermediateUrl, db);
+    const external = await getExternalShortenedUrl(intermediateUrl, db, user);
     if (external) {
       adFlyShortenerId = external.id;
       adFlyShortenedUrl = external.url;
@@ -1189,7 +1202,7 @@ function setupRoutes() {
     const host = getRequestHost(req);
     const intermediateUrl = `${protocol}://${host}/go-final/${code}`;
 
-    const external = await getExternalShortenedUrl(intermediateUrl, db);
+    const external = await getExternalShortenedUrl(intermediateUrl, db, user);
     if (external) {
       adFlyShortenerId = external.id;
       adFlyShortenedUrl = external.url;
@@ -1342,12 +1355,10 @@ function setupRoutes() {
     link.earnings += earningAmount;
 
     // Update User Wallet balance & earnings
-    if (link.userId !== "guest") {
-      const user = db.users.find((u: any) => u.id === link.userId);
-      if (user && !user.banned) {
-        user.balance = Number((user.balance + earningAmount).toFixed(6));
-        user.totalEarned = Number((user.totalEarned + earningAmount).toFixed(6));
-      }
+    const user = link.userId !== "guest" ? db.users.find((u: any) => u.id === link.userId) : null;
+    if (user && !user.banned) {
+      user.balance = Number((user.balance + earningAmount).toFixed(6));
+      user.totalEarned = Number((user.totalEarned + earningAmount).toFixed(6));
     }
 
     // Dynamically retrieve the external shortened URL at click time if not set but external APIs are active
@@ -1356,7 +1367,7 @@ function setupRoutes() {
       const protocol = getRequestProtocol(req);
       const host = getRequestHost(req);
       const intermediateUrl = `${protocol}://${host}/go-final/${link.code}`;
-      const external = await getExternalShortenedUrl(intermediateUrl, db);
+      const external = await getExternalShortenedUrl(intermediateUrl, db, user);
       if (external) {
         adFlyShortenedUrl = external.url;
         link.adFlyShortenedUrl = external.url;
@@ -1372,6 +1383,55 @@ function setupRoutes() {
       adFlyShortenedUrl: adFlyShortenedUrl,
       payoutCredited: earningAmount > 0 
     });
+  });
+
+  // --- GATEWAY AND REFERRER REDIRECTIONS ---
+  
+  // Redirect visitors from the main domain (tglinks.eu.cc) to the own page domain (url.thunder-appz.eu.org)
+  app.get("/go/:code", (req, res, next) => {
+    const hostHeader = req.get("host") || "";
+    const isProd = !hostHeader.includes("localhost") && !hostHeader.includes("127.0.0.1") && !hostHeader.includes("ais-dev") && !hostHeader.includes("ais-pre");
+    
+    if (isProd && !hostHeader.includes("url.thunder-appz.eu.org")) {
+      const { code } = req.params;
+      return res.redirect(`https://url.thunder-appz.eu.org/go/${code}`);
+    }
+    
+    next();
+  });
+
+  // Referrer cloak redirector - forces referrer to be exactly thunder-appz.eu.org
+  app.get("/r", (req, res) => {
+    const to = req.query.to;
+    if (!to || typeof to !== "string") {
+      return res.redirect("/");
+    }
+
+    res.setHeader("Content-Type", "text/html");
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="unsafe-url">
+  <title>Redirecting...</title>
+  <script>
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const toUrl = urlParams.get('to');
+      if (toUrl) {
+        window.location.replace(toUrl);
+      } else {
+        window.location.replace('/');
+      }
+    } catch (e) {
+      window.location.replace('/');
+    }
+  </script>
+</head>
+<body>
+  <p style="font-family: sans-serif; text-align: center; margin-top: 100px; color: #666;">Redirecting...</p>
+</body>
+</html>`);
   });
 
   // --- EXTERNAL SHORTENER CALLBACK AND LANDING ENDPOINT ---
@@ -1674,6 +1734,28 @@ function setupRoutes() {
     res.json({ success: true, user: userSafe });
   });
 
+  app.post("/api/users/faucet-settings", (req, res) => {
+    const { userId, enableFaucetMode, faucetPromptSeen } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
+    }
+
+    const db = loadDb();
+    const user = db.users.find((u: any) => u.id === userId && !u.banned);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (enableFaucetMode !== undefined) {
+      user.enableFaucetMode = !!enableFaucetMode;
+    }
+    if (faucetPromptSeen !== undefined) {
+      user.faucetPromptSeen = !!faucetPromptSeen;
+    }
+    saveDb(db);
+
+    const { password: _, ...userSafe } = user;
+    res.json({ success: true, user: userSafe });
+  });
+
   // --- ADMIN PANEL SECURE ROUTES ---
   
   // Guard middleware for Admin
@@ -1839,7 +1921,7 @@ function setupRoutes() {
   });
 
   app.post("/api/admin/external-shorteners", requireAdmin, (req, res) => {
-    const { id, name, apiUrl, apiToken, enabled, priority } = req.body;
+    const { id, name, apiUrl, apiToken, enabled, priority, isFaucetApi } = req.body;
     const db = loadDb();
 
     if (!db.adFlyShorteners) db.adFlyShorteners = [];
@@ -1854,7 +1936,8 @@ function setupRoutes() {
           apiUrl,
           apiToken,
           enabled,
-          priority: Number(priority || 0)
+          priority: Number(priority || 0),
+          isFaucetApi: !!isFaucetApi
         };
       } else {
         return res.status(404).json({ error: "AdLinkFly API configuration not found" });
@@ -1867,7 +1950,8 @@ function setupRoutes() {
         apiUrl,
         apiToken,
         enabled: enabled !== undefined ? enabled : true,
-        priority: Number(priority || 0)
+        priority: Number(priority || 0),
+        isFaucetApi: !!isFaucetApi
       };
       db.adFlyShorteners.push(newApi);
     }

@@ -19,6 +19,12 @@ export default function App() {
     // Format: /go/xyz123
     const goMatch = path.match(/^\/go\/([a-zA-Z0-9]+)$/);
     if (goMatch) {
+      const hostname = window.location.hostname;
+      const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
+      if (isProd && hostname !== "url.thunder-appz.eu.org") {
+        window.location.replace(`https://url.thunder-appz.eu.org/go/${goMatch[1]}`);
+        return;
+      }
       setShortCode(goMatch[1]);
       setActivePage("go");
     } else {

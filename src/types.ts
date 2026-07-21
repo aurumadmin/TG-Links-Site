@@ -14,6 +14,8 @@ export interface User {
   banned: boolean;
   customCpm?: number; // Custom CPM set by admin for this user
   apiToken: string; // Dynamic API Token for programmatic integration
+  enableFaucetMode?: boolean; // Faucet Mode setting for faucet traffic users
+  faucetPromptSeen?: boolean; // Track if user has seen the initial faucet prompt
 }
 
 export interface Link {
@@ -39,6 +41,7 @@ export interface AdFlyShortener {
   apiToken: string;
   enabled: boolean;
   priority: number; // For prioritizing which API to use
+  isFaucetApi?: boolean; // If enabled, only used for faucet traffic users
 }
 
 export interface ClickLog {
@@ -88,6 +91,13 @@ export interface SystemSettings {
   smtpPass?: string;
   backupSenderEmail?: string;
   backupReceiverEmail?: string;
+  enableOfferWall?: boolean;
+  offerWallSeconds?: number;
+  offerWallCount?: number;
+  offerWallUrl1?: string;
+  offerWallUrl2?: string;
+  offerWallUrl3?: string;
+  offerWallUrl4?: string;
 }
 
 export interface DashboardStats {

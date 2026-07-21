@@ -3,6 +3,12 @@ import { ArrowRight, Link2, Eye, ShieldAlert, Sparkles, DollarSign, Activity, Fi
 import { motion } from "motion/react";
 import { fetchApi } from "../lib/api";
 
+const getBaseShortUrl = () => {
+  const hostname = window.location.hostname;
+  const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
+  return isProd ? "https://tglinks.eu.cc" : window.location.origin;
+};
+
 interface LandingPageProps {
   onNavigate: (page: string) => void;
   user: any;
@@ -61,7 +67,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
 
   const copyToClipboard = () => {
     if (!shortenedLink) return;
-    const fullUrl = `${window.location.origin}/go/${shortenedLink.code}`;
+    const fullUrl = `${getBaseShortUrl()}/go/${shortenedLink.code}`;
     navigator.clipboard.writeText(fullUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -319,7 +325,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
                     <div className="flex-grow">
                       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Your Shortened Link</p>
                       <span className="font-mono font-bold text-indigo-400 text-sm md:text-base break-all">
-                        {window.location.origin}/go/{shortenedLink.code}
+                        {getBaseShortUrl()}/go/{shortenedLink.code}
                       </span>
                       <p className="text-xs text-slate-400 mt-1">
                         Est. CPM: <span className="font-bold text-emerald-400">${shortenedLink.cpm.toFixed(2)}</span> per 1,000 views.
@@ -344,7 +350,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
                       </button>
                       <button
                         onClick={() => {
-                          const fullUrl = `${window.location.origin}/go/${shortenedLink.code}`;
+                          const fullUrl = `${getBaseShortUrl()}/go/${shortenedLink.code}`;
                           window.open(fullUrl, "_blank");
                         }}
                         className="flex items-center justify-center gap-1 px-4 py-2.5 bg-indigo-600 text-white font-bold text-sm rounded-lg hover:bg-indigo-500 transition shadow-sm w-full md:w-auto"

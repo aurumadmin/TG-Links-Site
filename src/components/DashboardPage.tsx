@@ -20,8 +20,10 @@ import {
   TrendingUp, 
   Eye, 
   AlertCircle, 
+  AlertTriangle,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   LogOut,
   SlidersHorizontal,
   FolderOpen,
@@ -42,6 +44,12 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from "recharts";
+
+const getBaseShortUrl = () => {
+  const hostname = window.location.hostname;
+  const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
+  return isProd ? "https://tglinks.eu.cc" : window.location.origin;
+};
 
 interface DashboardPageProps {
   user: User;
@@ -78,6 +86,15 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
   const [userMethod, setUserMethod] = useState(user.withdrawalMethod || "");
   const [userAccount, setUserAccount] = useState(user.withdrawalAccount || "");
   const [profileSuccess, setProfileSuccess] = useState("");
+
+  // Faucet state
+  const [faucetModeEnabled, setFaucetModeEnabled] = useState(user.enableFaucetMode || false);
+  const [showFaucetModal, setShowFaucetModal] = useState(false);
+  const [faucetModalLoading, setFaucetModalLoading] = useState(false);
+  const [faucetSettingsSuccess, setFaucetSettingsSuccess] = useState("");
+
+  // Advanced shortener options state
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Support inquiry state
   const [supportSubject, setSupportSubject] = useState("");
@@ -154,6 +171,8 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
         setCurrentUser(freshUser.user);
         setUserMethod(freshUser.user.withdrawalMethod || "");
         setUserAccount(freshUser.user.withdrawalAccount || "");
+        setFaucetModeEnabled(!!freshUser.user.enableFaucetMode);
+        setShowFaucetModal(false);
       }
     } catch (err) {
       console.error("Failed to load dashboard statistics:", err);
@@ -196,7 +215,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
   };
 
   const copyLink = (code: string) => {
-    const fullUrl = `${window.location.origin}/go/${code}`;
+    const fullUrl = `${getBaseShortUrl()}/go/${code}`;
     navigator.clipboard.writeText(fullUrl);
     setCopiedCode(code);
     setTimeout(() => setCopiedCode(null), 2000);
@@ -283,6 +302,54 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
     } catch (err) {
       console.error(err);
       alert("Failed to update profile settings.");
+    }
+  };
+
+  const handleToggleFaucetMode = async (enabled: boolean) => {
+    try {
+      setFaucetModalLoading(true);
+      const res = await fetchApi("/users/faucet-settings", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: currentUser.id,
+          enableFaucetMode: enabled
+        })
+      });
+      if (res.success && res.user) {
+        setCurrentUser(res.user);
+        setFaucetModeEnabled(!!res.user.enableFaucetMode);
+        setFaucetSettingsSuccess("Faucet Mode updated successfully!");
+        setTimeout(() => setFaucetSettingsSuccess(""), 3000);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update Faucet Mode settings.");
+    } finally {
+      setFaucetModalLoading(false);
+    }
+  };
+
+  const handleDismissFaucetModal = async (enableFaucetMode: boolean) => {
+    try {
+      setFaucetModalLoading(true);
+      const res = await fetchApi("/users/faucet-settings", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: currentUser.id,
+          enableFaucetMode,
+          faucetPromptSeen: true
+        })
+      });
+      if (res.success && res.user) {
+        setCurrentUser(res.user);
+        setFaucetModeEnabled(!!res.user.enableFaucetMode);
+        setShowFaucetModal(false);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save Faucet settings.");
+    } finally {
+      setFaucetModalLoading(false);
     }
   };
 
@@ -502,6 +569,44 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
         {/* TAB WORKSPACE: OVERVIEW */}
         {activeTab === "overview" && (
           <div className="space-y-8" id="overview_workspace">
+            {faucetModeEnabled ? (
+              <div className="bg-amber-950/20 border border-amber-900/30 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                    <AlertTriangle className="w-4.5 h-4.5" />
+                    Faucet Mode is Enabled
+                  </div>
+                  <p className="text-xs text-slate-300 leading-normal">
+                    Your account is currently running in <strong>Faucet Mode</strong>. Faucet traffic is allowed, and is correctly routed through high-capacity shorteners. Do not send standard organic traffic to your links while in Faucet Mode, as CPM calculation might differ.
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleToggleFaucetMode(false)}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition shrink-0 cursor-pointer"
+                >
+                  Disable Faucet Mode
+                </button>
+              </div>
+            ) : (
+              <div className="bg-amber-950/20 border border-amber-900/30 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                    <AlertTriangle className="w-4.5 h-4.5" />
+                    Faucet Traffic Warning
+                  </div>
+                  <p className="text-xs text-slate-300 leading-normal">
+                    Are you sending traffic from a crypto faucet or similar rewards platform? You <strong>must</strong> enable Faucet Mode in your settings, otherwise your traffic will violate our terms and your pending payments will be cancelled.
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleToggleFaucetMode(true)}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-slate-950 font-extrabold text-xs rounded-xl transition shrink-0 cursor-pointer"
+                >
+                  Enable Faucet Mode
+                </button>
+              </div>
+            )}
+
             {/* IN-DASHBOARD SHORTENER CARD */}
             <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-md">
               <h3 className="font-extrabold text-white text-base mb-3 flex items-center gap-2">
@@ -509,8 +614,8 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                 Shorten a New Link
               </h3>
               <form onSubmit={handleShorten} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                  <div className="md:col-span-6">
+                <div className="space-y-4">
+                  <div>
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Destination URL</label>
                     <input
                       required
@@ -521,28 +626,47 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                       className="w-full px-4 py-3 bg-slate-950 border border-slate-800/80 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-slate-100 placeholder-slate-500"
                     />
                   </div>
-                  
-                  <div className="md:col-span-3">
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Custom Alias (Optional)</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. tutorial-guide"
-                      value={customAlias}
-                      onChange={(e) => setCustomAlias(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-950 border border-slate-800/80 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-slate-100 placeholder-slate-500"
-                    />
+
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvanced(!showAdvanced)}
+                      className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-bold transition focus:outline-none select-none"
+                    >
+                      <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showAdvanced ? "rotate-180" : ""}`} />
+                      <span>Advanced</span>
+                    </button>
                   </div>
 
-                  <div className="md:col-span-3">
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration (Optional)</label>
-                    <input
-                      type="datetime-local"
-                      value={expiresAt}
-                      min={new Date().toISOString().slice(0, 16)}
-                      onChange={(e) => setExpiresAt(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-950 border border-slate-800/80 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-slate-100"
-                    />
-                  </div>
+                  {showAdvanced && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t border-slate-800/40"
+                    >
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Custom Alias (Optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. tutorial-guide"
+                          value={customAlias}
+                          onChange={(e) => setCustomAlias(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800/80 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-slate-100 placeholder-slate-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration (Optional)</label>
+                        <input
+                          type="datetime-local"
+                          value={expiresAt}
+                          min={new Date().toISOString().slice(0, 16)}
+                          onChange={(e) => setExpiresAt(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800/80 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-slate-100"
+                        />
+                      </div>
+                    </motion.div>
+                  )}
                 </div>
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
@@ -568,7 +692,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                   <div className="overflow-hidden">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Shortened URL</p>
                     <span className="font-mono font-bold text-indigo-400 text-sm break-all">
-                      {window.location.origin}/go/{shortenedLink.code}
+                      {getBaseShortUrl()}/go/{shortenedLink.code}
                     </span>
                     {shortenedLink.expiresAt && (
                       <p className="text-[10px] text-amber-400 font-semibold mt-0.5">
@@ -581,7 +705,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
-                      onClick={() => handleGenerateQrCode(`${window.location.origin}/go/${shortenedLink.code}`)}
+                      onClick={() => handleGenerateQrCode(`${getBaseShortUrl()}/go/${shortenedLink.code}`)}
                       className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs rounded-lg border border-slate-800 shadow-sm flex items-center gap-1.5 transition-all"
                     >
                       <QrCode className="w-3.5 h-3.5 text-indigo-400" />
@@ -873,7 +997,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 text-sm text-slate-300">
                     {links.map((link) => {
-                      const fullShortUrl = `${window.location.origin}/go/${link.code}`;
+                      const fullShortUrl = `${getBaseShortUrl()}/go/${link.code}`;
                       return (
                         <tr key={link.id} className="hover:bg-slate-800/20 transition">
                           <td className="py-4 px-6 max-w-xs md:max-w-md truncate">
@@ -1161,6 +1285,54 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                 Save Payout Settings
               </button>
             </form>
+
+            <div className="mt-8 bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6">
+              <h3 className="font-extrabold text-white text-base mb-2 flex items-center gap-2">
+                <SlidersHorizontal className="w-5 h-5 text-indigo-400" />
+                Faucet Integration Settings
+              </h3>
+              <p className="text-xs text-slate-400 mb-6 leading-normal">
+                If you integrate your TG Links with a faucet platform, enable Faucet Mode below. This ensures faucet traffic is correctly routed through faucet-specific high-capacity shorteners.
+              </p>
+
+              {faucetSettingsSuccess && (
+                <div className="mb-4 p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs font-semibold flex items-start gap-2">
+                  <Check className="w-4 h-4 flex-shrink-0 text-emerald-400 mt-0.5" />
+                  <span>{faucetSettingsSuccess}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800/80">
+                <div className="space-y-1 pr-4">
+                  <div className="text-sm font-bold text-white flex items-center gap-2">
+                    Faucet Mode
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${faucetModeEnabled ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-slate-800 text-slate-500"}`}>
+                      {faucetModeEnabled ? "ENABLED" : "DISABLED"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-normal">
+                    Turn this on ONLY if you are sending automated/incentivized traffic from a crypto faucet. Non-faucet users should keep this disabled.
+                  </p>
+                </div>
+                
+                <button
+                  onClick={() => handleToggleFaucetMode(!faucetModeEnabled)}
+                  disabled={faucetModalLoading}
+                  className={`px-4 py-2 font-bold text-xs rounded-xl transition cursor-pointer shrink-0 ${faucetModeEnabled ? "bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30" : "bg-indigo-600 hover:bg-indigo-700 text-white shadow"}`}
+                >
+                  {faucetModalLoading ? "Updating..." : faucetModeEnabled ? "Disable Faucet Mode" : "Enable Faucet Mode"}
+                </button>
+              </div>
+
+              {faucetModeEnabled && (
+                <div className="mt-4 p-3.5 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-300 text-xs leading-normal font-medium flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                  <span>
+                    <strong>Warning:</strong> Since Faucet Mode is enabled, you will only use the Faucet API URL shorteners defined by the Admin. Do not send standard organic traffic to your links while in Faucet Mode, as CPM calculation might differ.
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1219,7 +1391,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                   Send a standardized <span className="font-mono text-slate-200">GET</span> request with your unique API token, the destination URL, and an optional custom alias:
                 </p>
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs font-mono text-emerald-400 overflow-x-auto whitespace-nowrap">
-                  {window.location.origin}/api?api=<span className="text-indigo-300 font-bold">{currentUser.apiToken || "your_api_token"}</span>&amp;url=<span className="text-indigo-400">yourdestinationlink.com</span>&amp;alias=<span className="text-purple-400">CustomAlias</span>
+                  {getBaseShortUrl()}/api?api=<span className="text-indigo-300 font-bold">{currentUser.apiToken || "your_api_token"}</span>&amp;url=<span className="text-indigo-400">yourdestinationlink.com</span>&amp;alias=<span className="text-purple-400">CustomAlias</span>
                 </div>
               </div>
 
@@ -1231,7 +1403,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                   <pre className="bg-slate-950 border border-slate-850 rounded-xl p-4 text-xs font-mono text-indigo-300 overflow-x-auto">
 {`{
   "status": "success",
-  "shortenedUrl": "${window.location.origin}/go/xxxxx"
+  "shortenedUrl": "${getBaseShortUrl()}/go/xxxxx"
 }`}
                   </pre>
                 </div>
@@ -1240,7 +1412,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                   <h5 className="font-bold text-slate-300 text-xs uppercase tracking-wider">2. Plain Text Response</h5>
                   <p className="text-xs text-slate-500 leading-relaxed">Append <code className="text-indigo-400 font-bold font-mono">&amp;format=text</code> at the end of the query string to return raw text URL output.</p>
                   <pre className="bg-slate-950 border border-slate-850 rounded-xl p-4 text-xs font-mono text-emerald-400 overflow-x-auto">
-{`${window.location.origin}/go/xxxxx`}
+{`${getBaseShortUrl()}/go/xxxxx`}
                   </pre>
                   <p className="text-[10px] text-slate-500 leading-relaxed italic">• Note: If an validation error or credential fault occurs during text format processing, it will return an empty output.</p>
                 </div>

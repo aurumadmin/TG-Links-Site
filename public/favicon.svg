@@ -1,22 +1,80 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
   <defs>
-    <linearGradient id="tg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#6366f1" />
-      <stop offset="100%" stop-color="#10b981" />
+    <!-- Background Gradient (Deep dark navy to black radial glow) -->
+    <radialGradient id="bg-glow" cx="50%" cy="50%" r="75%">
+      <stop offset="0%" stop-color="#0a1128" />
+      <stop offset="55%" stop-color="#030611" />
+      <stop offset="100%" stop-color="#010206" />
+    </radialGradient>
+
+    <!-- T-letter Gradient (Vibrant purple/blue/cyan/teal) -->
+    <linearGradient id="t-grad-full" x1="15%" y1="15%" x2="85%" y2="85%">
+      <stop offset="0%" stop-color="#7c3aed" /> <!-- Violet/Purple -->
+      <stop offset="35%" stop-color="#3b82f6" /> <!-- Indigo/Blue -->
+      <stop offset="70%" stop-color="#0ea5e9" /> <!-- Cyan -->
+      <stop offset="100%" stop-color="#10b981" /> <!-- Emerald/Teal -->
     </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="8" result="blur" />
+
+    <!-- G-letter Gradient (Cyan to Emerald to Vibrant Green) -->
+    <linearGradient id="g-grad" x1="15%" y1="15%" x2="85%" y2="85%">
+      <stop offset="0%" stop-color="#0ea5e9" /> <!-- Light Blue/Cyan -->
+      <stop offset="55%" stop-color="#10b981" /> <!-- Emerald -->
+      <stop offset="100%" stop-color="#22c55e" /> <!-- Bright Green -->
+    </linearGradient>
+
+    <!-- High-quality drop shadow for the 3D monogram floating effect -->
+    <filter id="monogram-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+
+    <!-- Subtle glow filter to mimic high-end screen illumination -->
+    <filter id="interlocking-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
       <feComposite in="SourceGraphic" in2="blur" operator="over" />
     </filter>
   </defs>
-  <!-- Background -->
-  <rect width="512" height="512" rx="128" fill="#020617" />
-  <!-- Glowing ring -->
-  <circle cx="256" cy="256" r="220" fill="none" stroke="#1e293b" stroke-width="8" />
-  <!-- Left/Top Link Loop -->
-  <path d="M190 190 C140 240, 140 320, 190 370 C240 420, 320 420, 370 370 L310 310 C290 330, 260 330, 240 310 C220 290, 220 260, 240 240 L190 190 Z" fill="url(#tg-grad)" filter="url(#glow)" />
-  <!-- Right/Bottom Link Loop -->
-  <path d="M322 322 C372 272, 372 192, 322 142 C272 92, 192 92, 142 142 L202 202 C222 182, 252 182, 272 202 C292 222, 292 252, 272 272 L322 322 Z" fill="url(#tg-grad)" filter="url(#glow)" />
-  <!-- Connecting Bar -->
-  <rect x="226" y="226" width="60" height="60" rx="12" fill="url(#tg-grad)" transform="rotate(45 256 256)" filter="url(#glow)" />
+
+  <!-- Squircle Base Frame with a luxury dark radial glow -->
+  <rect width="512" height="512" rx="140" fill="url(#bg-glow)" />
+  
+  <!-- Sleek, ultra-fine squircle border highlight -->
+  <rect x="6" y="6" width="500" height="500" rx="134" fill="none" stroke="rgba(255, 255, 255, 0.05)" stroke-width="2.5" />
+
+  <!-- Interlocking Monogram Group with Unified Drop Shadow -->
+  <g filter="url(#monogram-shadow)">
+    
+    <!-- 1. The T Stem and Loop (Bottom layer of monogram) -->
+    <!-- Starts under the top bar, loops down and curves up-right into the G -->
+    <path d="M 220,195 
+             C 220,240 155,255 155,305 
+             C 155,365 210,405 265,405 
+             C 320,405 355,360 355,310 
+             C 355,270 315,245 285,265 
+             C 265,278 265,305 275,315" 
+          fill="none" stroke="url(#t-grad-full)" stroke-width="46" stroke-linecap="round" />
+
+    <!-- 2. The G Loop (Middle layer) -->
+    <!-- Curves around the right and bottom, and includes the horizontal crossbar -->
+    <path d="M 290,245 
+             C 320,225 365,225 395,245 
+             C 430,270 440,310 440,345 
+             C 440,395 400,435 345,435 
+             C 290,435 250,395 250,345" 
+          fill="none" stroke="url(#g-grad)" stroke-width="46" stroke-linecap="round" />
+
+    <!-- G Horizontal Crossbar -->
+    <path d="M 315,345 L 435,345" 
+          fill="none" stroke="url(#g-grad)" stroke-width="46" stroke-linecap="round" />
+
+    <!-- 3. Interlocking Overlay (Top Layer) -->
+    <!-- Overlays a segment of the T's bottom-left loop on top of the G's bottom-left to lock them together -->
+    <path d="M 155,305 C 155,365 210,405 265,405" 
+          fill="none" stroke="url(#t-grad-full)" stroke-width="46" stroke-linecap="round" />
+
+    <!-- 4. The T's Slanted Top Bar (Top layer) -->
+    <!-- Polished trapezoid with slanted flat ends matching the original image's sleekness -->
+    <polygon points="120,160 310,160 280,204 145,204" 
+             fill="url(#t-grad-full)" />
+
+  </g>
 </svg>

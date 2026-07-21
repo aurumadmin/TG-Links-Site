@@ -30,7 +30,8 @@ import {
   Info,
   Mail,
   Send,
-  RefreshCw
+  RefreshCw,
+  Sparkles
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -60,6 +61,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
   const [apiUrl, setApiUrl] = useState("");
   const [apiToken, setApiToken] = useState("");
   const [apiPriority, setApiPriority] = useState("0");
+  const [isFaucetApi, setIsFaucetApi] = useState(false);
   const [editingApiId, setEditingApiId] = useState<string | null>(null);
 
   // New payment method state
@@ -244,7 +246,8 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           name: apiName,
           apiUrl,
           apiToken,
-          priority: Number(apiPriority || 0)
+          priority: Number(apiPriority || 0),
+          isFaucetApi
         })
       });
 
@@ -254,6 +257,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
         setApiUrl("");
         setApiToken("");
         setApiPriority("0");
+        setIsFaucetApi(false);
         setEditingApiId(null);
         loadAdminData();
       }
@@ -268,6 +272,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
     setApiUrl(api.apiUrl);
     setApiToken(api.apiToken);
     setApiPriority(String(api.priority));
+    setIsFaucetApi(!!api.isFaucetApi);
   };
 
   const handleDeleteApi = async (id: string) => {
@@ -940,75 +945,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
               </div>
             </div>
 
-            {/* GOOGLE DRIVE DATABASE SYNC STATUS */}
-            <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                </div>
-                <h3 className="font-extrabold text-white text-base">Google Drive Cloud Database Persistence</h3>
-              </div>
 
-              {gdriveInfo?.enabled ? (
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-3">
-                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-                    <Check className="w-5 h-5" />
-                    <span>Real-Time Cloud Storage Active</span>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Your database is successfully connected and writing changes dynamically to your Google Drive account. This bypasses Vercel's read-only/ephemeral storage limits to prevent any data loss!
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2 border-t border-emerald-500/10">
-                    <div>
-                      <span className="block text-slate-500 font-bold uppercase tracking-wider text-[10px]">Active Service Account</span>
-                      <code className="text-emerald-300 font-mono select-all bg-emerald-950/40 px-2 py-1.5 rounded block mt-1 break-all">{gdriveInfo.serviceAccountEmail}</code>
-                    </div>
-                    <div>
-                      <span className="block text-slate-500 font-bold uppercase tracking-wider text-[10px]">Google Drive File ID</span>
-                      <code className="text-emerald-300 font-mono select-all bg-emerald-950/40 px-2 py-1.5 rounded block mt-1 break-all">{gdriveInfo.fileId || "Locating/Creating..."}</code>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-2">
-                    <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-                      <AlertCircle className="w-5 h-5" />
-                      <span>Local Storage Only (No Cloud Persistence)</span>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      The database is currently operating in local fallback mode. Because Vercel's serverless containers are ephemeral, local files will be lost frequently on container recycling or cold-starts!
-                    </p>
-                  </div>
-
-                  <div className="p-5 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
-                    <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest block">How to configure Google Drive Persistence on Vercel:</span>
-                    <ol className="list-decimal pl-4 text-xs text-slate-400 space-y-2.5">
-                      <li>
-                        <strong className="text-slate-200">Create a Google Cloud Project</strong>: Go to the <a href="https://console.cloud.google.com" target="_blank" className="text-indigo-400 hover:underline inline-flex items-center gap-0.5" referrerPolicy="no-referrer">Google Cloud Console</a>, create a project, and enable the <strong className="text-slate-200">Google Drive API</strong>.
-                      </li>
-                      <li>
-                        <strong className="text-slate-200">Generate a Service Account Key</strong>: Create a Service Account under "IAM & Admin &rarr; Service Accounts", click "Keys &rarr; Add Key &rarr; Create New Key", and download it as a <strong className="text-slate-200">JSON</strong> file.
-                      </li>
-                      <li>
-                        <strong className="text-slate-200">Set Environment Variables in Vercel Dashboard</strong>:
-                        <ul className="list-disc pl-4 mt-1.5 space-y-1.5 text-slate-500">
-                          <li>
-                            <code className="text-slate-300 font-mono bg-slate-900 px-1.5 py-0.5 rounded">GOOGLE_SERVICE_ACCOUNT_KEY</code>: Copy and paste the entire content of your Service Account JSON key.
-                          </li>
-                          <li>
-                            <code className="text-slate-300 font-mono bg-slate-900 px-1.5 py-0.5 rounded">GOOGLE_DRIVE_FILE_ID</code> (Optional): A pre-existing Google Drive File ID. Leave blank to let the system automatically create <code className="text-slate-300">tglinks_db.json</code>.
-                          </li>
-                        </ul>
-                      </li>
-                      <li>
-                        <strong className="text-slate-200">Grant Google Drive Permissions (If folder specified)</strong>: If using a shared folder, share that folder with the Service Account email so it has write permission.
-                      </li>
-                    </ol>
-                  </div>
-                </div>
-              )}
-            </div>
 
             {/* SMTP DATABASE AUTO-BACKUP (EMAIL) */}
             <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4">
@@ -1186,6 +1123,103 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                 </div>
               </div>
 
+              {/* DIRECT LINK OFFER WALL (CLICK AD & STAY 10S) CONFIGURATION */}
+              <div className="mt-6 pt-6 border-t border-slate-800/60 space-y-4">
+                <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                  <div className="w-6 h-6 rounded-md bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <h4 className="font-bold text-white text-sm">Direct Link Offer Wall Ads (Gate Page 1 Only)</h4>
+                </div>
+
+                <p className="text-[11px] text-slate-400">
+                  Enable a multi-step offer wall on the first redirection gate. This forces visitors to click up to 4 configured direct-link ads and remain on each ad page for 10 seconds before they can advance to subsequent steps or unlock their destination URL.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Enable Offer Wall Ads</label>
+                    <select
+                      value={sysSettings.enableOfferWall ? "true" : "false"}
+                      onChange={(e) => setSysSettings({ ...sysSettings, enableOfferWall: e.target.value === "true" })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                    >
+                      <option value="false" className="bg-slate-950 text-white">Disabled</option>
+                      <option value="true" className="bg-slate-950 text-white">Enabled (Gate Page 1 only)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Timer per Ad (Seconds)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      value={sysSettings.offerWallSeconds === undefined ? 10 : sysSettings.offerWallSeconds}
+                      onChange={(e) => setSysSettings({ ...sysSettings, offerWallSeconds: e.target.value ? Number(e.target.value) : 10 })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Number of Ad Steps</label>
+                    <select
+                      value={sysSettings.offerWallCount === undefined ? 4 : sysSettings.offerWallCount}
+                      onChange={(e) => setSysSettings({ ...sysSettings, offerWallCount: Number(e.target.value) })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                    >
+                      <option value={1} className="bg-slate-950 text-white">1 Step</option>
+                      <option value={2} className="bg-slate-950 text-white">2 Steps</option>
+                      <option value={3} className="bg-slate-950 text-white">3 Steps</option>
+                      <option value={4} className="bg-slate-950 text-white">4 Steps</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Offer 1 Direct Link / Ad URL</label>
+                    <input
+                      type="text"
+                      placeholder="https://direct-link-1.com/ad"
+                      value={sysSettings.offerWallUrl1 || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, offerWallUrl1: e.target.value })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Offer 2 Direct Link / Ad URL</label>
+                    <input
+                      type="text"
+                      placeholder="https://direct-link-2.com/ad"
+                      value={sysSettings.offerWallUrl2 || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, offerWallUrl2: e.target.value })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Offer 3 Direct Link / Ad URL</label>
+                    <input
+                      type="text"
+                      placeholder="https://direct-link-3.com/ad"
+                      value={sysSettings.offerWallUrl3 || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, offerWallUrl3: e.target.value })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Offer 4 Direct Link / Ad URL</label>
+                    <input
+                      type="text"
+                      placeholder="https://direct-link-4.com/ad"
+                      value={sysSettings.offerWallUrl4 || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, offerWallUrl4: e.target.value })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* NEON.TODAY AD GATE CONFIGURATION */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 pt-4 border-t border-slate-800/50">
                 <div>
@@ -1337,6 +1371,21 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                   />
                 </div>
 
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/60">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isFaucetApi}
+                      onChange={(e) => setIsFaucetApi(e.target.checked)}
+                      className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-4 focus:ring-indigo-500/20 w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-slate-300 uppercase">Faucet-specific API</span>
+                  </label>
+                  <p className="text-[10px] text-slate-500 leading-normal mt-1">
+                    Check this if you want this API to be used <strong>ONLY for users who have enabled Faucet Mode</strong>.
+                  </p>
+                </div>
+
                 <div className="p-3.5 bg-indigo-950/20 border border-indigo-900/30 rounded-xl text-[11px] text-indigo-300 leading-normal font-medium">
                   💡 <span className="font-bold">Syndication Loop:</span> When users shorten links on TG Links, our system will automatically call these external platforms' API to request shortcodes. Visitors are routed directly or sequentially, allowing you to pool CPM payouts from multiple third-party accounts simultaneously!
                 </div>
@@ -1357,6 +1406,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                         setApiUrl("");
                         setApiToken("");
                         setApiPriority("0");
+                        setIsFaucetApi(false);
                       }}
                       className="px-4 py-3 bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-sm rounded-xl transition"
                     >
@@ -1389,6 +1439,11 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${api.enabled ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"}`}>
                             {api.enabled ? "ACTIVE" : "DISABLED"}
                           </span>
+                          {api.isFaucetApi && (
+                            <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold px-1.5 py-0.5 rounded">
+                              FAUCET ONLY
+                            </span>
+                          )}
                         </div>
                       </div>
 
