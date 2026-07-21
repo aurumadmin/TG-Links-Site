@@ -15,33 +15,7 @@ const redirectWithoutReferrer = (url: string) => {
   const target = ensureAbsoluteUrl(url);
   if (!target) return;
   
-  const hostname = window.location.hostname;
-  const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
-  
-  if (isProd) {
-    window.location.href = `https://thunder-appz.eu.org/r?to=${encodeURIComponent(target)}`;
-    return;
-  }
-  
-  try {
-    const meta = document.createElement("meta");
-    meta.name = "referrer";
-    meta.content = "no-referrer";
-    document.getElementsByTagName("head")[0].appendChild(meta);
-  } catch (e) {
-    console.error("Failed to inject referrer meta tag", e);
-  }
-
-  const a = document.createElement("a");
-  a.href = target;
-  a.rel = "noreferrer";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  
-  setTimeout(() => {
-    window.location.href = target;
-  }, 100);
+  window.location.href = target;
 };
 
 interface RedirectPageProps {
@@ -401,12 +375,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     ];
     const adUrl = ensureAbsoluteUrl(urls[index] || "https://www.google.com");
     
-    const hostname = window.location.hostname;
-    const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
-    const finalAdUrl = isProd ? `https://thunder-appz.eu.org/r?to=${encodeURIComponent(adUrl)}` : adUrl;
-    
     // Open ad URL in a new tab
-    window.open(finalAdUrl, "_blank");
+    window.open(adUrl, "_blank");
 
     // Start timer for this index
     setActiveOfferIndex(index);
