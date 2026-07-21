@@ -1108,18 +1108,19 @@ function setupRoutes() {
 
     const shortenedUrl = `${protocol}://${host}/go/${code}`;
 
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+
     if (format === "text") {
       return res.send(shortenedUrl);
     }
 
-    if (format === "json") {
-      return res.json({
-        status: "success",
-        shortenedUrl: shortenedUrl
-      });
-    }
-
-    return res.redirect(shortenedUrl);
+    // Default response is JSON (matching AroLinks and other shortener APIs)
+    return res.json({
+      status: "success",
+      shortenedUrl: shortenedUrl
+    });
   });
 
   // --- SYSTEM SETTINGS ---
