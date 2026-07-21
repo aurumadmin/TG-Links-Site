@@ -1298,7 +1298,14 @@ function setupRoutes() {
         popunderCode: db.settings.popunderCode,
         globalHeaderCode: db.settings.globalHeaderCode,
         enableNeonAdGate: db.settings.enableNeonAdGate,
-        neonTodayAdCode: db.settings.neonTodayAdCode
+        neonTodayAdCode: db.settings.neonTodayAdCode,
+        enableOfferWall: db.settings.enableOfferWall,
+        offerWallSeconds: db.settings.offerWallSeconds,
+        offerWallCount: db.settings.offerWallCount,
+        offerWallUrl1: db.settings.offerWallUrl1,
+        offerWallUrl2: db.settings.offerWallUrl2,
+        offerWallUrl3: db.settings.offerWallUrl3,
+        offerWallUrl4: db.settings.offerWallUrl4
       }
     });
   });
