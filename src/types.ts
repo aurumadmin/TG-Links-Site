@@ -80,6 +80,14 @@ export interface SystemSettings {
   enableOwnAds: boolean; // "My own page" option
   enableNeonAdGate?: boolean;
   neonTodayAdCode?: string;
+  enableEmailBackup?: boolean;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpPass?: string;
+  backupSenderEmail?: string;
+  backupReceiverEmail?: string;
 }
 
 export interface DashboardStats {

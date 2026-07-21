@@ -27,7 +27,10 @@ import {
   ShieldCheck,
   Edit2,
   ChevronRight,
-  Info
+  Info,
+  Mail,
+  Send,
+  RefreshCw
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -68,6 +71,34 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
   // Settings feedback
   const [settingsSuccess, setSettingsSuccess] = useState("");
   const [settingsError, setSettingsError] = useState("");
+
+  // SMTP Test State
+  const [smtpTesting, setSmtpTesting] = useState(false);
+  const [smtpTestSuccess, setSmtpTestSuccess] = useState("");
+  const [smtpTestError, setSmtpTestError] = useState("");
+
+  const handleTestSmtp = async () => {
+    if (!sysSettings) return;
+    setSmtpTesting(true);
+    setSmtpTestSuccess("");
+    setSmtpTestError("");
+
+    try {
+      const res = await fetchApi("/admin/test-smtp", {
+        method: "POST",
+        body: JSON.stringify(sysSettings)
+      });
+      if (res.success) {
+        setSmtpTestSuccess(res.message || "Database backup email sent successfully via SMTP!");
+      } else {
+        setSmtpTestError(res.error || "Failed to send email backup.");
+      }
+    } catch (err: any) {
+      setSmtpTestError(err.message || "Failed to send email backup.");
+    } finally {
+      setSmtpTesting(false);
+    }
+  };
 
   const loadAdminData = async () => {
     try {
@@ -977,6 +1008,149 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* SMTP DATABASE AUTO-BACKUP (EMAIL) */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <h3 className="font-extrabold text-white text-base">SMTP Database Hourly Auto-Backup</h3>
+              </div>
+
+              <p className="text-xs text-slate-400">
+                Configure automatic hourly database backups sent directly to your email address via SMTP. This ensures your user accounts, link logs, and configurations are securely preserved, even if your VPS fails unexpectedly!
+              </p>
+
+              <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
+                <div>
+                  <span className="block text-sm font-bold text-white">Enable Automated Email Backups</span>
+                  <span className="block text-xs text-slate-400">When enabled, the server will email a full database backup (.json) to your receiver address every hour.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSysSettings({ ...sysSettings, enableEmailBackup: !sysSettings.enableEmailBackup })}
+                  className="focus:outline-none transition"
+                >
+                  {sysSettings.enableEmailBackup ? (
+                    <ToggleRight className="w-12 h-12 text-indigo-500" />
+                  ) : (
+                    <ToggleLeft className="w-12 h-12 text-slate-600" />
+                  )}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">SMTP Host</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. smtp.gmail.com"
+                    value={sysSettings.smtpHost || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, smtpHost: e.target.value })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">SMTP Port</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 465"
+                    value={sysSettings.smtpPort || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, smtpPort: e.target.value ? Number(e.target.value) : undefined })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Secure (SSL/TLS)</label>
+                  <select
+                    value={sysSettings.smtpSecure === undefined ? "true" : sysSettings.smtpSecure ? "true" : "false"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, smtpSecure: e.target.value === "true" })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                  >
+                    <option value="true" className="bg-slate-950 text-white">SSL (Port 465)</option>
+                    <option value="false" className="bg-slate-950 text-white">STARTTLS (Port 587/25)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">SMTP Username / User</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. user@gmail.com"
+                    value={sysSettings.smtpUser || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, smtpUser: e.target.value })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">SMTP Password</label>
+                  <input
+                    type="password"
+                    placeholder="SMTP Mail Password"
+                    value={sysSettings.smtpPass || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, smtpPass: e.target.value })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Sender Email</label>
+                  <input
+                    type="email"
+                    placeholder="e.g. user@gmail.com"
+                    value={sysSettings.backupSenderEmail || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, backupSenderEmail: e.target.value })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Receiver Email</label>
+                  <input
+                    type="email"
+                    placeholder="e.g. backup@gmail.com"
+                    value={sysSettings.backupReceiverEmail || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, backupReceiverEmail: e.target.value })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex-1 min-w-[250px]">
+                  {smtpTestSuccess && (
+                    <p className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <Check className="w-4 h-4 flex-shrink-0" />
+                      {smtpTestSuccess}
+                    </p>
+                  )}
+                  {smtpTestError && (
+                    <p className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      {smtpTestError}
+                    </p>
+                  )}
+                </div>
+                
+                <button
+                  type="button"
+                  disabled={smtpTesting}
+                  onClick={handleTestSmtp}
+                  className="px-5 py-2.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-white border border-indigo-500/20 rounded-xl text-xs font-bold flex items-center gap-2 transition disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  {smtpTesting ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  {smtpTesting ? "Testing Connection..." : "Test SMTP & Send Backup Now"}
+                </button>
+              </div>
             </div>
 
             {/* AD CONFIGURATION OPTIONS */}

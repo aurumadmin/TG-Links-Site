@@ -3,6 +3,8 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import fetch from "node-fetch";
+import nodemailer from "nodemailer";
+import zlib from "zlib";
 
 import { 
   User, 
@@ -704,6 +706,104 @@ function saveDb(data: any) {
       console.error("[TG Links] Background Google Drive sync failed:", err);
     });
   }
+}
+
+// SMTP Database Backup Functions
+async function sendEmailBackup(settings: any, isTest: boolean = false): Promise<{ success: boolean; error?: string }> {
+  const {
+    enableEmailBackup,
+    smtpHost,
+    smtpPort,
+    smtpSecure,
+    smtpUser,
+    smtpPass,
+    backupSenderEmail,
+    backupReceiverEmail
+  } = settings || {};
+
+  if (!isTest && !enableEmailBackup) {
+    return { success: false, error: "Email backup is disabled in settings" };
+  }
+
+  if (!smtpHost || !smtpPort || !smtpUser || !smtpPass || !backupSenderEmail || !backupReceiverEmail) {
+    return { success: false, error: "SMTP configuration is incomplete" };
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: Number(smtpPort),
+      secure: smtpSecure === true || smtpSecure === "true" || Number(smtpPort) === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass
+      },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000
+    });
+
+    if (!fs.existsSync(DB_FILE)) {
+      return { success: false, error: "Database file does not exist to backup" };
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const attachmentName = `tglinks_db_backup_${timestamp}.json.gz`;
+    const dbRaw = fs.readFileSync(DB_FILE);
+    const compressedDb = zlib.gzipSync(dbRaw);
+
+    const originalSizeKb = (dbRaw.length / 1024).toFixed(2);
+    const compressedSizeKb = (compressedDb.length / 1024).toFixed(2);
+    const compressionRatio = ((1 - compressedDb.length / dbRaw.length) * 100).toFixed(1);
+
+    const mailOptions = {
+      from: backupSenderEmail,
+      to: backupReceiverEmail,
+      subject: isTest
+        ? `[TG Links] Test SMTP Database Backup`
+        : `[TG Links] Hourly Database Auto-Backup`,
+      text: isTest
+        ? `Hello!\n\nThis is a test backup to confirm your SMTP configuration on TG Links is working properly.\n\nTime of Send: ${new Date().toISOString()}\n\nDatabase Size: ${originalSizeKb} KB\nCompressed Backup Size: ${compressedSizeKb} KB (Gzip compressed: saved ${compressionRatio}%)\n\nPlease find the gzipped backup file (.json.gz) attached.`
+        : `Hello!\n\nThis is your automated hourly database backup from TG Links.\n\nTimestamp: ${new Date().toISOString()}\nDatabase File Path: ${DB_FILE}\nDatabase Size: ${originalSizeKb} KB\nCompressed Backup Size: ${compressedSizeKb} KB (Gzip compressed: saved ${compressionRatio}%)\n\nNote: The database is compressed using standard gzip format to save your email storage space and bypass SMTP size limits (under 25MB limit). You can open this file using standard tools like 7-Zip, WinRAR, or the gzip command-line.\n\nPlease keep this copy safe to protect against data loss.`,
+      attachments: [
+        {
+          filename: attachmentName,
+          content: compressedDb
+        }
+      ]
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`[TG Links] Database backup email successfully sent to ${backupReceiverEmail}`);
+    return { success: true };
+  } catch (err: any) {
+    console.error("[TG Links] Failed to send database backup email:", err);
+    return { success: false, error: err.message || String(err) };
+  }
+}
+
+let emailBackupInterval: NodeJS.Timeout | null = null;
+
+function startEmailBackupScheduler() {
+  if (emailBackupInterval) {
+    clearInterval(emailBackupInterval);
+    emailBackupInterval = null;
+  }
+
+  const HOURLY_MS = 60 * 60 * 1000;
+  
+  emailBackupInterval = setInterval(async () => {
+    try {
+      const db = loadDb();
+      if (db.settings?.enableEmailBackup) {
+        console.log("[TG Links] Executing scheduled hourly database backup via SMTP...");
+        await sendEmailBackup(db.settings, false);
+      }
+    } catch (err) {
+      console.error("[TG Links] Error in background email backup scheduler:", err);
+    }
+  }, HOURLY_MS);
+
+  console.log("[TG Links] Background hourly SMTP database backup scheduler initialized.");
 }
 
 function setupRoutes() {
@@ -1721,6 +1821,16 @@ function setupRoutes() {
     res.json({ success: true, settings: db.settings });
   });
 
+  app.post("/api/admin/test-smtp", requireAdmin, async (req, res) => {
+    const settings = req.body;
+    const result = await sendEmailBackup(settings, true);
+    if (result.success) {
+      res.json({ success: true, message: "Database backup email sent successfully via SMTP!" });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  });
+
   // --- EXTERNAL ADLINKFLY SHORTENERS ENDPOINTS ---
   
   app.get("/api/admin/external-shorteners", requireAdmin, (req, res) => {
@@ -1807,6 +1917,7 @@ function setupRoutes() {
   if (process.env.VERCEL !== "1") {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`[TG Links] Server booting up on http://0.0.0.0:${PORT}`);
+      startEmailBackupScheduler();
     });
   }
 }
