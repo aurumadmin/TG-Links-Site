@@ -1117,16 +1117,47 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (!file) return;
-                            if (file.size > 2 * 1024 * 1024) {
-                              alert("Please select an image smaller than 2MB.");
+                            if (file.size > 5 * 1024 * 1024) {
+                              alert("Please select an image smaller than 5MB.");
                               return;
                             }
                             const reader = new FileReader();
                             reader.onload = (event) => {
                               const base64 = event.target?.result as string;
-                              if (base64) {
+                              if (!base64) return;
+                              // SVG files or small images don't need canvas resizing
+                              if (file.type === "image/svg+xml" || file.size < 50000) {
                                 setSysSettings({ ...sysSettings, logoUrl: base64 });
+                                return;
                               }
+                              // Resize raster images via canvas
+                              const img = new Image();
+                              img.src = base64;
+                              img.onload = () => {
+                                const canvas = document.createElement("canvas");
+                                const maxDim = 400;
+                                let width = img.width;
+                                let height = img.height;
+                                if (width > maxDim || height > maxDim) {
+                                  if (width > height) {
+                                    height = Math.round((height * maxDim) / width);
+                                    width = maxDim;
+                                  } else {
+                                    width = Math.round((width * maxDim) / height);
+                                    height = maxDim;
+                                  }
+                                }
+                                canvas.width = width;
+                                canvas.height = height;
+                                const ctx = canvas.getContext("2d");
+                                if (ctx) {
+                                  ctx.drawImage(img, 0, 0, width, height);
+                                  const resizedBase64 = canvas.toDataURL("image/png");
+                                  setSysSettings({ ...sysSettings, logoUrl: resizedBase64 });
+                                } else {
+                                  setSysSettings({ ...sysSettings, logoUrl: base64 });
+                                }
+                              };
                             };
                             reader.readAsDataURL(file);
                           }}
