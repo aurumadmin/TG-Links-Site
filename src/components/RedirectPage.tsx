@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { fetchApi } from "../lib/api";
 import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck, Play, Pause } from "lucide-react";
 import { motion } from "motion/react";
+import SiteLogo, { getCachedSettings } from "./SiteLogo";
 
 const ensureAbsoluteUrl = (url: string) => {
   if (!url) return "";
@@ -85,7 +86,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [linkData, setLinkData] = useState<any>(null);
-  const [settings, setSettings] = useState<any>(null);
+  const [settings, setSettings] = useState<any>(() => getCachedSettings());
   
   // Redirection stepper state
   const [currentStep, setCurrentStep] = useState(1);
@@ -598,7 +599,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   if (loading || checkingSecurity) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
-        <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-16 h-16 object-contain rounded-2xl mb-4 shadow-lg shadow-indigo-500/10 animate-pulse" referrerPolicy="no-referrer" />
+        <SiteLogo logoUrl={settings?.logoUrl} isLoaded={!loading} className="w-16 h-16 object-contain rounded-2xl mb-4 shadow-lg shadow-indigo-500/10 animate-pulse" />
         <h2 className="text-xl font-bold">TG Links Security Gateway...</h2>
         <p className="text-xs text-slate-400 mt-1 max-w-sm">
           Securing destination endpoint parameters, performing IP integrity sweeps, and checking browser security parameters. Please wait.
@@ -801,7 +802,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             {/* Redirection Header / Stepper */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
               <div className="flex items-center gap-3">
-                <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-12 h-12 object-contain rounded-xl shadow-lg" referrerPolicy="no-referrer" />
+                <SiteLogo logoUrl={settings?.logoUrl} isLoaded={!loading} className="w-12 h-12 object-contain rounded-xl shadow-lg" />
                 <div>
                   <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest bg-indigo-950/40 border border-indigo-900/50 px-2.5 py-1 rounded-full">
                     Step {currentStep} of {settings?.adPagesCount || 1} Redirection Gates

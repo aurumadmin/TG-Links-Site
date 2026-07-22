@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { fetchApi } from "../lib/api";
 import { Lock, Mail, ArrowRight, ArrowLeft, ShieldAlert, Sparkles, CheckCircle2 } from "lucide-react";
 import { motion } from "motion/react";
+import SiteLogo, { getCachedSettings } from "./SiteLogo";
 
 interface AuthPageProps {
   onAuthSuccess: (user: any) => void;
@@ -15,7 +16,7 @@ export default function AuthPage({ onAuthSuccess, onClose }: AuthPageProps) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
-  const [settings, setSettings] = useState<any>(null);
+  const [settings, setSettings] = useState<any>(() => getCachedSettings());
 
   React.useEffect(() => {
     fetchApi("/settings")
@@ -73,7 +74,7 @@ export default function AuthPage({ onAuthSuccess, onClose }: AuthPageProps) {
 
           {/* Site branding */}
           <div className="flex flex-col items-center mb-6">
-            <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-16 h-16 object-contain rounded-2xl mb-3 shadow-lg shadow-indigo-500/10" referrerPolicy="no-referrer" />
+            <SiteLogo logoUrl={settings?.logoUrl} isLoaded={!!settings} className="w-16 h-16 object-contain rounded-2xl mb-3 shadow-lg shadow-indigo-500/10" />
             <div className="flex items-center gap-1 leading-none">
               <span className="text-3xl font-black text-white tracking-tight">TG</span>
               <span className="text-3xl font-black text-emerald-400 tracking-tight">LINKS</span>

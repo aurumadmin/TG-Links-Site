@@ -38,13 +38,15 @@ import {
   Upload
 } from "lucide-react";
 import { motion } from "motion/react";
+import SiteLogo, { getCachedSettings } from "./SiteLogo";
 
 interface AdminPageProps {
+  initialTab?: "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external";
   onBackToDashboard: () => void;
 }
 
-export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external">("overview");
+export default function AdminPage({ initialTab, onBackToDashboard }: AdminPageProps) {
+  const [activeTab, setActiveTab] = useState<"overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external">(initialTab || "overview");
   
   // Data states
   const [adminStats, setAdminStats] = useState<any>(null);
@@ -52,9 +54,22 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
   const [linksList, setLinksList] = useState<Link[]>([]);
   const [withdrawalsList, setWithdrawalsList] = useState<Withdrawal[]>([]);
   const [ticketsList, setTicketsList] = useState<SupportTicket[]>([]);
-  const [sysSettings, setSysSettings] = useState<SystemSettings | null>(null);
+  const [sysSettings, setSysSettings] = useState<SystemSettings | null>(() => getCachedSettings());
   const [externalApis, setExternalApis] = useState<AdFlyShortener[]>([]);
   const [alsoSetFavicon, setAlsoSetFavicon] = useState(true);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  const changeTab = (tab: "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external", path: string) => {
+    setActiveTab(tab);
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, "", path);
+    }
+  };
 
   // Dynamically update document favicon in head when settings change in Admin
   useEffect(() => {
@@ -367,7 +382,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
         {/* Sidebar Header */}
         <div className="p-6 border-b border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src={sysSettings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-9 h-9 object-contain rounded-xl" referrerPolicy="no-referrer" />
+            <SiteLogo logoUrl={sysSettings?.logoUrl} isLoaded={!!sysSettings} className="w-9 h-9 object-contain rounded-xl" />
             <div className="flex flex-col">
               <div className="flex items-center gap-1 leading-none">
                 <span className="text-xl font-black text-indigo-500 tracking-tight">TG</span>
@@ -383,7 +398,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
         {/* Navigation Tabs */}
         <nav className="flex-grow p-4 space-y-1 text-sm font-semibold" id="admin_nav">
           <button
-            onClick={() => setActiveTab("overview")}
+            onClick={() => changeTab("overview", "/admin")}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "overview" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
             <TrendingUp className="w-4 h-4" />
@@ -391,7 +406,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           </button>
           
           <button
-            onClick={() => setActiveTab("users")}
+            onClick={() => changeTab("users", "/admin/users")}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "users" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
             <Users className="w-4 h-4" />
@@ -399,7 +414,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           </button>
 
           <button
-            onClick={() => setActiveTab("links")}
+            onClick={() => changeTab("links", "/admin/links")}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "links" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
             <Link2 className="w-4 h-4" />
@@ -407,7 +422,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           </button>
 
           <button
-            onClick={() => setActiveTab("withdrawals")}
+            onClick={() => changeTab("withdrawals", "/admin/withdrawals")}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "withdrawals" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
             <DollarSign className="w-4 h-4" />
@@ -415,7 +430,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           </button>
 
           <button
-            onClick={() => setActiveTab("tickets")}
+            onClick={() => changeTab("tickets", "/admin/tickets")}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "tickets" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
             <LifeBuoy className="w-4 h-4" />
@@ -430,7 +445,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           </button>
 
           <button
-            onClick={() => setActiveTab("settings")}
+            onClick={() => changeTab("settings", "/admin/settings")}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "settings" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
             <Settings className="w-4 h-4" />
@@ -438,7 +453,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           </button>
 
           <button
-            onClick={() => setActiveTab("external")}
+            onClick={() => changeTab("external", "/admin/external-apis")}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "external" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
             <Cpu className="w-4 h-4" />

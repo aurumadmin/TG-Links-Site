@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { ArrowRight, Link2, Eye, ShieldAlert, Sparkles, DollarSign, Activity, FileText, Mail, ArrowUpRight, HelpCircle, Copy, Check } from "lucide-react";
 import { motion } from "motion/react";
 import { fetchApi } from "../lib/api";
+import SiteLogo, { getCachedSettings } from "./SiteLogo";
 
 const getBaseShortUrl = () => {
   const hostname = window.location.hostname;
@@ -13,9 +14,12 @@ interface LandingPageProps {
   onNavigate: (page: string) => void;
   user: any;
   onOpenAuth: () => void;
+  initialTab?: string;
+  siteSettings?: any;
+  isSettingsLoaded?: boolean;
 }
 
-export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPageProps) {
+export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, siteSettings: propSettings, isSettingsLoaded = true }: LandingPageProps) {
   const [url, setUrl] = useState("");
   const [shortenedLink, setShortenedLink] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -26,8 +30,20 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
     totalUsers: 0,
     globalCpm: 5.0
   });
-  const [siteSettings, setSiteSettings] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState("home"); // home, rates, contact, privacy, dmca, terms
+  const [siteSettings, setSiteSettings] = useState<any>(() => propSettings || getCachedSettings());
+  const [activeTab, setActiveTab] = useState(initialTab || "home"); // home, rates, contact, privacy, dmca, terms
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (propSettings) {
+      setSiteSettings(propSettings);
+    }
+  }, [propSettings]);
 
   useEffect(() => {
     // Load live site analytics from public stats endpoint
@@ -42,11 +58,19 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
       })
       .catch((err) => console.error("Error loading public stats:", err));
 
-    // Load public site settings (logo, siteName)
-    fetchApi("/settings")
-      .then((res) => setSiteSettings(res))
-      .catch((err) => console.error("Error loading public settings:", err));
-  }, []);
+    if (!propSettings) {
+      fetchApi("/settings")
+        .then((res) => setSiteSettings(res))
+        .catch((err) => console.error("Error loading public settings:", err));
+    }
+  }, [propSettings]);
+
+  const changeTab = (tab: string, path: string) => {
+    setActiveTab(tab);
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, "", path);
+    }
+  };
 
   const handleShorten = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,8 +114,8 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
       <header className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 shadow-lg shadow-indigo-950/10" id="landing_header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           {/* Logo */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab("home")} id="landing_logo">
-            <img src={siteSettings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-10 h-10 object-contain rounded-xl" referrerPolicy="no-referrer" />
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => changeTab("home", "/")} id="landing_logo">
+            <SiteLogo logoUrl={siteSettings?.logoUrl} isLoaded={isSettingsLoaded} className="w-10 h-10 object-contain rounded-xl" />
             <div className="flex flex-col">
               <div className="flex items-center gap-1 leading-none">
                 <span className="text-2xl font-black tracking-tight text-indigo-400">TG</span>
@@ -106,13 +130,13 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
           {/* Navigation Links */}
           <nav className="hidden md:flex space-x-6 text-sm font-semibold text-slate-400" id="landing_nav">
             <button 
-              onClick={() => setActiveTab("home")} 
+              onClick={() => changeTab("home", "/")} 
               className={`hover:text-indigo-400 transition ${activeTab === "home" ? "text-indigo-400 border-b-2 border-indigo-500 pb-1" : ""}`}
             >
               Home
             </button>
             <button 
-              onClick={() => setActiveTab("rates")} 
+              onClick={() => changeTab("rates", "/rates")} 
               className={`hover:text-indigo-400 transition ${activeTab === "rates" ? "text-indigo-400 border-b-2 border-indigo-500 pb-1" : ""}`}
             >
               Publisher Rates
@@ -597,7 +621,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
       <footer className="bg-slate-950 text-slate-400 py-12 border-t border-slate-900" id="landing_footer">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6 text-sm">
           <div className="flex items-center gap-3">
-            <img src={siteSettings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-8 h-8 object-contain rounded-lg" referrerPolicy="no-referrer" />
+            <SiteLogo logoUrl={siteSettings?.logoUrl} isLoaded={isSettingsLoaded} className="w-8 h-8 object-contain rounded-lg" />
             <div className="flex flex-col">
               <span className="font-extrabold text-white text-sm">TG Links</span>
               <span className="text-[10px] text-slate-500 mt-0.5">© 2026 TG Links Inc. All rights reserved.</span>

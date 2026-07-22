@@ -46,6 +46,8 @@ import {
   ResponsiveContainer 
 } from "recharts";
 
+import SiteLogo, { getCachedSettings } from "./SiteLogo";
+
 const getBaseShortUrl = () => {
   const hostname = window.location.hostname;
   const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
@@ -54,18 +56,33 @@ const getBaseShortUrl = () => {
 
 interface DashboardPageProps {
   user: User;
+  initialTab?: "overview" | "links" | "withdraw" | "settings" | "tools" | "contact";
   onLogout: () => void;
   onNavigate: (page: string) => void;
 }
 
-export default function DashboardPage({ user, onLogout, onNavigate }: DashboardPageProps) {
+export default function DashboardPage({ user, initialTab, onLogout, onNavigate }: DashboardPageProps) {
   const [currentUser, setCurrentUser] = useState<User>(user);
-  const [activeTab, setActiveTab] = useState<"overview" | "links" | "withdraw" | "settings" | "tools" | "contact">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "links" | "withdraw" | "settings" | "tools" | "contact">(initialTab || "overview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [links, setLinks] = useState<Link[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [settings, setSettings] = useState<SystemSettings | null>(() => getCachedSettings());
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  const changeTab = (tab: "overview" | "links" | "withdraw" | "settings" | "tools" | "contact", path: string) => {
+    setActiveTab(tab);
+    setMobileMenuOpen(false);
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, "", path);
+    }
+  };
   const [reportTab, setReportTab] = useState<"daily" | "monthly">("daily");
   
   // Create link state
@@ -411,7 +428,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
       {/* Mobile Top Header Navigation */}
       <header className="flex md:hidden items-center justify-between bg-slate-900 border-b border-slate-800/80 px-5 py-4 sticky top-0 z-40 w-full" id="mobile_dashboard_header">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => onNavigate("home")}>
-          <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-8 h-8 object-contain rounded-lg" referrerPolicy="no-referrer" />
+          <SiteLogo logoUrl={settings?.logoUrl} isLoaded={!!settings} className="w-8 h-8 object-contain rounded-lg" />
           <div className="flex items-center gap-1">
             <span className="text-2xl font-black text-white tracking-tight">TG</span>
             <span className="text-2xl font-black text-indigo-500 tracking-tight">LINKS</span>
@@ -445,7 +462,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
         {/* Sidebar Header */}
         <div className="p-6 border-b border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => onNavigate("home")}>
-            <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-10 h-10 object-contain rounded-xl" referrerPolicy="no-referrer" />
+            <SiteLogo logoUrl={settings?.logoUrl} isLoaded={!!settings} className="w-10 h-10 object-contain rounded-xl" />
             <div className="flex flex-col">
               <div className="flex items-center gap-1 leading-none">
                 <span className="text-xl font-black text-white tracking-tight">TG</span>
@@ -482,7 +499,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
         {/* Navigation Tabs */}
         <nav className="flex-grow p-4 space-y-1.5 text-sm font-semibold overflow-y-auto" id="sidebar_nav">
           <button
-            onClick={() => { setActiveTab("overview"); setMobileMenuOpen(false); }}
+            onClick={() => changeTab("overview", "/dashboard")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "overview" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
           >
             <LayoutDashboard className="w-4 h-4" />
@@ -490,7 +507,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
           </button>
           
           <button
-            onClick={() => { setActiveTab("links"); setMobileMenuOpen(false); }}
+            onClick={() => changeTab("links", "/dashboard/links")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "links" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
           >
             <Link2 className="w-4 h-4" />
@@ -498,7 +515,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
           </button>
 
           <button
-            onClick={() => { setActiveTab("withdraw"); setMobileMenuOpen(false); }}
+            onClick={() => changeTab("withdraw", "/dashboard/withdrawals")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "withdraw" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
           >
             <DollarSign className="w-4 h-4" />
@@ -506,7 +523,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
           </button>
 
           <button
-            onClick={() => { setActiveTab("settings"); setMobileMenuOpen(false); }}
+            onClick={() => changeTab("settings", "/dashboard/settings")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "settings" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
           >
             <SlidersHorizontal className="w-4 h-4" />
@@ -514,7 +531,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
           </button>
 
           <button
-            onClick={() => { setActiveTab("tools"); setMobileMenuOpen(false); }}
+            onClick={() => changeTab("tools", "/api")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "tools" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
           >
             <Sliders className="w-4 h-4" />
@@ -522,7 +539,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
           </button>
 
           <button
-            onClick={() => { setActiveTab("contact"); setMobileMenuOpen(false); }}
+            onClick={() => changeTab("contact", "/dashboard/tickets")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "contact" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
           >
             <Mail className="w-4 h-4" />
