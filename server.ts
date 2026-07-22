@@ -174,14 +174,14 @@ async function getExternalShortenedUrl(originalUrl: string, db: any, user?: any)
   });
   if (enabledApis.length === 0) return null;
 
-  // Sort by priority descending (highest priority first). If equal, randomize order slightly
+  // Sort by priority descending (highest priority first). If equal, maintain the exact sequence order set in admin panel
   const sortedApis = [...enabledApis].sort((a: any, b: any) => {
     const pA = Number(a.priority || 0);
     const pB = Number(b.priority || 0);
     if (pB !== pA) {
       return pB - pA;
     }
-    return 0.5 - Math.random();
+    return 0;
   });
 
   const fetchFn = typeof globalThis.fetch === "function" 
@@ -2331,6 +2331,17 @@ ${ticket.adminReply}
     if (idx === -1) return res.status(404).json({ error: "AdLinkFly API configuration not found" });
 
     db.adFlyShorteners.splice(idx, 1);
+    saveDb(db);
+    res.json({ success: true, shorteners: db.adFlyShorteners });
+  });
+
+  app.post("/api/admin/external-shorteners/reorder", requireAdmin, (req, res) => {
+    const { shorteners } = req.body;
+    if (!Array.isArray(shorteners)) {
+      return res.status(400).json({ error: "Invalid shorteners list format" });
+    }
+    const db = loadDb();
+    db.adFlyShorteners = shorteners;
     saveDb(db);
     res.json({ success: true, shorteners: db.adFlyShorteners });
   });

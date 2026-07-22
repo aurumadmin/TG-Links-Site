@@ -35,7 +35,10 @@ import {
   Sparkles,
   LifeBuoy,
   MessageSquare,
-  Upload
+  Upload,
+  ArrowUp,
+  ArrowDown,
+  HelpCircle
 } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings } from "./SiteLogo";
@@ -370,6 +373,46 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       loadAdminData();
     } catch (err) {
       alert("Failed to remove API integration.");
+    }
+  };
+
+  const handleToggleApi = async (api: AdFlyShortener) => {
+    try {
+      const res = await fetchApi("/admin/external-shorteners", {
+        method: "POST",
+        body: JSON.stringify({
+          ...api,
+          enabled: !api.enabled
+        })
+      });
+      if (res.success) {
+        loadAdminData();
+      }
+    } catch (err) {
+      alert("Failed to toggle API status.");
+    }
+  };
+
+  const handleMoveApi = async (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= externalApis.length) return;
+
+    const newApis = [...externalApis];
+    const temp = newApis[index];
+    newApis[index] = newApis[targetIndex];
+    newApis[targetIndex] = temp;
+
+    setExternalApis(newApis);
+
+    try {
+      await fetchApi("/admin/external-shorteners/reorder", {
+        method: "POST",
+        body: JSON.stringify({ shorteners: newApis })
+      });
+      loadAdminData();
+    } catch (err) {
+      alert("Failed to update shortener sequence ranking.");
+      loadAdminData();
     }
   };
 
@@ -1900,162 +1943,265 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
 
         {/* TAB WORKSPACE: EXTERNAL ADLINKFLY APIS */}
         {activeTab === "external" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8" id="admin_external">
-            {/* Left Column: API Registration Form */}
-            <div className="lg:col-span-5 bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4">
-              <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-2 flex items-center gap-1.5">
-                <Cpu className="w-5 h-5 text-indigo-400" />
-                {editingApiId ? "Edit AdLinkFly API" : "Integrate AdLinkFly API"}
-              </h3>
-              
-              <form onSubmit={handleSaveApi} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Shortener Name / Brand</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="e.g. ShrinkMe.io"
-                    value={apiName}
-                    onChange={(e) => setApiName(e.target.value)}
-                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
-                  />
+          <div className="space-y-6" id="admin_external">
+            {/* Round-Robin & Ranking Explanation Banner */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 p-5 rounded-2xl border border-indigo-500/20 shadow-lg">
+              <div className="flex items-start gap-3.5">
+                <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400 shrink-0 mt-0.5">
+                  <HelpCircle className="w-5 h-5" />
                 </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">API Base URL</label>
-                  <input
-                    required
-                    type="url"
-                    placeholder="https://arolinks.com/"
-                    value={apiUrl}
-                    onChange={(e) => setApiUrl(e.target.value)}
-                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white font-mono text-xs"
-                  />
-                  <p className="text-[10px] text-slate-500 font-medium mt-1">Please enter the shortener's base domain ending with a slash (e.g., <code>https://arolinks.com/</code>).</p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Developer API Secret Token</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="0123456789abcdef0123456789abcdef..."
-                    value={apiToken}
-                    onChange={(e) => setApiToken(e.target.value)}
-                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white font-mono text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Round-Robin Selection Weight</label>
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={apiPriority}
-                    onChange={(e) => setApiPriority(e.target.value)}
-                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white font-bold"
-                  />
-                </div>
-
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/60">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isFaucetApi}
-                      onChange={(e) => setIsFaucetApi(e.target.checked)}
-                      className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-4 focus:ring-indigo-500/20 w-4 h-4"
-                    />
-                    <span className="text-xs font-bold text-slate-300 uppercase">Faucet-specific API</span>
-                  </label>
-                  <p className="text-[10px] text-slate-500 leading-normal mt-1">
-                    Check this if you want this API to be used <strong>ONLY for users who have enabled Faucet Mode</strong>.
+                <div className="space-y-1.5 text-xs text-slate-300 leading-relaxed">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    What is Round-Robin Selection Weight & Rank Sequence?
+                  </h4>
+                  <p>
+                    <strong>Round-Robin Selection Weight (Priority)</strong> determines how link shortenings are routed across your external URL shorteners (e.g. ShrinkMe, AroLinks, AdFly). Shorteners with a higher weight number are selected first for syndication.
+                  </p>
+                  <p>
+                    <strong>Rank Sequence Order:</strong> The shorteners are called in the exact order shown in the table below (Rank #1, Rank #2, etc.). You can use the <strong>Move Up (▲)</strong> and <strong>Move Down (▼)</strong> buttons to rank your shorteners in your preferred sequence. If a primary shortener API fails or times out, the system automatically falls back to the next shortener in order!
                   </p>
                 </div>
-
-                <div className="p-3.5 bg-indigo-950/20 border border-indigo-900/30 rounded-xl text-[11px] text-indigo-300 leading-normal font-medium">
-                  💡 <span className="font-bold">Syndication Loop:</span> When users shorten links on TG Links, our system will automatically call these external platforms' API to request shortcodes. Visitors are routed directly or sequentially, allowing you to pool CPM payouts from multiple third-party accounts simultaneously!
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    className="flex-grow py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl transition shadow-lg"
-                  >
-                    {editingApiId ? "Save Connection Settings" : "Establish API Connection"}
-                  </button>
-                  {editingApiId && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingApiId(null);
-                        setApiName("");
-                        setApiUrl("");
-                        setApiToken("");
-                        setApiPriority("0");
-                        setIsFaucetApi(false);
-                      }}
-                      className="px-4 py-3 bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-sm rounded-xl transition"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              </form>
+              </div>
             </div>
 
-            {/* Right Column: Registered Connections List */}
-            <div className="lg:col-span-7 bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4">
-              <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-2">Active AdLinkFly Network APIs</h3>
-              
-              {externalApis.length === 0 ? (
-                <div className="py-12 text-center text-slate-500 text-sm">
-                  No external shorteners connected. Add connection in left panel!
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* Left Column: API Registration / Edit Form */}
+              <div className="lg:col-span-5 bg-slate-900/40 p-6 rounded-2xl border border-slate-800/80 space-y-4">
+                <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-3 flex items-center gap-2">
+                  <Cpu className="w-5 h-5 text-indigo-400" />
+                  {editingApiId ? "Edit Shortener API Details" : "Integrate External Shortener API"}
+                </h3>
+                
+                <form onSubmit={handleSaveApi} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Shortener Name / Brand</label>
+                    <input
+                      required
+                      type="text"
+                      placeholder="e.g. ShrinkMe.io"
+                      value={apiName}
+                      onChange={(e) => setApiName(e.target.value)}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">API Base URL</label>
+                    <input
+                      required
+                      type="url"
+                      placeholder="https://arolinks.com/"
+                      value={apiUrl}
+                      onChange={(e) => setApiUrl(e.target.value)}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white font-mono text-xs"
+                    />
+                    <p className="text-[10px] text-slate-500 font-medium mt-1">Please enter the shortener's base domain (e.g., <code>https://arolinks.com/</code>).</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Developer API Secret Token</label>
+                    <input
+                      required
+                      type="text"
+                      placeholder="0123456789abcdef0123456789abcdef..."
+                      value={apiToken}
+                      onChange={(e) => setApiToken(e.target.value)}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white font-mono text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Selection Weight / Priority Number</label>
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={apiPriority}
+                      onChange={(e) => setApiPriority(e.target.value)}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white font-bold"
+                    />
+                    <p className="text-[10px] text-slate-500 font-medium mt-1">Higher weight = Higher selection priority. Default is 0.</p>
+                  </div>
+
+                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/60 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isFaucetApi}
+                        onChange={(e) => setIsFaucetApi(e.target.checked)}
+                        className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-4 focus:ring-indigo-500/20 w-4 h-4"
+                      />
+                      <span className="text-xs font-bold text-slate-300 uppercase">Faucet-specific API</span>
+                    </label>
+                    <p className="text-[10px] text-slate-500 leading-normal">
+                      Check this if you want this API to be used <strong>ONLY for users who have enabled Faucet Mode</strong>.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 bg-indigo-950/20 border border-indigo-900/30 rounded-xl text-[11px] text-indigo-300 leading-normal font-medium">
+                    💡 <span className="font-bold">Syndication Loop:</span> When users shorten links on TG Links, our system will automatically call these external platforms' API to request shortcodes. Visitors are routed directly or sequentially!
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="submit"
+                      className="flex-grow py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl transition shadow-lg"
+                    >
+                      {editingApiId ? "Save Shortener Changes" : "Establish API Connection"}
+                    </button>
+                    {editingApiId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingApiId(null);
+                          setApiName("");
+                          setApiUrl("");
+                          setApiToken("");
+                          setApiPriority("0");
+                          setIsFaucetApi(false);
+                        }}
+                        className="px-4 py-3 bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-sm rounded-xl transition"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+
+              {/* Right Column: Registered Connections List & Rank Reordering */}
+              <div className="lg:col-span-7 bg-slate-900/40 p-6 rounded-2xl border border-slate-800/80 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                    <span>Ranked Shortener API Network</span>
+                    <span className="text-xs font-semibold px-2 py-0.5 bg-indigo-950 border border-indigo-800 text-indigo-400 rounded-full">
+                      {externalApis.length} Active
+                    </span>
+                  </h3>
+                  <span className="text-[11px] text-slate-500 font-medium">Use ▲ ▼ buttons to set ranking order</span>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {externalApis.map((api) => (
-                    <div key={api.id} className="p-4 rounded-xl border border-slate-800/80 bg-slate-950/60 flex items-center justify-between gap-4">
-                      <div className="overflow-hidden">
-                        <span className="font-bold text-white block">{api.name}</span>
-                        <span className="font-mono text-[10px] text-slate-500 truncate block mt-0.5">{api.apiUrl}</span>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className="text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-bold px-1.5 py-0.5 rounded">
-                            Weight: {api.priority || 0}
-                          </span>
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${api.enabled ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"}`}>
-                            {api.enabled ? "ACTIVE" : "DISABLED"}
-                          </span>
-                          {api.isFaucetApi && (
-                            <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold px-1.5 py-0.5 rounded">
-                              FAUCET ONLY
+                
+                {externalApis.length === 0 ? (
+                  <div className="py-12 text-center text-slate-500 text-sm bg-slate-950/40 rounded-xl border border-slate-800/50">
+                    No external shorteners connected. Add connection in left panel!
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {externalApis.map((api, index) => (
+                      <div 
+                        key={api.id} 
+                        className={`p-4 rounded-xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                          editingApiId === api.id 
+                            ? "bg-indigo-950/40 border-indigo-500/50 shadow-lg shadow-indigo-950/30" 
+                            : api.enabled 
+                              ? "bg-slate-950/70 border-slate-800/80" 
+                              : "bg-slate-950/30 border-slate-800/40 opacity-75"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3.5 overflow-hidden">
+                          {/* Rank Badge & Order Controls */}
+                          <div className="flex flex-col items-center justify-center shrink-0 bg-slate-900 border border-slate-800 p-1.5 rounded-lg">
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-tight">
+                              Rank
                             </span>
-                          )}
+                            <span className="text-base font-black text-white leading-none my-0.5">
+                              #{index + 1}
+                            </span>
+                            <div className="flex gap-1 mt-1">
+                              <button
+                                type="button"
+                                disabled={index === 0}
+                                onClick={() => handleMoveApi(index, "up")}
+                                className="p-1 bg-slate-800 hover:bg-indigo-600 disabled:opacity-30 disabled:hover:bg-slate-800 text-slate-300 hover:text-white rounded transition"
+                                title="Move Up in Rank Sequence"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={index === externalApis.length - 1}
+                                onClick={() => handleMoveApi(index, "down")}
+                                className="p-1 bg-slate-800 hover:bg-indigo-600 disabled:opacity-30 disabled:hover:bg-slate-800 text-slate-300 hover:text-white rounded transition"
+                                title="Move Down in Rank Sequence"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Api Details */}
+                          <div className="overflow-hidden space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white text-sm">{api.name}</span>
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                                api.enabled 
+                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" 
+                                  : "bg-rose-500/10 border-rose-500/30 text-rose-400"
+                              }`}>
+                                {api.enabled ? "ENABLED" : "DISABLED"}
+                              </span>
+                            </div>
+
+                            <span className="font-mono text-[11px] text-slate-400 truncate block">
+                              {api.apiUrl}
+                            </span>
+
+                            <div className="flex items-center gap-2 pt-0.5">
+                              <span className="text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 font-bold px-2 py-0.5 rounded">
+                                Weight: {api.priority || 0}
+                              </span>
+                              {api.isFaucetApi && (
+                                <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold px-2 py-0.5 rounded">
+                                  FAUCET ONLY
+                                </span>
+                              )}
+                              <span className="text-[10px] font-mono text-slate-500 truncate max-w-[120px]">
+                                Token: {api.apiToken ? `${api.apiToken.substring(0, 6)}...` : "None"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Control Buttons */}
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleApi(api)}
+                            className={`p-2 rounded-xl border text-xs font-bold transition flex items-center gap-1 ${
+                              api.enabled 
+                                ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-400 hover:bg-emerald-900/50" 
+                                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                            }`}
+                            title={api.enabled ? "Disable this shortener" : "Enable this shortener"}
+                          >
+                            {api.enabled ? <ToggleRight className="w-5 h-5 text-emerald-400" /> : <ToggleLeft className="w-5 h-5 text-slate-500" />}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditApi(api)}
+                            className="p-2.5 bg-slate-900 hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/30 text-slate-300 hover:text-indigo-400 rounded-xl shadow-xs transition flex items-center gap-1.5 text-xs font-bold"
+                            title="Edit shortener details"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+                          
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteApi(api.id)}
+                            className="p-2.5 bg-slate-900 hover:bg-rose-500/10 border border-slate-800 hover:border-rose-500/20 text-slate-400 hover:text-rose-400 rounded-xl shadow-xs transition"
+                            title="Remove integration"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleStartEditApi(api)}
-                          className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white rounded-lg shadow-xs transition"
-                          title="Edit settings"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        
-                        <button
-                          onClick={() => handleDeleteApi(api.id)}
-                          className="p-2 bg-slate-900 hover:bg-rose-500/10 border border-slate-800 hover:border-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg shadow-xs transition"
-                          title="Remove integration"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
