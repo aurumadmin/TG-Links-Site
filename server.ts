@@ -163,8 +163,8 @@ function getCurrentCpmForLink(link: any, db: any): number {
   return db.settings.globalCpm;
 }
 
-// Helper to syndicate a link with an external AdLinkFly shortener API dynamically
-async function getExternalShortenedUrl(originalUrl: string, db: any, user?: any): Promise<{ id: string; url: string } | null> {
+// Helper to syndicate a link with external AdLinkFly shortener APIs dynamically
+async function getExternalShortenedUrl(finalDestinationUrl: string, db: any, user?: any): Promise<{ id: string; url: string } | null> {
   const isFaucetUser = user?.enableFaucetMode === true;
   const enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
     if (!api.enabled) return false;
@@ -174,7 +174,7 @@ async function getExternalShortenedUrl(originalUrl: string, db: any, user?: any)
   });
   if (enabledApis.length === 0) return null;
 
-  // Sort by priority descending (highest priority first). If equal, maintain the exact sequence order set in admin panel
+  // Sort by priority descending (highest priority / top rank first). If equal, maintain set order
   const sortedApis = [...enabledApis].sort((a: any, b: any) => {
     const pA = Number(a.priority || 0);
     const pB = Number(b.priority || 0);
@@ -191,7 +191,14 @@ async function getExternalShortenedUrl(originalUrl: string, db: any, user?: any)
         return (f as any)(...args);
       };
 
-  for (const selectedApi of sortedApis) {
+  // Chain shorteners starting from the last rank towards the first rank so visitor completes Rank 1 -> Rank 2 -> ... -> finalDestination
+  let currentTargetUrl = finalDestinationUrl;
+  let lastSuccessfulApiId = "";
+  let hasChainedAny = false;
+
+  const reversedApis = [...sortedApis].reverse();
+
+  for (const selectedApi of reversedApis) {
     try {
       let cleanApiUrl = selectedApi.apiUrl.trim();
       if (!cleanApiUrl.startsWith("http://") && !cleanApiUrl.startsWith("https://")) {
@@ -203,7 +210,7 @@ async function getExternalShortenedUrl(originalUrl: string, db: any, user?: any)
       if (!cleanApiUrl.includes("/api") && !cleanApiUrl.endsWith("/api")) {
         cleanApiUrl += "/api";
       }
-      const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(originalUrl)}`;
+      const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(currentTargetUrl)}`;
 
       // Use AbortController for a standard 8 seconds timeout
       const controller = new AbortController();
@@ -231,9 +238,11 @@ async function getExternalShortenedUrl(originalUrl: string, db: any, user?: any)
       }
 
       if (shortenedUrl) {
-        return { id: selectedApi.id, url: shortenedUrl };
+        currentTargetUrl = shortenedUrl;
+        lastSuccessfulApiId = selectedApi.id;
+        hasChainedAny = true;
       } else {
-        console.warn(`External shortener API ${selectedApi.name} returned an unrecognized or empty response:`, text);
+        console.warn(`External shortener API ${selectedApi.name} returned an empty/unrecognized response:`, text);
       }
     } catch (err: any) {
       if (err.name === "AbortError") {
@@ -242,6 +251,10 @@ async function getExternalShortenedUrl(originalUrl: string, db: any, user?: any)
         console.error(`Failed to syndicate with external shortener API ${selectedApi.name}:`, err);
       }
     }
+  }
+
+  if (hasChainedAny) {
+    return { id: lastSuccessfulApiId, url: currentTargetUrl };
   }
   return null;
 }
@@ -1498,50 +1511,15 @@ function setupRoutes() {
       });
     }
 
-    const hasPaidClickInLast24h = db.clicksLog.some(
-      (c: any) => {
-        let loggedIp = c.ip;
-        if (typeof loggedIp === "string" && loggedIp.includes(",")) {
-          loggedIp = loggedIp.split(",")[0].trim();
-        }
-        return loggedIp === ip && c.timestamp > twentyFourHoursAgo && c.earning > 0;
-      }
-    );
-
-    const currentCpm = getCurrentCpmForLink(link, db);
-    const earningAmount = hasPaidClickInLast24h ? 0 : (currentCpm / 1000);
-
-    // Save click log
-    const clickId = "c-" + Math.random().toString(36).substring(2, 9);
-    const click: ClickLog = {
-      id: clickId,
-      linkId: link.id,
-      userId: link.userId,
-      timestamp: new Date().toISOString(),
-      ip: String(ip),
-      earning: earningAmount,
-      country: "Global"
-    };
-    db.clicksLog.push(click);
-
-    // Update Link stats
-    link.clicks += 1;
-    link.earnings += earningAmount;
-
-    // Update User Wallet balance & earnings
     const user = link.userId !== "guest" ? db.users.find((u: any) => u.id === link.userId) : null;
-    if (user && !user.banned) {
-      user.balance = Number((user.balance + earningAmount).toFixed(6));
-      user.totalEarned = Number((user.totalEarned + earningAmount).toFixed(6));
-    }
+    const protocol = getRequestProtocol(req);
+    const host = getRequestHost(req);
+    const finalLandingUrl = `${protocol}://${host}/go-final/${link.code}`;
 
-    // Dynamically retrieve the external shortened URL at click time if not set but external APIs are active
+    // Dynamically retrieve the external shortened URL(s)
     let adFlyShortenedUrl = link.adFlyShortenedUrl;
     if (!adFlyShortenedUrl) {
-      const protocol = getRequestProtocol(req);
-      const host = getRequestHost(req);
-      const intermediateUrl = `${protocol}://${host}/go-final/${link.code}`;
-      const external = await getExternalShortenedUrl(intermediateUrl, db, user);
+      const external = await getExternalShortenedUrl(finalLandingUrl, db, user);
       if (external) {
         adFlyShortenedUrl = external.url;
         link.adFlyShortenedUrl = external.url;
@@ -1551,11 +1529,13 @@ function setupRoutes() {
 
     saveDb(db);
 
+    const targetUrl = adFlyShortenedUrl || finalLandingUrl;
+
     res.json({ 
       success: true, 
+      targetUrl: targetUrl,
       originalUrl: link.originalUrl,
-      adFlyShortenedUrl: adFlyShortenedUrl,
-      payoutCredited: earningAmount > 0 
+      adFlyShortenedUrl: adFlyShortenedUrl
     });
   });
 
@@ -1719,7 +1699,53 @@ function setupRoutes() {
     }
 
     res.setHeader("Referrer-Policy", "no-referrer");
-    res.redirect(targetUrl);
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="referrer" content="no-referrer">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>View Completed - Redirecting...</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { background-color: #020617; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+          .card { background: #0f172a; border: 1px solid #1e293b; padding: 40px; border-radius: 24px; max-width: 480px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
+          .icon-wrap { width: 72px; height: 72px; margin: 0 auto 20px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); color: #10b981; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: bold; }
+          h2 { color: #f8fafc; font-size: 22px; font-weight: 800; margin: 0 0 10px; }
+          p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin: 0 0 24px; }
+          .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 15px 24px; background: #6366f1; color: white; border-radius: 14px; text-decoration: none; font-weight: bold; font-size: 15px; transition: all 0.2s; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4); }
+          .btn:hover { background-color: #4f46e5; transform: translateY(-1px); }
+          .badge { display: inline-block; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); color: #a5b4fc; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
+        </style>
+        <script>
+          let seconds = 2;
+          function tick() {
+            seconds--;
+            if (seconds <= 0) {
+              window.location.replace("${targetUrl.replace(/"/g, '&quot;').trim()}");
+            } else {
+              const el = document.getElementById('timer');
+              if (el) el.innerText = seconds;
+              setTimeout(tick, 1000);
+            }
+          }
+          setTimeout(tick, 1000);
+        </script>
+      </head>
+      <body>
+        <div class="card">
+          <div class="badge">1 View Successfully Completed</div>
+          <div class="icon-wrap">✓</div>
+          <h2>Shorteners Fully Completed!</h2>
+          <p>Your visit has been verified and recorded. Redirecting to your destination in <span id="timer" style="color: #6366f1; font-weight: bold;">2</span> seconds...</p>
+          <a href="${targetUrl.replace(/"/g, '&quot;')}" rel="noreferrer" class="btn">
+            Continue to Destination →
+          </a>
+        </div>
+      </body>
+      </html>
+    `);
   });
 
   // --- USER DASHBOARD STATS ---

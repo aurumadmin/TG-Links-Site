@@ -581,7 +581,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           return;
         }
 
-        const targetUrl = clickRes.adFlyShortenedUrl || linkData?.adFlyShortenedUrl || clickRes.originalUrl || linkData?.originalUrl;
+        const targetUrl = clickRes.targetUrl || clickRes.adFlyShortenedUrl || linkData?.adFlyShortenedUrl || clickRes.originalUrl || linkData?.originalUrl;
         if (!targetUrl) {
           setFaucetLimitDetected(true);
           setRedirecting(false);
