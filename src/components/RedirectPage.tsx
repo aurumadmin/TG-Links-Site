@@ -160,6 +160,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [checkingSecurity, setCheckingSecurity] = useState(true);
   const [adBlockerDetected, setAdBlockerDetected] = useState(false);
   const [vpsDetected, setVpsDetected] = useState(false);
+  const [faucetLimitDetected, setFaucetLimitDetected] = useState(false);
   const [vpsDetails, setVpsDetails] = useState<any>(null);
 
   // High Security Ad Blocker Detection
@@ -325,6 +326,10 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         const res = await fetchApi(`/links/resolve/${code}`);
         if (!active) return;
 
+        if (res.faucetLimitReached) {
+          setFaucetLimitDetected(true);
+        }
+
         setLinkData(res.link);
         setSettings(res.settings);
         setLoading(false);
@@ -346,7 +351,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         });
 
         // Fast immediate redirection if own ads are disabled AND no security locks triggered
-        if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult.isVpnOrProxy) {
+        if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult.isVpnOrProxy && !res.faucetLimitReached) {
           setRedirecting(true);
           if (res.link?.adFlyShortenedUrl) {
             redirectWithoutReferrer(res.link.adFlyShortenedUrl, res.settings?.enableThunderRedirect);
@@ -356,9 +361,15 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                 method: "POST",
                 body: JSON.stringify({ code })
               });
-              redirectWithoutReferrer(clickRes.originalUrl, res.settings?.enableThunderRedirect);
+              if (clickRes.faucetLimitReached) {
+                setFaucetLimitDetected(true);
+                setRedirecting(false);
+              } else {
+                redirectWithoutReferrer(clickRes.adFlyShortenedUrl || clickRes.originalUrl, res.settings?.enableThunderRedirect);
+              }
             } catch {
-              redirectWithoutReferrer(res.link.originalUrl, res.settings?.enableThunderRedirect);
+              setFaucetLimitDetected(true);
+              setRedirecting(false);
             }
           }
         }
@@ -509,6 +520,10 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   };
 
   const handleNextStep = async () => {
+    if (faucetLimitDetected) {
+      return;
+    }
+
     const isOfferWallEnabled = settings?.enableOfferWall && currentStep === 1;
     const totalOffersCount = settings?.offerWallCount === undefined ? 4 : settings.offerWallCount;
     const allOffersCompleted = Array.from({ length: totalOffersCount }).every((_, idx) => offerCompleted[idx]);
@@ -550,19 +565,32 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       });
     } else {
       // Final step: Get Link!
+      if (faucetLimitDetected) return;
+
       setRedirecting(true);
-      if (linkData?.adFlyShortenedUrl) {
-        redirectWithoutReferrer(linkData.adFlyShortenedUrl, settings?.enableThunderRedirect);
-      } else {
-        try {
-          const res = await fetchApi("/links/click", {
-            method: "POST",
-            body: JSON.stringify({ code })
-          });
-          redirectWithoutReferrer(res.originalUrl, settings?.enableThunderRedirect);
-        } catch (err) {
-          redirectWithoutReferrer(linkData.originalUrl, settings?.enableThunderRedirect);
+      try {
+        const clickRes = await fetchApi("/links/click", {
+          method: "POST",
+          body: JSON.stringify({ code })
+        });
+
+        if (clickRes.faucetLimitReached) {
+          setFaucetLimitDetected(true);
+          setRedirecting(false);
+          return;
         }
+
+        const targetUrl = clickRes.adFlyShortenedUrl || linkData?.adFlyShortenedUrl || clickRes.originalUrl || linkData?.originalUrl;
+        if (!targetUrl) {
+          setFaucetLimitDetected(true);
+          setRedirecting(false);
+          return;
+        }
+
+        redirectWithoutReferrer(targetUrl, settings?.enableThunderRedirect);
+      } catch (err: any) {
+        setFaucetLimitDetected(true);
+        setRedirecting(false);
       }
     }
   };
@@ -570,11 +598,62 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   if (loading || checkingSecurity) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
-        <img src="/logo.svg" alt="TG Links Logo" className="w-16 h-16 object-contain rounded-2xl mb-4 shadow-lg shadow-indigo-500/10 animate-pulse" referrerPolicy="no-referrer" />
+        <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-16 h-16 object-contain rounded-2xl mb-4 shadow-lg shadow-indigo-500/10 animate-pulse" referrerPolicy="no-referrer" />
         <h2 className="text-xl font-bold">TG Links Security Gateway...</h2>
         <p className="text-xs text-slate-400 mt-1 max-w-sm">
           Securing destination endpoint parameters, performing IP integrity sweeps, and checking browser security parameters. Please wait.
         </p>
+      </div>
+    );
+  }
+
+  if (faucetLimitDetected) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="p-4 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 mb-6">
+          <ShieldAlert className="w-16 h-16" />
+        </div>
+        <h2 className="text-3xl font-black text-white tracking-tight">Faucet Mode Daily Limit Reached</h2>
+        <p className="text-sm text-slate-400 max-w-md mt-3 leading-relaxed">
+          Your IP address has already completed a shortener link on our network in the last 24 hours. Because this link is in <span className="text-amber-400 font-bold">Faucet Mode</span>, completions are restricted to 1 per IP address per day.
+        </p>
+
+        <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 max-w-md w-full mt-6 text-left space-y-3.5 font-sans text-xs shadow-xl">
+          <h3 className="font-bold text-white text-xs uppercase tracking-wider text-center border-b border-slate-800 pb-2">Why was access blocked?</h3>
+          
+          <div className="flex items-start gap-2.5 text-slate-300 leading-relaxed pt-1">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <span>Integrated shortener APIs and advertiser networks only count <strong>1 view per IP per 24 hours</strong>.</span>
+          </div>
+
+          <p className="text-slate-400 text-[11px] leading-relaxed">
+            To protect advertiser view accuracy and shortener account safety, additional completions and access to destination links are disabled for repeat visits within 24 hours.
+          </p>
+
+          <div className="pt-3 border-t border-slate-800/80 flex justify-between items-center text-[11px] font-mono">
+            <span className="text-slate-500">Your IP Address:</span>
+            <span className="text-amber-400 font-bold select-all">{vpsDetails?.ip || "Detected"}</span>
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-500 mt-6 max-w-sm">
+          Please wait 24 hours before completing another faucet shortener link from this IP address.
+        </p>
+
+        <div className="flex gap-4 mt-8">
+          <button
+            onClick={() => { window.location.reload(); }}
+            className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-amber-900/30 transition cursor-pointer"
+          >
+            Check Status Again
+          </button>
+          <button
+            onClick={() => { window.location.href = "/"; }}
+            className="px-6 py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-bold text-sm rounded-xl transition cursor-pointer"
+          >
+            Go to Homepage
+          </button>
+        </div>
       </div>
     );
   }
@@ -722,7 +801,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             {/* Redirection Header / Stepper */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
               <div className="flex items-center gap-3">
-                <img src="/logo.svg" alt="TG Links Logo" className="w-12 h-12 object-contain rounded-xl shadow-lg" referrerPolicy="no-referrer" />
+                <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-12 h-12 object-contain rounded-xl shadow-lg" referrerPolicy="no-referrer" />
                 <div>
                   <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest bg-indigo-950/40 border border-indigo-900/50 px-2.5 py-1 rounded-full">
                     Step {currentStep} of {settings?.adPagesCount || 1} Redirection Gates
@@ -1088,8 +1167,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       </div>
 
       {/* Footer copyright */}
-      <footer className="bg-slate-950 text-slate-600 text-center py-6 border-t border-slate-900 text-xs">
-        © 2026 {settings?.siteName || "TG Links"} Security Redirection Gateway. All rights reserved.
+      <footer className="bg-slate-950 text-slate-500 text-center py-6 border-t border-slate-900 text-xs flex flex-col items-center justify-center gap-2">
+        <div>© 2026 {settings?.siteName || "TG Links"} Security Redirection Gateway. All rights reserved.</div>
+        <div className="text-[11px] font-semibold text-slate-300 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800/80">
+          Proudly Made with 💝 in India
+        </div>
       </footer>
     </div>
   );

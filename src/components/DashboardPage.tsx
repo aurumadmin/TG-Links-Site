@@ -5,7 +5,8 @@ import {
   Link, 
   Withdrawal, 
   DashboardStats, 
-  SystemSettings 
+  SystemSettings,
+  SupportTicket
 } from "../types";
 import { 
   LayoutDashboard, 
@@ -101,6 +102,18 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
   const [supportMessage, setSupportMessage] = useState("");
   const [supportSuccess, setSupportSuccess] = useState("");
   const [supportLoading, setSupportLoading] = useState(false);
+  const [userTickets, setUserTickets] = useState<SupportTicket[]>([]);
+
+  const loadUserTickets = async () => {
+    try {
+      const res = await fetchApi(`/tickets/user/${user.id}`);
+      if (res.tickets) {
+        setUserTickets(res.tickets);
+      }
+    } catch (err) {
+      console.error("Failed to load user support tickets:", err);
+    }
+  };
 
   // QR Code generator state
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -181,6 +194,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
 
   useEffect(() => {
     loadDashboardData();
+    loadUserTickets();
   }, [user.id]);
 
   const handleShorten = async (e: React.FormEvent) => {
@@ -355,17 +369,29 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
 
   const handleSupportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supportSubject || !supportMessage) return;
     setSupportLoading(true);
     setSupportSuccess("");
     try {
-      // Simulate sending a support ticket beautifully
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      setSupportSuccess("Support inquiry submitted successfully! Our help desk will review your request and reply via email within 12-24 hours.");
-      setSupportSubject("");
-      setSupportMessage("");
-    } catch (err) {
+      const res = await fetchApi("/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: user.id,
+          subject: supportSubject,
+          message: supportMessage
+        })
+      });
+      if (res.success) {
+        setSupportSuccess("Support ticket created and saved! An email alert has been sent via SMTP to our support team.");
+        setSupportSubject("");
+        setSupportMessage("");
+        loadUserTickets();
+      } else {
+        alert(res.error || "Failed to submit support request.");
+      }
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to submit support request. Please try again.");
+      alert(err.message || "Failed to submit support request. Please try again.");
     } finally {
       setSupportLoading(false);
     }
@@ -385,7 +411,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
       {/* Mobile Top Header Navigation */}
       <header className="flex md:hidden items-center justify-between bg-slate-900 border-b border-slate-800/80 px-5 py-4 sticky top-0 z-40 w-full" id="mobile_dashboard_header">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => onNavigate("home")}>
-          <img src="/logo.svg" alt="TG Links Logo" className="w-8 h-8 object-contain rounded-lg" referrerPolicy="no-referrer" />
+          <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-8 h-8 object-contain rounded-lg" referrerPolicy="no-referrer" />
           <div className="flex items-center gap-1">
             <span className="text-2xl font-black text-white tracking-tight">TG</span>
             <span className="text-2xl font-black text-indigo-500 tracking-tight">LINKS</span>
@@ -419,7 +445,7 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
         {/* Sidebar Header */}
         <div className="p-6 border-b border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => onNavigate("home")}>
-            <img src="/logo.svg" alt="TG Links Logo" className="w-10 h-10 object-contain rounded-xl" referrerPolicy="no-referrer" />
+            <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-10 h-10 object-contain rounded-xl" referrerPolicy="no-referrer" />
             <div className="flex flex-col">
               <div className="flex items-center gap-1 leading-none">
                 <span className="text-xl font-black text-white tracking-tight">TG</span>
@@ -1550,11 +1576,78 @@ if( $result ) {
               <button
                 type="submit"
                 disabled={supportLoading}
-                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 text-white font-bold text-sm rounded-xl transition shadow-lg shadow-indigo-600/10 flex items-center gap-2"
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 text-white font-bold text-sm rounded-xl transition shadow-lg shadow-indigo-600/10 flex items-center gap-2 cursor-pointer"
               >
                 {supportLoading ? "Sending inquiry..." : "Submit Support Ticket"}
               </button>
             </form>
+
+            {/* YOUR TICKETS HISTORY */}
+            <div className="mt-10 pt-8 border-t border-slate-800/80">
+              <h4 className="text-base font-bold text-white mb-4 flex items-center gap-2">
+                <span>📋 Your Support Ticket History</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-normal">
+                  {userTickets.length}
+                </span>
+              </h4>
+
+              {userTickets.length === 0 ? (
+                <div className="p-6 bg-slate-950/50 border border-slate-800/50 rounded-xl text-center text-slate-500 text-xs">
+                  No support tickets submitted yet. Any tickets you submit will appear here with live resolution status.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {userTickets.map((t) => (
+                    <div key={t.id} className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-indigo-400 font-bold">{t.id}</span>
+                          <span className="text-xs font-bold text-white">{t.subject}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500">
+                            {new Date(t.createdAt).toLocaleDateString()} {new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {t.status === "open" && (
+                            <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-full">
+                              Open
+                            </span>
+                          )}
+                          {t.status === "replied" && (
+                            <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full">
+                              Replied
+                            </span>
+                          )}
+                          {t.status === "closed" && (
+                            <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase bg-slate-800 text-slate-400 rounded-full">
+                              Closed
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-900/60 p-3 rounded-lg border border-slate-850">
+                        {t.message}
+                      </div>
+
+                      {t.adminReply && (
+                        <div className="p-3 bg-indigo-950/30 border border-indigo-900/40 rounded-lg space-y-1">
+                          <div className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <span>💬 Admin Response</span>
+                            <span className="text-[9px] font-normal text-slate-500">
+                              ({new Date(t.updatedAt).toLocaleDateString()})
+                            </span>
+                          </div>
+                          <p className="text-xs text-indigo-200 leading-relaxed whitespace-pre-wrap">
+                            {t.adminReply}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>

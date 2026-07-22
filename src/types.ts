@@ -133,3 +133,15 @@ export interface DashboardStats {
     cpm: number;
   }[];
 }
+
+export interface SupportTicket {
+  id: string;
+  userId: string;
+  userEmail: string;
+  subject: string;
+  message: string;
+  status: 'open' | 'replied' | 'closed';
+  createdAt: string;
+  updatedAt: string;
+  adminReply?: string;
+}

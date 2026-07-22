@@ -26,6 +26,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
     totalUsers: 0,
     globalCpm: 5.0
   });
+  const [siteSettings, setSiteSettings] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("home"); // home, rates, contact, privacy, dmca, terms
 
   useEffect(() => {
@@ -40,6 +41,11 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
         });
       })
       .catch((err) => console.error("Error loading public stats:", err));
+
+    // Load public site settings (logo, siteName)
+    fetchApi("/settings")
+      .then((res) => setSiteSettings(res))
+      .catch((err) => console.error("Error loading public settings:", err));
   }, []);
 
   const handleShorten = async (e: React.FormEvent) => {
@@ -85,7 +91,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab("home")} id="landing_logo">
-            <img src="/logo.svg" alt="TG Links Logo" className="w-10 h-10 object-contain rounded-xl" referrerPolicy="no-referrer" />
+            <img src={siteSettings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-10 h-10 object-contain rounded-xl" referrerPolicy="no-referrer" />
             <div className="flex flex-col">
               <div className="flex items-center gap-1 leading-none">
                 <span className="text-2xl font-black tracking-tight text-indigo-400">TG</span>
@@ -591,11 +597,14 @@ export default function LandingPage({ onNavigate, user, onOpenAuth }: LandingPag
       <footer className="bg-slate-950 text-slate-400 py-12 border-t border-slate-900" id="landing_footer">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6 text-sm">
           <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="TG Links Logo" className="w-8 h-8 object-contain rounded-lg" referrerPolicy="no-referrer" />
+            <img src={siteSettings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-8 h-8 object-contain rounded-lg" referrerPolicy="no-referrer" />
             <div className="flex flex-col">
               <span className="font-extrabold text-white text-sm">TG Links</span>
               <span className="text-[10px] text-slate-500 mt-0.5">© 2026 TG Links Inc. All rights reserved.</span>
             </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 bg-slate-900/80 px-3.5 py-1.5 rounded-full border border-slate-800/80 shadow-inner">
+            <span>Proudly Made with 💝 in India</span>
           </div>
         </div>
       </footer>

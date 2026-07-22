@@ -15,6 +15,13 @@ export default function AuthPage({ onAuthSuccess, onClose }: AuthPageProps) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+  const [settings, setSettings] = useState<any>(null);
+
+  React.useEffect(() => {
+    fetchApi("/settings")
+      .then((res) => setSettings(res))
+      .catch((err) => console.error("Error loading settings:", err));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +73,7 @@ export default function AuthPage({ onAuthSuccess, onClose }: AuthPageProps) {
 
           {/* Site branding */}
           <div className="flex flex-col items-center mb-6">
-            <img src="/logo.svg" alt="TG Links Logo" className="w-16 h-16 object-contain rounded-2xl mb-3 shadow-lg shadow-indigo-500/10" referrerPolicy="no-referrer" />
+            <img src={settings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-16 h-16 object-contain rounded-2xl mb-3 shadow-lg shadow-indigo-500/10" referrerPolicy="no-referrer" />
             <div className="flex items-center gap-1 leading-none">
               <span className="text-3xl font-black text-white tracking-tight">TG</span>
               <span className="text-3xl font-black text-emerald-400 tracking-tight">LINKS</span>

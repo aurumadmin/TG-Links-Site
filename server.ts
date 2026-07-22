@@ -667,6 +667,14 @@ function loadDb() {
     db.withdrawals = db.withdrawals.filter(Boolean);
     if (db.withdrawals.length !== originalLength) changed = true;
   }
+  if (!db.tickets) {
+    db.tickets = [];
+    changed = true;
+  } else {
+    const originalLength = db.tickets.length;
+    db.tickets = db.tickets.filter(Boolean);
+    if (db.tickets.length !== originalLength) changed = true;
+  }
 
   if (db.settings) {
     if (db.settings.enableNeonAdGate === undefined) {
@@ -718,6 +726,58 @@ function saveDb(data: any) {
     syncPromise = syncPromise.then(() => saveDbToGoogleDrive(data)).catch((err) => {
       console.error("[TG Links] Background Google Drive sync failed:", err);
     });
+  }
+}
+
+// Helper to send general emails via SMTP
+async function sendSmtpEmail(options: { to?: string; subject: string; text: string; html?: string }): Promise<{ success: boolean; error?: string }> {
+  const db = loadDb();
+  const settings = db.settings || {};
+  const {
+    smtpHost,
+    smtpPort,
+    smtpSecure,
+    smtpUser,
+    smtpPass,
+    backupSenderEmail,
+    backupReceiverEmail
+  } = settings;
+
+  if (!smtpHost || !smtpPort || !smtpUser || !smtpPass) {
+    console.warn("[TG Links SMTP] Cannot send email: SMTP credentials are not configured in Admin Settings.");
+    return { success: false, error: "SMTP host, port, user or pass is not configured in admin settings." };
+  }
+
+  const sender = backupSenderEmail || smtpUser;
+  const recipient = options.to || backupReceiverEmail || ADMIN_EMAILS[0] || smtpUser;
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: Number(smtpPort),
+      secure: smtpSecure === true || smtpSecure === "true" || Number(smtpPort) === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass
+      },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000
+    });
+
+    const mailOptions = {
+      from: `"${settings.siteName || 'TG Links'} Support" <${sender}>`,
+      to: recipient,
+      subject: options.subject,
+      text: options.text,
+      html: options.html
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`[TG Links SMTP] Email sent successfully to ${recipient}`);
+    return { success: true };
+  } catch (err: any) {
+    console.error("[TG Links SMTP] Failed to send email:", err);
+    return { success: false, error: err.message || String(err) };
   }
 }
 
@@ -1274,6 +1334,10 @@ function setupRoutes() {
   
   app.get("/api/links/resolve/:code", (req, res) => {
     const { code } = req.params;
+    let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+    if (typeof ip === "string" && ip.includes(",")) {
+      ip = ip.split(",")[0].trim();
+    }
     const db = loadDb();
     const link = db.links.find((l: any) => l.code === code && l.status === "active");
 
@@ -1285,16 +1349,32 @@ function setupRoutes() {
       return res.status(410).json({ error: "This shortened link has expired and is no longer available." });
     }
 
+    const linkOwner = db.users.find((u: any) => u.id === link.userId);
+    const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const hasCompletedInLast24h = db.clicksLog.some((c: any) => {
+      let loggedIp = c.ip;
+      if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+        loggedIp = loggedIp.split(",")[0].trim();
+      }
+      return loggedIp === ip && c.timestamp > twentyFourHoursAgo;
+    });
+
+    const faucetLimitReached = isFaucetMode && hasCompletedInLast24h;
+
     // Include ad configs in resolution
     res.json({ 
       link: {
         code: link.code,
-        originalUrl: link.originalUrl,
-        adFlyShortenedUrl: link.adFlyShortenedUrl,
+        originalUrl: faucetLimitReached ? undefined : link.originalUrl,
+        adFlyShortenedUrl: faucetLimitReached ? undefined : link.adFlyShortenedUrl,
         adFlyShortenerId: link.adFlyShortenerId,
         cpm: getCurrentCpmForLink(link, db),
-        userId: link.userId
+        userId: link.userId,
+        isFaucetMode: isFaucetMode
       },
+      faucetLimitReached: faucetLimitReached,
       settings: {
         siteName: db.settings.siteName,
         enableOwnAds: db.settings.enableOwnAds,
@@ -1343,8 +1423,27 @@ function setupRoutes() {
       return res.status(410).json({ error: "This shortened link has expired and is no longer active." });
     }
 
-    // Check for IP click spam: 1 view reward per IP per day across the platform
+    const linkOwner = db.users.find((u: any) => u.id === link.userId);
+    const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
+
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const hasCompletedInLast24h = db.clicksLog.some(
+      (c: any) => {
+        let loggedIp = c.ip;
+        if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+          loggedIp = loggedIp.split(",")[0].trim();
+        }
+        return loggedIp === ip && c.timestamp > twentyFourHoursAgo;
+      }
+    );
+
+    if (isFaucetMode && hasCompletedInLast24h) {
+      return res.status(429).json({ 
+        error: "Faucet Mode Daily Limit Reached: Your IP address has already completed a shortener link in the last 24 hours.",
+        faucetLimitReached: true 
+      });
+    }
+
     const hasPaidClickInLast24h = db.clicksLog.some(
       (c: any) => {
         let loggedIp = c.ip;
@@ -1477,8 +1576,47 @@ function setupRoutes() {
       return res.status(410).send("This shortened link has expired and is no longer active.");
     }
 
-    // Check for IP click spam: 1 view reward per IP per day across the platform
+    const linkOwner = db.users.find((u: any) => u.id === link.userId);
+    const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
+
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const hasCompletedInLast24h = db.clicksLog.some(
+      (c: any) => {
+        let loggedIp = c.ip;
+        if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+          loggedIp = loggedIp.split(",")[0].trim();
+        }
+        return loggedIp === ip && c.timestamp > twentyFourHoursAgo;
+      }
+    );
+
+    if (isFaucetMode && hasCompletedInLast24h) {
+      return res.status(429).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>429 - Faucet Mode Daily Limit Reached</title>
+          <style>
+            body { background-color: #020617; color: #f8fafc; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+            .card { background: #0f172a; border: 1px solid #1e293b; padding: 32px; border-radius: 16px; max-width: 440px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
+            h2 { color: #f59e0b; margin-top: 0; }
+            p { color: #94a3b8; font-size: 14px; line-height: 1.6; }
+            .badge { background: #78350f33; border: 1px solid #b4530944; color: #fcd34d; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: bold; margin-top: 16px; display: inline-block; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>Faucet Mode Daily Limit Reached</h2>
+            <p>Your IP address has already completed a shortener link in the last 24 hours.</p>
+            <div class="badge">1 Completion Per IP / 24 Hours Enforced</div>
+            <p style="margin-top: 16px; font-size: 12px; color: #64748b;">In Faucet Mode, access to additional shortener links is blocked for 24 hours to ensure valid advertiser view counting.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
     const hasPaidClickInLast24h = db.clicksLog.some(
       (c: any) => {
         let loggedIp = c.ip;
@@ -1777,6 +1915,80 @@ function setupRoutes() {
     res.json({ success: true, user: userSafe });
   });
 
+  // --- SUPPORT TICKETS API ---
+  app.post("/api/tickets", async (req, res) => {
+    const { userId, subject, message } = req.body;
+    if (!userId || !subject || !message) {
+      return res.status(400).json({ error: "User ID, subject, and message are required" });
+    }
+
+    const db = loadDb();
+    const user = db.users.find((u: any) => u.id === userId && !u.banned);
+    if (!user) {
+      return res.status(404).json({ error: "User account not found" });
+    }
+
+    const ticket = {
+      id: "tkt-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2, 6),
+      userId: user.id,
+      userEmail: user.email,
+      subject: String(subject).trim(),
+      message: String(message).trim(),
+      status: "open", // 'open' | 'replied' | 'closed'
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      adminReply: ""
+    };
+
+    if (!db.tickets) db.tickets = [];
+    db.tickets.unshift(ticket);
+    saveDb(db);
+
+    // Send notification email via SMTP to admin
+    const adminEmail = db.settings?.backupReceiverEmail || db.settings?.smtpUser || ADMIN_EMAILS[0];
+    const emailSubject = `[TG Links Support Ticket] ${ticket.subject} (${user.email})`;
+    const emailText = `A new support ticket has been submitted on TG Links:\n\nUser Email: ${user.email}\nUser ID: ${user.id}\nTicket ID: ${ticket.id}\nSubmitted At: ${ticket.createdAt}\n\nSubject: ${ticket.subject}\n\nMessage:\n${ticket.message}\n\nPlease check the admin panel to reply.`;
+    
+    const emailHtml = `
+      <div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #4f46e5; margin-top: 0; font-size: 20px;">📬 New Support Ticket Submitted</h2>
+        <p style="font-size: 14px; color: #475569;">A user has submitted a support inquiry on <strong>${db.settings?.siteName || "TG Links"}</strong>:</p>
+        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin: 16px 0; border: 1px solid #e2e8f0;">
+          <p style="margin: 4px 0; font-size: 13px;"><strong>User Email:</strong> ${user.email}</p>
+          <p style="margin: 4px 0; font-size: 13px;"><strong>Ticket ID:</strong> <code>${ticket.id}</code></p>
+          <p style="margin: 4px 0; font-size: 13px;"><strong>Subject:</strong> ${ticket.subject}</p>
+          <p style="margin: 4px 0; font-size: 13px;"><strong>Date:</strong> ${new Date(ticket.createdAt).toLocaleString()}</p>
+        </div>
+        <div style="background: #eef2ff; border-left: 4px solid #6366f1; padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 14px; white-space: pre-wrap; color: #1e1b4b;">
+${ticket.message}
+        </div>
+        <p style="font-size: 12px; color: #64748b; margin-top: 24px;">Log in to your TG Links Admin Dashboard to review and respond to this ticket.</p>
+      </div>
+    `;
+
+    let emailSent = false;
+    let emailError = null;
+    const smtpResult = await sendSmtpEmail({
+      to: adminEmail,
+      subject: emailSubject,
+      text: emailText,
+      html: emailHtml
+    });
+    emailSent = smtpResult.success;
+    if (!smtpResult.success) {
+      emailError = smtpResult.error;
+    }
+
+    res.json({ success: true, ticket, emailSent, emailError });
+  });
+
+  app.get("/api/tickets/user/:userId", (req, res) => {
+    const { userId } = req.params;
+    const db = loadDb();
+    const userTickets = (db.tickets || []).filter((t: any) => t && t.userId === userId);
+    res.json({ tickets: userTickets });
+  });
+
   // --- ADMIN PANEL SECURE ROUTES ---
   
   // Guard middleware for Admin
@@ -1799,13 +2011,15 @@ function setupRoutes() {
     const pendingWithdrawal = db.withdrawals
       .filter((w: any) => w.status === "pending")
       .reduce((acc: number, w: any) => acc + w.amount, 0);
+    const openTickets = (db.tickets || []).filter((t: any) => t.status === "open").length;
 
     res.json({
       totalUsers,
       totalLinks,
       totalViews,
       systemEarnings: Number(systemEarnings.toFixed(4)),
-      pendingWithdrawal: Number(pendingWithdrawal.toFixed(2))
+      pendingWithdrawal: Number(pendingWithdrawal.toFixed(2)),
+      openTickets
     });
   });
 
@@ -1868,6 +2082,78 @@ function setupRoutes() {
   app.get("/api/admin/withdrawals", requireAdmin, (req, res) => {
     const db = loadDb();
     res.json({ withdrawals: db.withdrawals });
+  });
+
+  // --- ADMIN SUPPORT TICKETS ENDPOINTS ---
+  app.get("/api/admin/tickets", requireAdmin, (req, res) => {
+    const db = loadDb();
+    res.json({ tickets: db.tickets || [] });
+  });
+
+  app.post("/api/admin/tickets/:id/reply", requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { adminReply, status } = req.body;
+    const db = loadDb();
+
+    if (!db.tickets) db.tickets = [];
+    const ticket = db.tickets.find((t: any) => t.id === id);
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+    if (adminReply !== undefined) ticket.adminReply = String(adminReply).trim();
+    if (status) ticket.status = status; // 'open' | 'replied' | 'closed'
+    ticket.updatedAt = new Date().toISOString();
+
+    saveDb(db);
+
+    // Send email notification to user via SMTP if reply provided
+    let emailSent = false;
+    let emailError = null;
+
+    if (ticket.userEmail && adminReply) {
+      const emailSubject = `[TG Links Support] Reply to Ticket: ${ticket.subject}`;
+      const emailText = `Hello,\n\nOur support team has updated your ticket (${ticket.id}):\n\nSubject: ${ticket.subject}\nStatus: ${(ticket.status || "replied").toUpperCase()}\n\nAdmin Response:\n${ticket.adminReply}\n\nThank you for using TG Links!`;
+      const emailHtml = `
+        <div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: #4f46e5; margin-top: 0; font-size: 20px;">💬 Update on Your Support Ticket</h2>
+          <p style="font-size: 14px; color: #475569;">Hello! Our support team has responded to your ticket on <strong>${db.settings?.siteName || "TG Links"}</strong>:</p>
+          <div style="background: #f8fafc; padding: 12px 16px; border-radius: 8px; margin: 16px 0; border: 1px solid #e2e8f0; font-size: 13px;">
+            <p style="margin: 2px 0;"><strong>Ticket ID:</strong> <code>${ticket.id}</code></p>
+            <p style="margin: 2px 0;"><strong>Subject:</strong> ${ticket.subject}</p>
+            <p style="margin: 2px 0;"><strong>Status:</strong> <span style="font-weight: bold; color: #0284c7;">${(ticket.status || "replied").toUpperCase()}</span></p>
+          </div>
+          <div style="background: #f0fdf4; border-left: 4px solid #22c55e; padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 14px; white-space: pre-wrap; color: #14532d;">
+<strong>Support Response:</strong>
+${ticket.adminReply}
+          </div>
+          <p style="font-size: 12px; color: #64748b; margin-top: 24px;">You can also view and track your ticket status directly inside your user dashboard.</p>
+        </div>
+      `;
+
+      const smtpResult = await sendSmtpEmail({
+        to: ticket.userEmail,
+        subject: emailSubject,
+        text: emailText,
+        html: emailHtml
+      });
+      emailSent = smtpResult.success;
+      if (!smtpResult.success) {
+        emailError = smtpResult.error;
+      }
+    }
+
+    res.json({ success: true, ticket, emailSent, emailError });
+  });
+
+  app.delete("/api/admin/tickets/:id", requireAdmin, (req, res) => {
+    const { id } = req.params;
+    const db = loadDb();
+    if (!db.tickets) db.tickets = [];
+    const idx = db.tickets.findIndex((t: any) => t.id === id);
+    if (idx === -1) return res.status(404).json({ error: "Ticket not found" });
+
+    db.tickets.splice(idx, 1);
+    saveDb(db);
+    res.json({ success: true });
   });
 
   app.post("/api/admin/withdrawals/:id/status", requireAdmin, (req, res) => {

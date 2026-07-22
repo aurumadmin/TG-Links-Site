@@ -5,7 +5,8 @@ import {
   Link, 
   Withdrawal, 
   SystemSettings, 
-  AdFlyShortener 
+  AdFlyShortener,
+  SupportTicket 
 } from "../types";
 import { 
   ArrowLeft, 
@@ -31,7 +32,10 @@ import {
   Mail,
   Send,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  LifeBuoy,
+  MessageSquare,
+  Upload
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -40,15 +44,25 @@ interface AdminPageProps {
 }
 
 export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "links" | "withdrawals" | "settings" | "external">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external">("overview");
   
   // Data states
   const [adminStats, setAdminStats] = useState<any>(null);
   const [usersList, setUsersList] = useState<User[]>([]);
   const [linksList, setLinksList] = useState<Link[]>([]);
   const [withdrawalsList, setWithdrawalsList] = useState<Withdrawal[]>([]);
+  const [ticketsList, setTicketsList] = useState<SupportTicket[]>([]);
   const [sysSettings, setSysSettings] = useState<SystemSettings | null>(null);
   const [externalApis, setExternalApis] = useState<AdFlyShortener[]>([]);
+
+  // Ticket management state
+  const [ticketFilter, setTicketFilter] = useState<'all' | 'open' | 'replied' | 'closed'>('all');
+  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
+  const [adminReplyText, setAdminReplyText] = useState("");
+  const [replyingStatus, setReplyingStatus] = useState<'open' | 'replied' | 'closed'>('replied');
+  const [replyLoading, setReplyLoading] = useState(false);
+  const [replySuccess, setReplySuccess] = useState("");
+  const [replyError, setReplyError] = useState("");
 
   // User edit state
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -104,11 +118,12 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
 
   const loadAdminData = async () => {
     try {
-      const [stats, users, links, withdrawals, settings, apis] = await Promise.all([
+      const [stats, users, links, withdrawals, tickets, settings, apis] = await Promise.all([
         fetchApi("/admin/stats"),
         fetchApi("/admin/users"),
         fetchApi("/admin/links"),
         fetchApi("/admin/withdrawals"),
+        fetchApi("/admin/tickets"),
         fetchApi("/admin/settings"),
         fetchApi("/admin/external-shorteners")
       ]);
@@ -117,6 +132,9 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
       setUsersList(users.users);
       setLinksList(links.links);
       setWithdrawalsList(withdrawals.withdrawals);
+      if (tickets?.tickets) {
+        setTicketsList(tickets.tickets);
+      }
       setSysSettings(settings.settings);
       if (settings.gdrive) {
         setGdriveInfo(settings.gdrive);
@@ -124,6 +142,44 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
       setExternalApis(apis.shorteners);
     } catch (err) {
       console.error("Failed to load admin panel data:", err);
+    }
+  };
+
+  const handleSendAdminReply = async (ticketId: string) => {
+    if (!adminReplyText.trim()) return;
+    setReplyLoading(true);
+    setReplySuccess("");
+    setReplyError("");
+    try {
+      const res = await fetchApi(`/admin/tickets/${ticketId}/reply`, {
+        method: "POST",
+        body: JSON.stringify({
+          adminReply: adminReplyText,
+          status: replyingStatus
+        })
+      });
+      if (res.success) {
+        setReplySuccess(`Reply saved successfully! ${res.emailSent ? "Email notification sent to user via SMTP." : (res.emailError ? "Saved, but email send failed: " + res.emailError : "")}`);
+        loadAdminData();
+        if (res.ticket) setSelectedTicket(res.ticket);
+      } else {
+        setReplyError(res.error || "Failed to update ticket.");
+      }
+    } catch (err: any) {
+      setReplyError(err.message || "Failed to submit reply.");
+    } finally {
+      setReplyLoading(false);
+    }
+  };
+
+  const handleDeleteTicket = async (ticketId: string) => {
+    if (!confirm("Are you sure you want to delete this support ticket?")) return;
+    try {
+      await fetchApi(`/admin/tickets/${ticketId}`, { method: "DELETE" });
+      setSelectedTicket(null);
+      loadAdminData();
+    } catch (err) {
+      alert("Failed to delete ticket.");
     }
   };
 
@@ -294,7 +350,7 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
         {/* Sidebar Header */}
         <div className="p-6 border-b border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="TG Links Logo" className="w-9 h-9 object-contain rounded-xl" referrerPolicy="no-referrer" />
+            <img src={sysSettings?.logoUrl || "/logo.svg"} alt="TG Links Logo" className="w-9 h-9 object-contain rounded-xl" referrerPolicy="no-referrer" />
             <div className="flex flex-col">
               <div className="flex items-center gap-1 leading-none">
                 <span className="text-xl font-black text-indigo-500 tracking-tight">TG</span>
@@ -339,6 +395,21 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           >
             <DollarSign className="w-4 h-4" />
             Pending Withdrawals
+          </button>
+
+          <button
+            onClick={() => setActiveTab("tickets")}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "tickets" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
+          >
+            <LifeBuoy className="w-4 h-4" />
+            <div className="flex-grow text-left flex items-center justify-between">
+              <span>Support Tickets</span>
+              {ticketsList.filter(t => t.status === "open").length > 0 && (
+                <span className="px-2 py-0.5 text-[10px] font-extrabold bg-amber-500 text-slate-950 rounded-full animate-pulse">
+                  {ticketsList.filter(t => t.status === "open").length}
+                </span>
+              )}
+            </div>
           </button>
 
           <button
@@ -779,6 +850,204 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
           </div>
         )}
 
+        {/* TAB WORKSPACE: SUPPORT TICKETS */}
+        {activeTab === "tickets" && (
+          <div className="space-y-6" id="admin_tickets">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-2xl font-black text-white flex items-center gap-2">
+                  <LifeBuoy className="w-6 h-6 text-indigo-400" />
+                  <span>Support Tickets Desk</span>
+                </h1>
+                <p className="text-xs text-slate-400 mt-1">
+                  Manage user inquiries and send responses. Configured SMTP ({sysSettings?.smtpHost ? sysSettings.smtpHost : "Not set"}) will automatically send email notifications to users when you reply!
+                </p>
+              </div>
+
+              {/* Status Filter buttons */}
+              <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                {(['all', 'open', 'replied', 'closed'] as const).map(filter => (
+                  <button
+                    key={filter}
+                    onClick={() => setTicketFilter(filter)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition ${ticketFilter === filter ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    {filter} {filter === 'open' && `(${ticketsList.filter(t => t.status === 'open').length})`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* SMTP Alert Banner */}
+            {(!sysSettings?.smtpHost || !sysSettings?.smtpUser) && (
+              <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+                <div>
+                  <strong>SMTP Notice:</strong> You haven't completed SMTP server configuration in <span className="underline font-bold cursor-pointer text-amber-200" onClick={() => setActiveTab("settings")}>Ads & System Settings</span>. Support tickets are saved, but email alerts cannot be dispatched until SMTP host and credentials are standardly saved.
+                </div>
+              </div>
+            )}
+
+            {/* TICKETS LIST & DETAILED REPLY VIEW */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* TICKETS LIST COLUMN */}
+              <div className="lg:col-span-5 bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 pb-2 border-b border-slate-800 flex justify-between items-center">
+                  <span>User Tickets ({ticketsList.length})</span>
+                  <button onClick={loadAdminData} className="hover:text-white transition cursor-pointer" title="Refresh Tickets">
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </h3>
+
+                {ticketsList.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 text-xs">
+                    No support tickets found in system.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">
+                    {ticketsList
+                      .filter(t => ticketFilter === 'all' || t.status === ticketFilter)
+                      .map(t => (
+                        <div
+                          key={t.id}
+                          onClick={() => {
+                            setSelectedTicket(t);
+                            setAdminReplyText(t.adminReply || "");
+                            setReplyingStatus(t.status === "open" ? "replied" : t.status);
+                            setReplySuccess("");
+                            setReplyError("");
+                          }}
+                          className={`p-3.5 rounded-xl border transition cursor-pointer ${selectedTicket?.id === t.id ? 'bg-indigo-950/40 border-indigo-500/60 shadow-lg' : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'}`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <span className="font-mono text-[11px] font-bold text-indigo-400">{t.id}</span>
+                            {t.status === "open" && (
+                              <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full">
+                                Open
+                              </span>
+                            )}
+                            {t.status === "replied" && (
+                              <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full">
+                                Replied
+                              </span>
+                            )}
+                            {t.status === "closed" && (
+                              <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-slate-800 text-slate-400 rounded-full">
+                                Closed
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs font-bold text-white truncate">{t.subject}</div>
+                          <div className="text-[11px] text-slate-400 truncate mt-0.5">{t.userEmail}</div>
+                          <div className="text-[10px] text-slate-500 mt-2 flex justify-between items-center">
+                            <span>{new Date(t.createdAt).toLocaleDateString()}</span>
+                            <span>{new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              {/* TICKET DETAILS & ADMIN REPLY COLUMN */}
+              <div className="lg:col-span-7">
+                {selectedTicket ? (
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-5">
+                    <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-indigo-400">{selectedTicket.id}</span>
+                          <span className="text-xs text-slate-500">•</span>
+                          <span className="text-xs font-semibold text-slate-300">{new Date(selectedTicket.createdAt).toLocaleString()}</span>
+                        </div>
+                        <h2 className="text-lg font-bold text-white mt-1">{selectedTicket.subject}</h2>
+                        <div className="text-xs text-indigo-300 font-medium mt-0.5 flex items-center gap-1.5">
+                          <Mail className="w-3.5 h-3.5" />
+                          <span>From User: <strong>{selectedTicket.userEmail}</strong></span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleDeleteTicket(selectedTicket.id)}
+                        className="p-2 text-rose-400 hover:bg-rose-950/40 border border-rose-900/40 rounded-xl transition cursor-pointer"
+                        title="Delete Ticket"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Original User Message */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">User's Message</label>
+                      <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
+                        {selectedTicket.message}
+                      </div>
+                    </div>
+
+                    {/* Admin Response Form */}
+                    <div className="pt-2 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-[11px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>Admin Reply & Status Update</span>
+                        </label>
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-slate-400 font-semibold">Status:</span>
+                          <select
+                            value={replyingStatus}
+                            onChange={(e) => setReplyingStatus(e.target.value as any)}
+                            className="bg-slate-950 border border-slate-800 text-xs font-bold text-white rounded-lg px-2.5 py-1 outline-none"
+                          >
+                            <option value="open">Open</option>
+                            <option value="replied">Replied</option>
+                            <option value="closed">Closed</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <textarea
+                        rows={5}
+                        placeholder="Type your official reply to the publisher... (This response will be saved and sent directly to user's email via SMTP)"
+                        value={adminReplyText}
+                        onChange={(e) => setAdminReplyText(e.target.value)}
+                        className="w-full p-4 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-xs text-white placeholder-slate-600 leading-relaxed"
+                      />
+
+                      {replySuccess && (
+                        <div className="p-3 bg-emerald-950/50 border border-emerald-900/60 rounded-xl text-emerald-400 text-xs font-semibold leading-relaxed">
+                          🎉 {replySuccess}
+                        </div>
+                      )}
+
+                      {replyError && (
+                        <div className="p-3 bg-rose-950/50 border border-rose-900/60 rounded-xl text-rose-400 text-xs font-semibold leading-relaxed">
+                          ⚠️ {replyError}
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => handleSendAdminReply(selectedTicket.id)}
+                        disabled={replyLoading || !adminReplyText.trim()}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Send className="w-4 h-4" />
+                        {replyLoading ? "Saving & Sending Email..." : "Save Reply & Send Email via SMTP"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-900/30 border border-slate-800/80 rounded-2xl p-12 text-center text-slate-500 space-y-2">
+                    <LifeBuoy className="w-10 h-10 mx-auto text-slate-700" />
+                    <div className="text-sm font-bold text-slate-400">No Ticket Selected</div>
+                    <p className="text-xs text-slate-600">Select any support ticket from the list on the left to read full details and send an email response.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* TAB WORKSPACE: SYSTEM SETTINGS */}
         {activeTab === "settings" && sysSettings && (
           <form onSubmit={handleSaveSettings} className="space-y-8" id="admin_settings">
@@ -811,7 +1080,115 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
               </div>
             )}
 
-            {/* General Settings Section */}
+            {/* WEBSITE LOGO & BRANDING SECTION */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-indigo-400" />
+                  <h3 className="font-extrabold text-white text-base">Website Logo & Visual Branding</h3>
+                </div>
+                {sysSettings.logoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setSysSettings({ ...sysSettings, logoUrl: "" })}
+                    className="text-xs text-rose-400 hover:text-rose-300 font-semibold transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Reset to Default Logo
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Upload & URL Controls */}
+                <div className="lg:col-span-8 space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">
+                      Upload Custom Logo Image
+                    </label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl cursor-pointer transition flex items-center gap-2 shadow-md shadow-indigo-600/20">
+                        <Upload className="w-4 h-4" />
+                        <span>Choose Image File...</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 2 * 1024 * 1024) {
+                              alert("Please select an image smaller than 2MB.");
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const base64 = event.target?.result as string;
+                              if (base64) {
+                                setSysSettings({ ...sysSettings, logoUrl: base64 });
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                      <span className="text-xs text-slate-500">Supports PNG, JPG, SVG, WEBP (Max 2MB)</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">
+                      Or Direct Logo Image URL / Data Base64
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. https://example.com/logo.png or data:image/png;base64,..."
+                      value={sysSettings.logoUrl || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, logoUrl: e.target.value })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs text-white font-mono"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Leaving this empty will default to the standard site logo asset (<code className="text-indigo-400">/logo.svg</code>).
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">
+                      Website Favicon URL (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. https://example.com/favicon.ico"
+                      value={sysSettings.faviconUrl || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, faviconUrl: e.target.value })}
+                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs text-white font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Live Logo Preview Box */}
+                <div className="lg:col-span-4 bg-slate-950 p-4 border border-slate-800 rounded-xl space-y-3">
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">
+                    Live Header Logo Preview
+                  </label>
+                  <div className="p-4 bg-slate-900/90 rounded-lg border border-slate-800 flex flex-col items-center justify-center gap-2">
+                    <img
+                      src={sysSettings.logoUrl || "/logo.svg"}
+                      alt="Site Logo Preview"
+                      className="w-12 h-12 object-contain rounded-xl shadow-md border border-slate-700/50"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "/logo.svg";
+                      }}
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="text-center">
+                      <div className="text-sm font-black text-white">{sysSettings.siteName || "TG LINKS"}</div>
+                      <span className="text-[9px] text-indigo-400 uppercase font-extrabold tracking-wider">Active Logo</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
             <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4">
               <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-2">Global System Parameters</h3>
               
