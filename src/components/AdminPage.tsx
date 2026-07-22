@@ -54,6 +54,23 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
   const [ticketsList, setTicketsList] = useState<SupportTicket[]>([]);
   const [sysSettings, setSysSettings] = useState<SystemSettings | null>(null);
   const [externalApis, setExternalApis] = useState<AdFlyShortener[]>([]);
+  const [alsoSetFavicon, setAlsoSetFavicon] = useState(true);
+
+  // Dynamically update document favicon in head when settings change in Admin
+  useEffect(() => {
+    if (sysSettings?.faviconUrl || sysSettings?.logoUrl) {
+      const activeFavicon = sysSettings.faviconUrl || sysSettings.logoUrl;
+      if (activeFavicon) {
+        let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+        if (!link) {
+          link = document.createElement("link");
+          link.rel = "icon";
+          document.head.appendChild(link);
+        }
+        link.href = activeFavicon;
+      }
+    }
+  }, [sysSettings?.faviconUrl, sysSettings?.logoUrl]);
 
   // Ticket management state
   const [ticketFilter, setTicketFilter] = useState<'all' | 'open' | 'replied' | 'closed'>('all');
@@ -1130,9 +1147,18 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                             reader.onload = (event) => {
                               const base64 = event.target?.result as string;
                               if (!base64) return;
+                              
+                              const applyImage = (imgData: string) => {
+                                setSysSettings((prev) => prev ? {
+                                  ...prev,
+                                  logoUrl: imgData,
+                                  ...(alsoSetFavicon ? { faviconUrl: imgData } : {})
+                                } : prev);
+                              };
+
                               // SVG files or small images don't need canvas resizing
                               if (file.type === "image/svg+xml" || file.size < 50000) {
-                                setSysSettings({ ...sysSettings, logoUrl: base64 });
+                                applyImage(base64);
                                 return;
                               }
                               // Resize raster images via canvas
@@ -1158,9 +1184,9 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                                 if (ctx) {
                                   ctx.drawImage(img, 0, 0, width, height);
                                   const resizedBase64 = canvas.toDataURL("image/png");
-                                  setSysSettings({ ...sysSettings, logoUrl: resizedBase64 });
+                                  applyImage(resizedBase64);
                                 } else {
-                                  setSysSettings({ ...sysSettings, logoUrl: base64 });
+                                  applyImage(base64);
                                 }
                               };
                             };
@@ -1168,8 +1194,19 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                           }}
                         />
                       </label>
-                      <span className="text-xs text-slate-500">Supports PNG, JPG, SVG, WEBP (Max 2MB)</span>
+                      <span className="text-xs text-slate-500">Supports PNG, JPG, SVG, WEBP (Max 5MB)</span>
                     </div>
+
+                    {/* Auto-set favicon checkbox option */}
+                    <label className="flex items-center gap-2 mt-2.5 text-xs text-slate-300 font-medium cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={alsoSetFavicon}
+                        onChange={(e) => setAlsoSetFavicon(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/40 cursor-pointer"
+                      />
+                      <span>Also apply uploaded image / URL as website browser favicon</span>
+                    </label>
                   </div>
 
                   <div>
@@ -1180,7 +1217,14 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                       type="text"
                       placeholder="e.g. https://example.com/logo.png or data:image/png;base64,..."
                       value={sysSettings.logoUrl || ""}
-                      onChange={(e) => setSysSettings({ ...sysSettings, logoUrl: e.target.value })}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSysSettings({
+                          ...sysSettings,
+                          logoUrl: val,
+                          ...(alsoSetFavicon ? { faviconUrl: val } : {})
+                        });
+                      }}
                       className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs text-white font-mono"
                     />
                     <p className="text-[11px] text-slate-500 mt-1">
@@ -1189,12 +1233,25 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">
-                      Website Favicon URL (Optional)
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-400 uppercase">
+                        Website Favicon URL (Optional)
+                      </label>
+                      {sysSettings.logoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setSysSettings({ ...sysSettings, faviconUrl: sysSettings.logoUrl || "" })}
+                          className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-800/60 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                          title="Copy the current Website Logo URL to use as Favicon"
+                        >
+                          <Sparkles className="w-3 h-3 text-indigo-400" />
+                          Use Logo as Favicon
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="e.g. https://example.com/favicon.ico"
+                      placeholder="e.g. https://example.com/favicon.ico or leave empty to use logo"
                       value={sysSettings.faviconUrl || ""}
                       onChange={(e) => setSysSettings({ ...sysSettings, faviconUrl: e.target.value })}
                       className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs text-white font-mono"
@@ -1202,24 +1259,47 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                   </div>
                 </div>
 
-                {/* Live Logo Preview Box */}
-                <div className="lg:col-span-4 bg-slate-950 p-4 border border-slate-800 rounded-xl space-y-3">
+                {/* Live Logo & Favicon Preview Box */}
+                <div className="lg:col-span-4 bg-slate-950 p-4 border border-slate-800 rounded-xl space-y-4">
                   <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">
-                    Live Header Logo Preview
+                    Live Visual Branding Preview
                   </label>
-                  <div className="p-4 bg-slate-900/90 rounded-lg border border-slate-800 flex flex-col items-center justify-center gap-2">
+
+                  {/* Header Logo Preview */}
+                  <div className="p-3 bg-slate-900/90 rounded-lg border border-slate-800 flex flex-col items-center justify-center gap-1.5">
                     <img
                       src={sysSettings.logoUrl || "/logo.svg"}
                       alt="Site Logo Preview"
-                      className="w-12 h-12 object-contain rounded-xl shadow-md border border-slate-700/50"
+                      className="w-10 h-10 object-contain rounded-xl shadow-md border border-slate-700/50"
                       onError={(e) => {
                         (e.target as HTMLImageElement).src = "/logo.svg";
                       }}
                       referrerPolicy="no-referrer"
                     />
                     <div className="text-center">
-                      <div className="text-sm font-black text-white">{sysSettings.siteName || "TG LINKS"}</div>
-                      <span className="text-[9px] text-indigo-400 uppercase font-extrabold tracking-wider">Active Logo</span>
+                      <div className="text-xs font-black text-white">{sysSettings.siteName || "TG LINKS"}</div>
+                      <span className="text-[9px] text-indigo-400 uppercase font-extrabold tracking-wider">Header Logo</span>
+                    </div>
+                  </div>
+
+                  {/* Browser Tab / Favicon Preview */}
+                  <div className="p-2.5 bg-slate-900/90 rounded-lg border border-slate-800 space-y-1.5">
+                    <span className="text-[9px] text-slate-400 uppercase font-bold tracking-wider block text-center">
+                      Browser Tab Favicon Preview
+                    </span>
+                    <div className="bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 flex items-center gap-2 max-w-full">
+                      <img
+                        src={sysSettings.faviconUrl || sysSettings.logoUrl || "/favicon.svg"}
+                        alt="Favicon Preview"
+                        className="w-4 h-4 object-contain rounded-sm flex-shrink-0"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = "/logo.svg";
+                        }}
+                        referrerPolicy="no-referrer"
+                      />
+                      <span className="text-[11px] font-semibold text-slate-300 truncate">
+                        {sysSettings.siteTitle || sysSettings.siteName || "TG Links"}
+                      </span>
                     </div>
                   </div>
                 </div>

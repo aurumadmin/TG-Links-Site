@@ -13,8 +13,27 @@ export default function App() {
   const [shortCode, setShortCode] = useState<string>("");
   const [showAuth, setShowAuth] = useState(false);
 
-  // 1. Path routing check
+  // 1. Path routing check and site settings (favicon/title) load
   useEffect(() => {
+    fetchApi("/settings")
+      .then((res) => {
+        if (!res) return;
+        const iconUrl = res.faviconUrl || res.logoUrl;
+        if (iconUrl) {
+          let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+          if (!link) {
+            link = document.createElement("link");
+            link.rel = "icon";
+            document.head.appendChild(link);
+          }
+          link.href = iconUrl;
+        }
+        if (res.siteTitle || res.siteName) {
+          document.title = res.siteTitle || res.siteName || "TG Links";
+        }
+      })
+      .catch((err) => console.error("Error setting public site settings:", err));
+
     const path = window.location.pathname;
     // Format: /go/xyz123
     const goMatch = path.match(/^\/go\/([a-zA-Z0-9]+)$/);
