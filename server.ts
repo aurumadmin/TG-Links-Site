@@ -1016,9 +1016,20 @@ function setupRoutes() {
     res.json({ user });
   });
 
-  // --- DEVELOPER PROGRAMMATIC SHORTENING API (GET) ---
-  app.get("/api", async (req, res) => {
-    const { api, url, alias, format } = req.query;
+  // --- DEVELOPER PROGRAMMATIC SHORTENING API (GET & POST) ---
+  app.all(["/api", "/api/"], async (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+
+    const api = String(req.query.api || req.body?.api || req.query.api_token || req.body?.api_token || "").trim();
+    const url = String(req.query.url || req.body?.url || "").trim();
+    const alias = String(req.query.alias || req.body?.alias || "").trim();
+    const format = String(req.query.format || req.body?.format || "json").toLowerCase().trim();
 
     if (!api) {
       if (format === "text") return res.status(400).send("");
@@ -1041,25 +1052,24 @@ function setupRoutes() {
       return res.status(401).json({ status: "error", message: "Invalid or inactive API token" });
     }
 
-    const originalUrl = String(url);
+    const originalUrl = url;
 
     // Generate unique short code
     let code = "";
     const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let isUnique = false;
 
-    const aliasStr = alias ? String(alias).trim() : "";
-    if (aliasStr) {
-      if (aliasStr.length < 3) {
+    if (alias) {
+      if (alias.length < 3) {
         if (format === "text") return res.status(400).send("");
         return res.status(400).json({ status: "error", message: "Custom alias must be at least 3 characters" });
       }
-      const alreadyExists = db.links.some((l: any) => l.code.toLowerCase() === aliasStr.toLowerCase());
+      const alreadyExists = db.links.some((l: any) => l.code.toLowerCase() === alias.toLowerCase());
       if (alreadyExists) {
         if (format === "text") return res.status(400).send("");
         return res.status(400).json({ status: "error", message: "Custom alias already exists" });
       }
-      code = aliasStr;
+      code = alias;
     } else {
       while (!isUnique) {
         code = "";
@@ -1108,15 +1118,11 @@ function setupRoutes() {
 
     const shortenedUrl = `${protocol}://${host}/go/${code}`;
 
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-
     if (format === "text") {
       return res.send(shortenedUrl);
     }
 
-    // Default response is JSON (matching AroLinks and other shortener APIs)
+    // Standard AdLinkFly API JSON Response
     return res.json({
       status: "success",
       shortenedUrl: shortenedUrl
