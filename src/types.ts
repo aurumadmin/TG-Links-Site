@@ -32,6 +32,8 @@ export interface Link {
   adFlyShortenerId?: string; // If delegated to external AdLinkFly API
   adFlyShortenedUrl?: string; // The URL returned by AdLinkFly API
   expiresAt?: string; // Optional link expiration ISO date string
+  isApiGenerated?: boolean; // Tag for links generated via Developer API
+  lastViewedAt?: string; // ISO date string of last view/click
 }
 
 export interface AdFlyShortener {

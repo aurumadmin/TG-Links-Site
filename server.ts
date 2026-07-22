@@ -709,8 +709,48 @@ function loadDb() {
       console.error("[TG Links] Failed to update database on disk:", err);
     }
   }
+
+  // Auto-cleanup API generated links with no new views in 3 days
+  if (cleanupInactiveApiLinks(db)) {
+    saveDb(db);
+  }
+
   cachedDbInMemory = db;
   return db;
+}
+
+function cleanupInactiveApiLinks(db: any): boolean {
+  if (!db || !Array.isArray(db.links)) return false;
+  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000; // 3 days in ms
+  const now = Date.now();
+  let changed = false;
+
+  const initialCount = db.links.length;
+  db.links = db.links.filter((link: any) => {
+    // Only check links generated programmatically via Developer API
+    if (!link || !link.isApiGenerated) {
+      return true;
+    }
+
+    const lastActivityStr = link.lastViewedAt || link.createdAt;
+    if (!lastActivityStr) return true;
+
+    const activityTime = new Date(lastActivityStr).getTime();
+    if (isNaN(activityTime)) return true;
+
+    // Auto delete if no new views/clicks in 3 days
+    if (now - activityTime > THREE_DAYS_MS) {
+      changed = true;
+      return false;
+    }
+    return true;
+  });
+
+  if (changed) {
+    console.log(`[Auto Cleanup] Successfully deleted ${initialCount - db.links.length} API-generated links with no new views in 3 days.`);
+  }
+
+  return changed;
 }
 
 function saveDb(data: any) {
@@ -1159,6 +1199,7 @@ function setupRoutes() {
       adFlyShortenedUrl = external.url;
     }
 
+    const nowIso = new Date().toISOString();
     const newLink: Link = {
       id: "l-" + Math.random().toString(36).substring(2, 9),
       code,
@@ -1168,7 +1209,9 @@ function setupRoutes() {
       cpm: linkCpm,
       clicks: 0,
       earnings: 0.0,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      lastViewedAt: nowIso,
+      isApiGenerated: true,
       status: "active",
       adFlyShortenerId,
       adFlyShortenedUrl
@@ -1276,6 +1319,7 @@ function setupRoutes() {
       adFlyShortenedUrl = external.url;
     }
 
+    const nowIso = new Date().toISOString();
     const newLink: Link = {
       id: "l-" + Math.random().toString(36).substring(2, 9),
       code,
@@ -1285,7 +1329,9 @@ function setupRoutes() {
       cpm: linkCpm,
       clicks: 0,
       earnings: 0.0,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      lastViewedAt: nowIso,
+      isApiGenerated: false,
       status: "active",
       adFlyShortenerId,
       adFlyShortenedUrl,
@@ -1349,6 +1395,10 @@ function setupRoutes() {
     if (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now()) {
       return res.status(410).json({ error: "This shortened link has expired and is no longer available." });
     }
+
+    // Refresh lastViewedAt timestamp whenever link is resolved
+    link.lastViewedAt = new Date().toISOString();
+    saveDb(db);
 
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
     const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
@@ -1415,6 +1465,9 @@ function setupRoutes() {
 
     const link = db.links.find((l: any) => l.code === code);
     if (!link) return res.status(404).json({ error: "Link not found" });
+
+    // Refresh lastViewedAt timestamp on click
+    link.lastViewedAt = new Date().toISOString();
 
     if (link.status === "suspended") {
       return res.status(403).json({ error: "Link has been suspended" });

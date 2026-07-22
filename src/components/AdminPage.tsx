@@ -735,6 +735,11 @@ export default function AdminPage({ onBackToDashboard }: AdminPageProps) {
                         <span className="text-[10px] text-slate-500 block font-mono" title={link.originalUrl}>
                           Origin: {link.originalUrl}
                         </span>
+                        {link.isApiGenerated && (
+                          <span className="inline-flex px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[9px] text-amber-400 font-extrabold mt-1 mr-1" title="API Generated URL: Auto-deleted after 3 days with no new views">
+                            ⚡ API URL (Auto-deletes after 3d idle)
+                          </span>
+                        )}
                         {link.adFlyShortenedUrl && (
                           <span className="inline-flex px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[9px] text-indigo-300 font-bold mt-1 max-w-full truncate" title={link.adFlyShortenedUrl}>
                             🔀 Syndicated: {link.adFlyShortenedUrl}

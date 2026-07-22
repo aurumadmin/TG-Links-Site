@@ -1033,6 +1033,14 @@ export default function DashboardPage({ user, onLogout, onNavigate }: DashboardP
                             <span className="text-[10px] text-slate-500 font-medium block">
                               Created on: {new Date(link.createdAt).toLocaleString()}
                             </span>
+                            {link.isApiGenerated && (
+                              <span
+                                className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                                title="API Generated Link: Auto-deleted if no new views/clicks occur within 3 days"
+                              >
+                                ⚡ API Link (Auto-deletes after 3d no views)
+                              </span>
+                            )}
                             {link.expiresAt && (
                               <span className={`text-[10px] font-semibold block mt-0.5 ${new Date(link.expiresAt).getTime() < Date.now() ? "text-rose-400" : "text-amber-400"}`}>
                                 {new Date(link.expiresAt).getTime() < Date.now() ? "Expired on: " : "Expires: "}
