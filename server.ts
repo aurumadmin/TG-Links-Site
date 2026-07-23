@@ -2558,6 +2558,96 @@ ${ticket.adminReply}
     }
   });
 
+  app.get("/api/admin/export-db", requireAdmin, (req, res) => {
+    const db = loadDb();
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename=tglinks_database_${Date.now()}.json`);
+    res.json(db);
+  });
+
+  app.post("/api/admin/restore-db", requireAdmin, (req, res) => {
+    try {
+      const { fileData, fileName, jsonText } = req.body || {};
+      let rawString = "";
+
+      if (jsonText && typeof jsonText === "string" && jsonText.trim()) {
+        rawString = jsonText.trim();
+      } else if (fileData && typeof fileData === "string") {
+        let base64Content = fileData;
+        if (base64Content.includes(";base64,")) {
+          base64Content = base64Content.split(";base64,")[1];
+        }
+        const buffer = Buffer.from(base64Content, "base64");
+
+        // Check if file is gzip compressed (.json.gz or gzip magic bytes 0x1f 0x8b)
+        let isGzip = (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b);
+        if (fileName && fileName.endsWith(".gz")) {
+          isGzip = true;
+        }
+
+        if (isGzip) {
+          try {
+            rawString = zlib.gunzipSync(buffer).toString("utf-8");
+          } catch (gzErr) {
+            console.warn("[Restore DB] Gunzip failed, trying raw UTF-8 string:", gzErr);
+            rawString = buffer.toString("utf-8");
+          }
+        } else {
+          rawString = buffer.toString("utf-8");
+        }
+      } else {
+        return res.status(400).json({ error: "No backup file data or JSON string provided." });
+      }
+
+      if (!rawString) {
+        return res.status(400).json({ error: "Extracted database backup content is empty." });
+      }
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(rawString);
+      } catch (parseErr: any) {
+        return res.status(400).json({ error: "Invalid JSON format: " + parseErr.message });
+      }
+
+      if (typeof parsed !== "object" || parsed === null) {
+        return res.status(400).json({ error: "Invalid database structure: expected a JSON object." });
+      }
+
+      // Repair/ensure key fields exist so nothing crashes
+      if (!Array.isArray(parsed.users)) parsed.users = [];
+      if (!Array.isArray(parsed.links)) parsed.links = [];
+      if (!Array.isArray(parsed.clicksLog)) parsed.clicksLog = [];
+      if (!Array.isArray(parsed.withdrawals)) parsed.withdrawals = [];
+      if (!Array.isArray(parsed.tickets)) parsed.tickets = [];
+      if (!Array.isArray(parsed.adFlyShorteners)) parsed.adFlyShorteners = [];
+      if (typeof parsed.settings !== "object" || !parsed.settings) parsed.settings = {};
+      if (parsed.deletedLinksCount === undefined) parsed.deletedLinksCount = 0;
+
+      // Save database to memory and disk
+      saveDb(parsed);
+
+      const usersCount = parsed.users.length;
+      const linksCount = parsed.links.length;
+      const clicksCount = parsed.clicksLog.length;
+
+      console.log(`[Restore DB] Successfully restored database! Users: ${usersCount}, Links: ${linksCount}, Clicks: ${clicksCount}`);
+
+      return res.json({
+        success: true,
+        message: `Database restored successfully! Re-loaded ${usersCount} users, ${linksCount} links, and ${clicksCount} click logs.`,
+        summary: {
+          usersCount,
+          linksCount,
+          clicksCount
+        }
+      });
+    } catch (err: any) {
+      console.error("[Restore DB] Error restoring database:", err);
+      return res.status(500).json({ error: err.message || "Failed to restore database backup." });
+    }
+  });
+
   // --- EXTERNAL ADLINKFLY SHORTENERS ENDPOINTS ---
   
   app.get("/api/admin/external-shorteners", requireAdmin, (req, res) => {
