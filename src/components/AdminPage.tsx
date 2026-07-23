@@ -38,18 +38,27 @@ import {
   Upload,
   ArrowUp,
   ArrowDown,
-  HelpCircle
+  HelpCircle,
+  BarChart3,
+  Eye,
+  Calendar,
+  Search,
+  FileText,
+  Globe,
+  Filter,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings } from "./SiteLogo";
 
 interface AdminPageProps {
-  initialTab?: "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external";
+  initialTab?: "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views";
   onBackToDashboard: () => void;
 }
 
 export default function AdminPage({ initialTab, onBackToDashboard }: AdminPageProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external">(initialTab || "overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views">(initialTab || "overview");
   
   // Data states
   const [adminStats, setAdminStats] = useState<any>(null);
@@ -61,13 +70,19 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [externalApis, setExternalApis] = useState<AdFlyShortener[]>([]);
   const [alsoSetFavicon, setAlsoSetFavicon] = useState(true);
 
+  // Views Analytics & Reports state
+  const [viewsReportData, setViewsReportData] = useState<any>(null);
+  const [viewsSubTab, setViewsSubTab] = useState<"users" | "daily" | "monthly" | "logs">("users");
+  const [viewSearchQuery, setViewSearchQuery] = useState("");
+  const [selectedUserReportModal, setSelectedUserReportModal] = useState<any>(null);
+
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
     }
   }, [initialTab]);
 
-  const changeTab = (tab: "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external", path: string) => {
+  const changeTab = (tab: "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views", path: string) => {
     setActiveTab(tab);
     if (window.location.pathname !== path) {
       window.history.pushState({}, "", path);
@@ -153,14 +168,15 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
 
   const loadAdminData = async () => {
     try {
-      const [stats, users, links, withdrawals, tickets, settings, apis] = await Promise.all([
+      const [stats, users, links, withdrawals, tickets, settings, apis, viewsReport] = await Promise.all([
         fetchApi("/admin/stats"),
         fetchApi("/admin/users"),
         fetchApi("/admin/links"),
         fetchApi("/admin/withdrawals"),
         fetchApi("/admin/tickets"),
         fetchApi("/admin/settings"),
-        fetchApi("/admin/external-shorteners")
+        fetchApi("/admin/external-shorteners"),
+        fetchApi("/admin/views-report")
       ]);
 
       setAdminStats(stats);
@@ -175,6 +191,9 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         setGdriveInfo(settings.gdrive);
       }
       setExternalApis(apis.shorteners);
+      if (viewsReport) {
+        setViewsReportData(viewsReport);
+      }
     } catch (err) {
       console.error("Failed to load admin panel data:", err);
     }
@@ -501,6 +520,14 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
           >
             <Cpu className="w-4 h-4" />
             AdLinkFly External APIs
+          </button>
+
+          <button
+            onClick={() => changeTab("views", "/admin/views")}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "views" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
+          >
+            <BarChart3 className="w-4 h-4 text-emerald-400" />
+            <span>All User Views Analytics</span>
           </button>
 
           <div className="pt-4 mt-4 border-t border-slate-800/80">
@@ -2201,6 +2228,562 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB WORKSPACE: VIEWS ANALYTICS (ALL USERS) */}
+        {activeTab === "views" && (
+          <div className="space-y-8" id="admin_views_analytics">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
+                  <BarChart3 className="w-8 h-8 text-emerald-400" />
+                  All User Views Analytics & Reports
+                </h1>
+                <p className="text-xs text-slate-400 mt-1">
+                  Comprehensive daily and monthly view analytics across all users and individual publisher view logs.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadAdminData}
+                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4 text-indigo-400" />
+                  <span>Refresh Data</span>
+                </button>
+              </div>
+            </div>
+
+            {/* TOP METRIC CARDS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/80 flex items-center gap-4 shadow-sm">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <TrendingUp className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Views (All Time)</p>
+                  <h3 className="text-2xl font-black text-white mt-0.5">{viewsReportData?.totalViews || adminStats?.totalViews || 0}</h3>
+                  <p className="text-[11px] text-emerald-400/90 font-semibold mt-0.5">Recorded across all users</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/80 flex items-center gap-4 shadow-sm">
+                <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                  <Calendar className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Today's System Views</p>
+                  <h3 className="text-2xl font-black text-white mt-0.5">{viewsReportData?.todayViews || 0}</h3>
+                  <p className="text-[11px] text-indigo-400/90 font-semibold mt-0.5">Logged today</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/80 flex items-center gap-4 shadow-sm">
+                <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center">
+                  <BarChart3 className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">This Month's Views</p>
+                  <h3 className="text-2xl font-black text-white mt-0.5">{viewsReportData?.monthViews || 0}</h3>
+                  <p className="text-[11px] text-purple-400/90 font-semibold mt-0.5">Logged this calendar month</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/80 flex items-center gap-4 shadow-sm">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <Users className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Publishers</p>
+                  <h3 className="text-2xl font-black text-white mt-0.5">{viewsReportData?.userBreakdown?.length || 0}</h3>
+                  <p className="text-[11px] text-amber-400/90 font-semibold mt-0.5">Users with recorded views</p>
+                </div>
+              </div>
+            </div>
+
+            {/* SUB TAB CONTROLS */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-slate-900/60 p-2 rounded-2xl border border-slate-800">
+              <div className="flex items-center gap-1.5 overflow-x-auto p-1">
+                <button
+                  onClick={() => setViewsSubTab("users")}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 whitespace-nowrap ${
+                    viewsSubTab === "users"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>User Views Breakdown ({viewsReportData?.userBreakdown?.length || 0})</span>
+                </button>
+
+                <button
+                  onClick={() => setViewsSubTab("daily")}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 whitespace-nowrap ${
+                    viewsSubTab === "daily"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>System Daily Views Report</span>
+                </button>
+
+                <button
+                  onClick={() => setViewsSubTab("monthly")}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 whitespace-nowrap ${
+                    viewsSubTab === "monthly"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                  <span>System Monthly Views Report</span>
+                </button>
+
+                <button
+                  onClick={() => setViewsSubTab("logs")}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 whitespace-nowrap ${
+                    viewsSubTab === "logs"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Live Click Logs</span>
+                </button>
+              </div>
+
+              {viewsSubTab === "users" && (
+                <div className="relative min-w-[240px] px-2 sm:px-0">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={viewSearchQuery}
+                    onChange={(e) => setViewSearchQuery(e.target.value)}
+                    placeholder="Search publisher username/email..."
+                    className="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* SUB-VIEW 1: USER BREAKDOWN TABLE */}
+            {viewsSubTab === "users" && (
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+                <div className="p-6 border-b border-slate-800/60 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                      <Users className="w-4 h-4 text-indigo-400" />
+                      All Publisher Users View Breakdown
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      View total, daily, and monthly views and earnings received by each registered publisher account.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase tracking-wider border-b border-slate-800/60">
+                        <th className="py-4 px-6">Publisher Account</th>
+                        <th className="py-4 px-6 text-center">Today's Views</th>
+                        <th className="py-4 px-6 text-center">Month's Views</th>
+                        <th className="py-4 px-6 text-center">Total Views</th>
+                        <th className="py-4 px-6 text-right">Total Earnings</th>
+                        <th className="py-4 px-6 text-right">Avg CPM</th>
+                        <th className="py-4 px-6 text-center">Detailed Reports</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {viewsReportData?.userBreakdown
+                        ?.filter((u: any) => {
+                          if (!viewSearchQuery) return true;
+                          const q = viewSearchQuery.toLowerCase();
+                          return (
+                            (u.username && u.username.toLowerCase().includes(q)) ||
+                            (u.email && u.email.toLowerCase().includes(q)) ||
+                            (u.userId && u.userId.toLowerCase().includes(q)) ||
+                            (u.name && u.name.toLowerCase().includes(q))
+                          );
+                        })
+                        .map((u: any) => (
+                          <tr key={u.userId} className="hover:bg-slate-800/30 transition">
+                            <td className="py-4 px-6">
+                              <div className="font-extrabold text-white text-sm">{u.name || u.username}</div>
+                              <div className="text-slate-400 text-[11px] font-mono mt-0.5">{u.email || u.userId}</div>
+                            </td>
+
+                            <td className="py-4 px-6 text-center font-extrabold text-indigo-400 text-sm">
+                              {u.todayViews || 0}
+                            </td>
+
+                            <td className="py-4 px-6 text-center font-extrabold text-purple-400 text-sm">
+                              {u.monthViews || 0}
+                            </td>
+
+                            <td className="py-4 px-6 text-center">
+                              <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-black text-sm">
+                                {u.totalViews || 0}
+                              </span>
+                            </td>
+
+                            <td className="py-4 px-6 text-right font-black text-emerald-400 text-sm">
+                              ${u.totalEarnings ? u.totalEarnings.toFixed(4) : "0.0000"}
+                            </td>
+
+                            <td className="py-4 px-6 text-right font-extrabold text-amber-400 text-xs">
+                              ${u.averageCpm ? u.averageCpm.toFixed(2) : "0.00"}
+                            </td>
+
+                            <td className="py-4 px-6 text-center">
+                              <button
+                                onClick={() => setSelectedUserReportModal(u)}
+                                className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 text-indigo-300 hover:text-white rounded-xl font-bold transition text-xs flex items-center gap-1.5 mx-auto"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Daily & Monthly Logs</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+
+                      {(!viewsReportData?.userBreakdown || viewsReportData?.userBreakdown?.length === 0) && (
+                        <tr>
+                          <td colSpan={7} className="text-center py-12 text-slate-500 italic">
+                            No publisher view activity recorded yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-VIEW 2: SYSTEM DAILY VIEWS REPORT */}
+            {viewsSubTab === "daily" && (
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+                <div className="p-6 border-b border-slate-800/60">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-emerald-400" />
+                    System Daily Views Report (All Users)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Day-by-day views count and total earnings generated across all publishers over the last 30 days.
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase tracking-wider border-b border-slate-800/60">
+                        <th className="py-4 px-6">Date</th>
+                        <th className="py-4 px-6 text-center">Total System Views</th>
+                        <th className="py-4 px-6 text-center">Active Viewing Publishers</th>
+                        <th className="py-4 px-6 text-right">System Earnings</th>
+                        <th className="py-4 px-6 text-right">Average CPM</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {viewsReportData?.dailyReports?.map((item: any) => (
+                        <tr key={item.date} className="hover:bg-slate-800/30 transition">
+                          <td className="py-4 px-6 font-extrabold text-white font-mono text-xs">
+                            {item.date}
+                          </td>
+
+                          <td className="py-4 px-6 text-center">
+                            <span className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-lg font-black text-sm">
+                              {item.views}
+                            </span>
+                          </td>
+
+                          <td className="py-4 px-6 text-center font-bold text-slate-300">
+                            {item.activeUsersCount || 0} users
+                          </td>
+
+                          <td className="py-4 px-6 text-right font-black text-emerald-400 text-sm">
+                            ${item.earnings ? item.earnings.toFixed(4) : "0.0000"}
+                          </td>
+
+                          <td className="py-4 px-6 text-right font-extrabold text-amber-400">
+                            ${item.cpm ? item.cpm.toFixed(2) : "0.00"}
+                          </td>
+                        </tr>
+                      ))}
+
+                      {(!viewsReportData?.dailyReports || viewsReportData?.dailyReports?.length === 0) && (
+                        <tr>
+                          <td colSpan={5} className="text-center py-12 text-slate-500 italic">
+                            No daily view records available yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-VIEW 3: SYSTEM MONTHLY VIEWS REPORT */}
+            {viewsSubTab === "monthly" && (
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+                <div className="p-6 border-b border-slate-800/60">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-purple-400" />
+                    System Monthly Views Report (All Users)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Month-by-month historical breakdown of total views, publisher earnings, and active accounts.
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase tracking-wider border-b border-slate-800/60">
+                        <th className="py-4 px-6">Month</th>
+                        <th className="py-4 px-6 text-center">Total Monthly Views</th>
+                        <th className="py-4 px-6 text-center">Active Viewing Publishers</th>
+                        <th className="py-4 px-6 text-right">Total Earnings</th>
+                        <th className="py-4 px-6 text-right">Average CPM</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {viewsReportData?.monthlyReports?.map((item: any) => (
+                        <tr key={item.month} className="hover:bg-slate-800/30 transition">
+                          <td className="py-4 px-6 font-extrabold text-white font-mono text-xs">
+                            {item.month}
+                          </td>
+
+                          <td className="py-4 px-6 text-center">
+                            <span className="px-3 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-lg font-black text-sm">
+                              {item.views}
+                            </span>
+                          </td>
+
+                          <td className="py-4 px-6 text-center font-bold text-slate-300">
+                            {item.activeUsersCount || 0} users
+                          </td>
+
+                          <td className="py-4 px-6 text-right font-black text-emerald-400 text-sm">
+                            ${item.earnings ? item.earnings.toFixed(4) : "0.0000"}
+                          </td>
+
+                          <td className="py-4 px-6 text-right font-extrabold text-amber-400">
+                            ${item.cpm ? item.cpm.toFixed(2) : "0.00"}
+                          </td>
+                        </tr>
+                      ))}
+
+                      {(!viewsReportData?.monthlyReports || viewsReportData?.monthlyReports?.length === 0) && (
+                        <tr>
+                          <td colSpan={5} className="text-center py-12 text-slate-500 italic">
+                            No monthly view records available yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-VIEW 4: LIVE CLICK LOGS */}
+            {viewsSubTab === "logs" && (
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+                <div className="p-6 border-b border-slate-800/60">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-amber-400" />
+                    Live Recorded Views & Clicks Stream (Last 100)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Real-time transaction log of verified views completed by visitors across all links.
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase tracking-wider border-b border-slate-800/60">
+                        <th className="py-4 px-6">Timestamp</th>
+                        <th className="py-4 px-6">Publisher</th>
+                        <th className="py-4 px-6">Link Code</th>
+                        <th className="py-4 px-6">Visitor IP</th>
+                        <th className="py-4 px-6 text-right">Earning</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {viewsReportData?.recentLogs?.map((log: any) => (
+                        <tr key={log.id} className="hover:bg-slate-800/30 transition">
+                          <td className="py-3 px-6 font-mono text-slate-300 text-[11px]">
+                            {new Date(log.timestamp).toLocaleString()}
+                          </td>
+
+                          <td className="py-3 px-6 font-bold text-white">
+                            {log.username}
+                          </td>
+
+                          <td className="py-3 px-6 font-mono text-indigo-400 font-bold">
+                            {log.linkCode}
+                          </td>
+
+                          <td className="py-3 px-6 font-mono text-slate-400 text-[11px]">
+                            {log.ip}
+                          </td>
+
+                          <td className="py-3 px-6 text-right font-black text-emerald-400">
+                            ${log.earning ? log.earning.toFixed(4) : "0.0000"}
+                          </td>
+                        </tr>
+                      ))}
+
+                      {(!viewsReportData?.recentLogs || viewsReportData?.recentLogs?.length === 0) && (
+                        <tr>
+                          <td colSpan={5} className="text-center py-12 text-slate-500 italic">
+                            No click logs recorded yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* INDIVIDUAL USER VIEW REPORT MODAL */}
+        {selectedUserReportModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 md:p-8 space-y-6 shadow-2xl my-8 relative">
+              {/* Modal Header */}
+              <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <div className="inline-block px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-full font-bold text-[11px] uppercase tracking-wider mb-2">
+                    Publisher View Analytics
+                  </div>
+                  <h2 className="text-2xl font-black text-white">
+                    {selectedUserReportModal.name || selectedUserReportModal.username}
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    {selectedUserReportModal.email} • ID: {selectedUserReportModal.userId}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setSelectedUserReportModal(null)}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* User Metric Badges */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Today's Views</p>
+                  <p className="text-xl font-black text-indigo-400 mt-1">{selectedUserReportModal.todayViews || 0}</p>
+                </div>
+                <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Month's Views</p>
+                  <p className="text-xl font-black text-purple-400 mt-1">{selectedUserReportModal.monthViews || 0}</p>
+                </div>
+                <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Lifetime Views</p>
+                  <p className="text-xl font-black text-emerald-400 mt-1">{selectedUserReportModal.totalViews || 0}</p>
+                </div>
+                <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Total Earned</p>
+                  <p className="text-xl font-black text-emerald-400 mt-1">${selectedUserReportModal.totalEarnings ? selectedUserReportModal.totalEarnings.toFixed(4) : "0.00"}</p>
+                </div>
+              </div>
+
+              {/* User Daily Breakdown Table */}
+              <div className="space-y-3">
+                <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-emerald-400" />
+                  Daily Views History ({selectedUserReportModal.dailyReports?.length || 0} Days)
+                </h3>
+                <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/60">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-900/80 text-slate-400 font-extrabold uppercase border-b border-slate-800 sticky top-0">
+                        <th className="py-3 px-4">Date</th>
+                        <th className="py-3 px-4 text-center">Views</th>
+                        <th className="py-3 px-4 text-right">Earnings</th>
+                        <th className="py-3 px-4 text-right">CPM</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {selectedUserReportModal.dailyReports?.map((d: any) => (
+                        <tr key={d.date} className="hover:bg-slate-850/40 transition">
+                          <td className="py-2.5 px-4 font-mono font-bold text-slate-200">{d.date}</td>
+                          <td className="py-2.5 px-4 text-center font-black text-indigo-400">{d.views}</td>
+                          <td className="py-2.5 px-4 text-right font-extrabold text-emerald-400">${d.earnings.toFixed(4)}</td>
+                          <td className="py-2.5 px-4 text-right font-bold text-amber-400">${d.cpm.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      {(!selectedUserReportModal.dailyReports || selectedUserReportModal.dailyReports.length === 0) && (
+                        <tr>
+                          <td colSpan={4} className="text-center py-6 text-slate-500 italic">
+                            No daily views logged for this user.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* User Monthly Breakdown Table */}
+              <div className="space-y-3">
+                <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-purple-400" />
+                  Monthly Views History ({selectedUserReportModal.monthlyReports?.length || 0} Months)
+                </h3>
+                <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/60">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-900/80 text-slate-400 font-extrabold uppercase border-b border-slate-800 sticky top-0">
+                        <th className="py-3 px-4">Month</th>
+                        <th className="py-3 px-4 text-center">Views</th>
+                        <th className="py-3 px-4 text-right">Earnings</th>
+                        <th className="py-3 px-4 text-right">CPM</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {selectedUserReportModal.monthlyReports?.map((m: any) => (
+                        <tr key={m.month} className="hover:bg-slate-850/40 transition">
+                          <td className="py-2.5 px-4 font-mono font-bold text-slate-200">{m.month}</td>
+                          <td className="py-2.5 px-4 text-center font-black text-purple-400">{m.views}</td>
+                          <td className="py-2.5 px-4 text-right font-extrabold text-emerald-400">${m.earnings.toFixed(4)}</td>
+                          <td className="py-2.5 px-4 text-right font-bold text-amber-400">${m.cpm.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      {(!selectedUserReportModal.monthlyReports || selectedUserReportModal.monthlyReports.length === 0) && (
+                        <tr>
+                          <td colSpan={4} className="text-center py-6 text-slate-500 italic">
+                            No monthly views logged for this user.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  onClick={() => setSelectedUserReportModal(null)}
+                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition"
+                >
+                  Close Report
+                </button>
               </div>
             </div>
           </div>

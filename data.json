@@ -10,7 +10,8 @@
       "withdrawalAccount": "admin_paypal@example.com",
       "createdAt": "2026-07-15T15:41:09.261Z",
       "banned": false,
-      "password": "Thunderffyt123@"
+      "password": "Thunderffyt123@",
+      "apiToken": "00910e6d014e8c772724df28db6f59cab0388acf"
     },
     {
       "id": "admin-2",
@@ -22,7 +23,8 @@
       "withdrawalAccount": "teamthunder@example.com",
       "createdAt": "2026-07-15T15:41:09.261Z",
       "banned": false,
-      "password": "Thunderffyt123@"
+      "password": "Thunderffyt123@",
+      "apiToken": "fa43f62e7c8d8cb6754f621ee92166d58abdbf4c"
     }
   ],
   "links": [
@@ -73,6 +75,10 @@
     "globalHeaderCode": "<script>\n  console.log(\"Global site verification script loaded in site header\");\n</script>",
     "faviconUrl": "",
     "logoUrl": "",
-    "enableOwnAds": true
-  }
+    "enableOwnAds": true,
+    "enableNeonAdGate": false,
+    "neonTodayAdCode": "<iframe scrolling=\"no\" src=\"https://neon.today/show/surf/21651\" style=\"width: 100%; height: 250px; padding: 0; border: 1px dotted grey;\" frameborder=\"0\"></iframe>"
+  },
+  "tickets": [],
+  "deletedLinksCount": 0
 }

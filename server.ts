@@ -525,6 +525,24 @@ async function saveDbToGoogleDrive(data: any): Promise<void> {
   }
 }
 
+// Helper functions to format ISO date strings in Indian Standard Time (IST, UTC+5:30)
+function getISTDateString(dateInput: Date | string | number = new Date()): string {
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return new Date().toISOString().split("T")[0];
+  
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  return formatter.format(d);
+}
+
+function getISTMonthString(dateInput: Date | string | number = new Date()): string {
+  return getISTDateString(dateInput).substring(0, 7);
+}
+
 // Helper to load/save database
 function loadDb() {
   let db: any = null;
@@ -589,6 +607,7 @@ function loadDb() {
       }
     ],
     links: [],
+    deletedLinksCount: 0,
     adFlyShorteners: [],
     clicksLog: [],
     withdrawals: [],
@@ -655,6 +674,10 @@ function loadDb() {
     const originalLength = db.links.length;
     db.links = db.links.filter(Boolean);
     if (db.links.length !== originalLength) changed = true;
+  }
+  if (db.deletedLinksCount === undefined) {
+    db.deletedLinksCount = 0;
+    changed = true;
   }
   if (!db.adFlyShorteners) {
     db.adFlyShorteners = [];
@@ -739,6 +762,7 @@ function cleanupInactiveApiLinks(db: any): boolean {
   let changed = false;
 
   const initialCount = db.links.length;
+  let deletedNow = 0;
   db.links = db.links.filter((link: any) => {
     // Only check links generated programmatically via Developer API
     if (!link || !link.isApiGenerated) {
@@ -754,13 +778,15 @@ function cleanupInactiveApiLinks(db: any): boolean {
     // Auto delete if no new views/clicks in 3 days
     if (now - activityTime > THREE_DAYS_MS) {
       changed = true;
+      deletedNow++;
       return false;
     }
     return true;
   });
 
-  if (changed) {
-    console.log(`[Auto Cleanup] Successfully deleted ${initialCount - db.links.length} API-generated links with no new views in 3 days.`);
+  if (deletedNow > 0) {
+    db.deletedLinksCount = (db.deletedLinksCount || 0) + deletedNow;
+    console.log(`[Auto Cleanup] Successfully deleted ${deletedNow} API-generated links with no new views in 3 days. Total deleted links tracked: ${db.deletedLinksCount}`);
   }
 
   return changed;
@@ -1258,7 +1284,7 @@ function setupRoutes() {
   app.get("/api/public/stats", (req, res) => {
     const db = loadDb();
     const totalUsers = db.users.length;
-    const totalLinks = db.links.length;
+    const totalLinks = (db.links ? db.links.length : 0) + (db.deletedLinksCount || 0);
     const totalClicks = db.clicksLog.length;
     res.json({
       totalUsers,
@@ -1385,6 +1411,7 @@ function setupRoutes() {
       return res.status(403).json({ error: "Forbidden" });
     }
 
+    db.deletedLinksCount = (db.deletedLinksCount || 0) + 1;
     db.links.splice(linkIdx, 1);
     saveDb(db);
     res.json({ success: true });
@@ -1416,29 +1443,18 @@ function setupRoutes() {
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
     const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
 
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const hasCompletedInLast24h = db.clicksLog.some((c: any) => {
-      let loggedIp = c.ip;
-      if (typeof loggedIp === "string" && loggedIp.includes(",")) {
-        loggedIp = loggedIp.split(",")[0].trim();
-      }
-      return loggedIp === ip && c.timestamp > twentyFourHoursAgo;
-    });
-
-    const faucetLimitReached = isFaucetMode && hasCompletedInLast24h;
-
-    // Include ad configs in resolution
+    // Include ad configs in resolution (allow user to complete own shortener pages first)
     res.json({ 
       link: {
         code: link.code,
-        originalUrl: faucetLimitReached ? undefined : link.originalUrl,
-        adFlyShortenedUrl: faucetLimitReached ? undefined : link.adFlyShortenedUrl,
+        originalUrl: link.originalUrl,
+        adFlyShortenedUrl: link.adFlyShortenedUrl,
         adFlyShortenerId: link.adFlyShortenerId,
         cpm: getCurrentCpmForLink(link, db),
         userId: link.userId,
         isFaucetMode: isFaucetMode
       },
-      faucetLimitReached: faucetLimitReached,
+      faucetLimitReached: false,
       settings: {
         siteName: db.settings.siteName,
         enableOwnAds: db.settings.enableOwnAds,
@@ -1493,20 +1509,20 @@ function setupRoutes() {
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
     const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
 
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const hasCompletedInLast24h = db.clicksLog.some(
+    const todayIST = getISTDateString();
+    const hasCompletedToday = db.clicksLog.some(
       (c: any) => {
         let loggedIp = c.ip;
         if (typeof loggedIp === "string" && loggedIp.includes(",")) {
           loggedIp = loggedIp.split(",")[0].trim();
         }
-        return loggedIp === ip && c.timestamp > twentyFourHoursAgo;
+        return loggedIp === ip && getISTDateString(c.timestamp) === todayIST;
       }
     );
 
-    if (isFaucetMode && hasCompletedInLast24h) {
+    if (isFaucetMode && hasCompletedToday) {
       return res.status(429).json({ 
-        error: "Faucet Mode Daily Limit Reached: Your IP address has already completed a shortener link in the last 24 hours.",
+        error: "Faucet Mode Daily Limit Reached: Your IP address has already completed a shortener link today.",
         faucetLimitReached: true 
       });
     }
@@ -1613,18 +1629,18 @@ function setupRoutes() {
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
     const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
 
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const hasCompletedInLast24h = db.clicksLog.some(
+    const todayIST = getISTDateString();
+    const hasCompletedToday = db.clicksLog.some(
       (c: any) => {
         let loggedIp = c.ip;
         if (typeof loggedIp === "string" && loggedIp.includes(",")) {
           loggedIp = loggedIp.split(",")[0].trim();
         }
-        return loggedIp === ip && c.timestamp > twentyFourHoursAgo;
+        return loggedIp === ip && getISTDateString(c.timestamp) === todayIST;
       }
     );
 
-    if (isFaucetMode && hasCompletedInLast24h) {
+    if (isFaucetMode && hasCompletedToday) {
       return res.status(429).send(`
         <!DOCTYPE html>
         <html>
@@ -1642,27 +1658,27 @@ function setupRoutes() {
         <body>
           <div class="card">
             <h2>Faucet Mode Daily Limit Reached</h2>
-            <p>Your IP address has already completed a shortener link in the last 24 hours.</p>
-            <div class="badge">1 Completion Per IP / 24 Hours Enforced</div>
-            <p style="margin-top: 16px; font-size: 12px; color: #64748b;">In Faucet Mode, access to additional shortener links is blocked for 24 hours to ensure valid advertiser view counting.</p>
+            <p>Your IP address has already completed a shortener link today.</p>
+            <div class="badge">1 Completion Per IP / Daily Limit Enforced (Resets 00:00 IST)</div>
+            <p style="margin-top: 16px; font-size: 12px; color: #64748b;">In Faucet Mode, access to additional shortener links is blocked until 00:00 IST to ensure valid advertiser view counting.</p>
           </div>
         </body>
         </html>
       `);
     }
 
-    const hasPaidClickInLast24h = db.clicksLog.some(
+    const hasPaidClickToday = db.clicksLog.some(
       (c: any) => {
         let loggedIp = c.ip;
         if (typeof loggedIp === "string" && loggedIp.includes(",")) {
           loggedIp = loggedIp.split(",")[0].trim();
         }
-        return loggedIp === ip && c.timestamp > twentyFourHoursAgo && c.earning > 0;
+        return loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
       }
     );
 
     const currentCpm = getCurrentCpmForLink(link, db);
-    const earningAmount = hasPaidClickInLast24h ? 0 : (currentCpm / 1000);
+    const earningAmount = hasPaidClickToday ? 0 : (currentCpm / 1000);
 
     // Save click log
     const clickId = "c-" + Math.random().toString(36).substring(2, 9);
@@ -1765,8 +1781,8 @@ function setupRoutes() {
     const avgCpm = totalViews > 0 ? Number(((totalEarnings / totalViews) * 1000).toFixed(2)) : db.settings.globalCpm;
 
     const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
-    const currentMonthStr = todayStr.substring(0, 7);
+    const todayStr = getISTDateString(now);
+    const currentMonthStr = getISTMonthString(now);
 
     // 1. Calculate today's stats
     let todayViews = 0;
@@ -1776,8 +1792,8 @@ function setupRoutes() {
     let monthEarnings = 0;
 
     userClicks.forEach((c: any) => {
-      const clickDate = c.timestamp.split("T")[0];
-      const clickMonth = clickDate.substring(0, 7);
+      const clickDate = getISTDateString(c.timestamp);
+      const clickMonth = getISTMonthString(c.timestamp);
 
       if (clickDate === todayStr) {
         todayViews += 1;
@@ -1792,14 +1808,13 @@ function setupRoutes() {
     // 3. Generate daily reports for the last 30 days
     const dailyReportsMap = new Map<string, { views: number; earnings: number }>();
     for (let i = 29; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateString = d.toISOString().split("T")[0];
+      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+      const dateString = getISTDateString(d);
       dailyReportsMap.set(dateString, { views: 0, earnings: 0 });
     }
 
     userClicks.forEach((c: any) => {
-      const dateString = c.timestamp.split("T")[0];
+      const dateString = getISTDateString(c.timestamp);
       if (dailyReportsMap.has(dateString)) {
         const current = dailyReportsMap.get(dateString)!;
         dailyReportsMap.set(dateString, {
@@ -1830,12 +1845,12 @@ function setupRoutes() {
     for (let i = 11; i >= 0; i--) {
       const d = new Date();
       d.setMonth(d.getMonth() - i);
-      const monthString = d.toISOString().substring(0, 7);
+      const monthString = getISTMonthString(d);
       monthlyReportsMap.set(monthString, { views: 0, earnings: 0 });
     }
 
     userClicks.forEach((c: any) => {
-      const monthString = c.timestamp.substring(0, 7);
+      const monthString = getISTMonthString(c.timestamp);
       if (monthlyReportsMap.has(monthString)) {
         const current = monthlyReportsMap.get(monthString)!;
         monthlyReportsMap.set(monthString, {
@@ -1863,14 +1878,13 @@ function setupRoutes() {
     // Keep the dailyStats array (last 15 days, ascending) for the chart
     const dailyStatsMap = new Map<string, { views: number; earnings: number }>();
     for (let i = 14; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateString = d.toISOString().split("T")[0];
+      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+      const dateString = getISTDateString(d);
       dailyStatsMap.set(dateString, { views: 0, earnings: 0 });
     }
 
     userClicks.forEach((c: any) => {
-      const dateString = c.timestamp.split("T")[0];
+      const dateString = getISTDateString(c.timestamp);
       if (dailyStatsMap.has(dateString)) {
         const current = dailyStatsMap.get(dateString)!;
         dailyStatsMap.set(dateString, {
@@ -2084,7 +2098,7 @@ ${ticket.message}
     const db = loadDb();
     
     const totalUsers = db.users.length;
-    const totalLinks = db.links.length;
+    const totalLinks = (db.links ? db.links.length : 0) + (db.deletedLinksCount || 0);
     const totalViews = db.clicksLog.length;
     
     const systemEarnings = db.clicksLog.reduce((acc: number, c: any) => acc + c.earning, 0);
@@ -2100,6 +2114,250 @@ ${ticket.message}
       systemEarnings: Number(systemEarnings.toFixed(4)),
       pendingWithdrawal: Number(pendingWithdrawal.toFixed(2)),
       openTickets
+    });
+  });
+
+  app.get("/api/admin/views-report", requireAdmin, (req, res) => {
+    const db = loadDb();
+    const clicks = db.clicksLog || [];
+    const users = db.users || [];
+    const links = db.links || [];
+
+    const todayStr = getISTDateString();
+    const currentMonthStr = getISTMonthString();
+
+    // Map links for fast code lookup
+    const linkMap = new Map<string, any>();
+    links.forEach((l: any) => {
+      if (l && l.id) linkMap.set(l.id, l);
+    });
+
+    // Map users for fast lookup
+    const userMap = new Map<string, any>();
+    users.forEach((u: any) => {
+      if (u && u.id) userMap.set(u.id, u);
+    });
+
+    // 1. System Daily Breakdown
+    const dailyMap = new Map<string, { views: number; earnings: number; userSet: Set<string> }>();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+      const dateStr = getISTDateString(d);
+      dailyMap.set(dateStr, { views: 0, earnings: 0, userSet: new Set() });
+    }
+
+    // 2. System Monthly Breakdown
+    const monthlyMap = new Map<string, { views: number; earnings: number; userSet: Set<string> }>();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const mStr = getISTMonthString(d);
+      monthlyMap.set(mStr, { views: 0, earnings: 0, userSet: new Set() });
+    }
+
+    // 3. User-by-User aggregations
+    const userStatsMap = new Map<string, {
+      userId: string;
+      username: string;
+      email: string;
+      name: string;
+      totalViews: number;
+      todayViews: number;
+      monthViews: number;
+      totalEarnings: number;
+      dailyMap: Map<string, { views: number; earnings: number }>;
+      monthlyMap: Map<string, { views: number; earnings: number }>;
+    }>();
+
+    // Pre-initialize for registered users
+    users.forEach((u: any) => {
+      if (u && u.id) {
+        userStatsMap.set(u.id, {
+          userId: u.id,
+          username: u.username || u.email?.split("@")[0] || u.id,
+          email: u.email || "",
+          name: u.name || u.username || "Registered User",
+          totalViews: 0,
+          todayViews: 0,
+          monthViews: 0,
+          totalEarnings: 0,
+          dailyMap: new Map(),
+          monthlyMap: new Map()
+        });
+      }
+    });
+
+    // Pre-initialize for guest if needed
+    userStatsMap.set("guest", {
+      userId: "guest",
+      username: "Guest / Anonymous",
+      email: "guest@system.local",
+      name: "Guest Users",
+      totalViews: 0,
+      todayViews: 0,
+      monthViews: 0,
+      totalEarnings: 0,
+      dailyMap: new Map(),
+      monthlyMap: new Map()
+    });
+
+    // Process all clicks
+    clicks.forEach((c: any) => {
+      if (!c) return;
+      const dateStr = c.timestamp ? getISTDateString(c.timestamp) : todayStr;
+      const monthStr = c.timestamp ? getISTMonthString(c.timestamp) : currentMonthStr;
+      const uId = c.userId || "guest";
+      const earning = Number(c.earning || 0);
+
+      // System Daily
+      if (!dailyMap.has(dateStr)) {
+        dailyMap.set(dateStr, { views: 0, earnings: 0, userSet: new Set() });
+      }
+      const dObj = dailyMap.get(dateStr)!;
+      dObj.views += 1;
+      dObj.earnings += earning;
+      if (uId) dObj.userSet.add(uId);
+
+      // System Monthly
+      if (!monthlyMap.has(monthStr)) {
+        monthlyMap.set(monthStr, { views: 0, earnings: 0, userSet: new Set() });
+      }
+      const mObj = monthlyMap.get(monthStr)!;
+      mObj.views += 1;
+      mObj.earnings += earning;
+      if (uId) mObj.userSet.add(uId);
+
+      // User aggregations
+      if (!userStatsMap.has(uId)) {
+        const u = userMap.get(uId);
+        userStatsMap.set(uId, {
+          userId: uId,
+          username: u ? (u.username || u.email) : uId,
+          email: u ? (u.email || "") : "",
+          name: u ? (u.name || u.username) : uId,
+          totalViews: 0,
+          todayViews: 0,
+          monthViews: 0,
+          totalEarnings: 0,
+          dailyMap: new Map(),
+          monthlyMap: new Map()
+        });
+      }
+
+      const uStats = userStatsMap.get(uId)!;
+      uStats.totalViews += 1;
+      uStats.totalEarnings += earning;
+
+      if (dateStr === todayStr) uStats.todayViews += 1;
+      if (monthStr === currentMonthStr) uStats.monthViews += 1;
+
+      // User Daily Map
+      const uDaily = uStats.dailyMap.get(dateStr) || { views: 0, earnings: 0 };
+      uDaily.views += 1;
+      uDaily.earnings += earning;
+      uStats.dailyMap.set(dateStr, uDaily);
+
+      // User Monthly Map
+      const uMonthly = uStats.monthlyMap.get(monthStr) || { views: 0, earnings: 0 };
+      uMonthly.views += 1;
+      uMonthly.earnings += earning;
+      uStats.monthlyMap.set(monthStr, uMonthly);
+    });
+
+    // System Daily List
+    const dailyReports = Array.from(dailyMap.entries())
+      .map(([date, d]) => {
+        const cpm = d.views > 0 ? (d.earnings / d.views) * 1000 : 0;
+        return {
+          date,
+          views: d.views,
+          earnings: Number(d.earnings.toFixed(4)),
+          cpm: Number(cpm.toFixed(2)),
+          activeUsersCount: d.userSet.size
+        };
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    // System Monthly List
+    const monthlyReports = Array.from(monthlyMap.entries())
+      .map(([month, m]) => {
+        const cpm = m.views > 0 ? (m.earnings / m.views) * 1000 : 0;
+        return {
+          month,
+          views: m.views,
+          earnings: Number(m.earnings.toFixed(4)),
+          cpm: Number(cpm.toFixed(2)),
+          activeUsersCount: m.userSet.size
+        };
+      })
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    // User breakdown list
+    const userBreakdown = Array.from(userStatsMap.values())
+      .filter(u => u.totalViews > 0 || u.userId !== "guest")
+      .map(u => {
+        const userDailyList = Array.from(u.dailyMap.entries())
+          .map(([date, data]) => ({
+            date,
+            views: data.views,
+            earnings: Number(data.earnings.toFixed(4)),
+            cpm: data.views > 0 ? Number(((data.earnings / data.views) * 1000).toFixed(2)) : 0
+          }))
+          .sort((a, b) => b.date.localeCompare(a.date));
+
+        const userMonthlyList = Array.from(u.monthlyMap.entries())
+          .map(([month, data]) => ({
+            month,
+            views: data.views,
+            earnings: Number(data.earnings.toFixed(4)),
+            cpm: data.views > 0 ? Number(((data.earnings / data.views) * 1000).toFixed(2)) : 0
+          }))
+          .sort((a, b) => b.month.localeCompare(a.month));
+
+        const averageCpm = u.totalViews > 0 ? Number(((u.totalEarnings / u.totalViews) * 1000).toFixed(2)) : 0;
+
+        return {
+          userId: u.userId,
+          username: u.username,
+          email: u.email,
+          name: u.name,
+          totalViews: u.totalViews,
+          todayViews: u.todayViews,
+          monthViews: u.monthViews,
+          totalEarnings: Number(u.totalEarnings.toFixed(4)),
+          averageCpm,
+          dailyReports: userDailyList,
+          monthlyReports: userMonthlyList
+        };
+      })
+      .sort((a, b) => b.totalViews - a.totalViews);
+
+    // Recent 100 logs
+    const recentLogs = clicks.slice(-100).reverse().map((c: any) => {
+      const user = userMap.get(c.userId);
+      const link = linkMap.get(c.linkId);
+      return {
+        id: c.id,
+        timestamp: c.timestamp,
+        userId: c.userId,
+        username: user ? (user.username || user.email) : (c.userId === "guest" ? "Guest" : "Unknown"),
+        linkCode: link ? link.code : (c.linkId || "Direct"),
+        originalUrl: link ? link.originalUrl : "",
+        ip: c.ip || "Unknown",
+        earning: Number((c.earning || 0).toFixed(4)),
+        country: c.country || "Global"
+      };
+    });
+
+    res.json({
+      success: true,
+      totalViews: clicks.length,
+      todayViews: clicks.filter((c: any) => (c.timestamp || "").startsWith(todayStr)).length,
+      monthViews: clicks.filter((c: any) => (c.timestamp || "").startsWith(currentMonthStr)).length,
+      dailyReports,
+      monthlyReports,
+      userBreakdown,
+      recentLogs
     });
   });
 

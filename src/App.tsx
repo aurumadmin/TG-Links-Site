@@ -97,6 +97,7 @@ export default function App() {
       else if (sub === "tickets") tab = "tickets";
       else if (sub === "settings") tab = "settings";
       else if (sub === "external" || sub === "external-apis") tab = "external";
+      else if (sub === "views" || sub === "reports") tab = "views";
 
       setActivePage("admin");
       setActiveTab(tab);
