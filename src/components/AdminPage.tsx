@@ -198,11 +198,11 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const handleRestoreDb = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!restoreFile && !restoreJsonText.trim()) {
-      setRestoreError("Please select a database backup file (.json or .json.gz) or paste JSON content.");
+      setRestoreError("Please select a database backup file (.json, .sql, .gz) or paste JSON content.");
       return;
     }
 
-    if (!confirm("Are you sure you want to restore this database? This will replace current database entries with the backup data!")) {
+    if (!confirm("Are you sure you want to restore this database? This will replace or update current database entries with your backup data!")) {
       return;
     }
 
@@ -214,13 +214,23 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       let payload: { fileData?: string; fileName?: string; jsonText?: string } = {};
 
       if (restoreFile) {
-        const base64Data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(restoreFile);
-        });
-        payload = { fileData: base64Data, fileName: restoreFile.name };
+        if (restoreFile.name.endsWith(".gz") || restoreFile.name.endsWith(".zip")) {
+          const base64Data = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(restoreFile);
+          });
+          payload = { fileData: base64Data, fileName: restoreFile.name };
+        } else {
+          const textData = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsText(restoreFile);
+          });
+          payload = { jsonText: textData, fileName: restoreFile.name };
+        }
       } else {
         payload = { jsonText: restoreJsonText.trim() };
       }
@@ -593,6 +603,14 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
           >
             <Settings className="w-4 h-4" />
             Ads & System Settings
+          </button>
+
+          <button
+            onClick={() => changeTab("backup", "/admin/backup")}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "backup" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
+          >
+            <Database className="w-4 h-4 text-emerald-400" />
+            <span>Database Backup & Restore</span>
           </button>
 
           <button
@@ -2157,6 +2175,129 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </div>
             </div>
           </form>
+        )}
+
+        {/* TAB WORKSPACE: DATABASE BACKUP & RESTORE */}
+        {activeTab === "backup" && (
+          <div className="space-y-6" id="admin_backup">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-2xl font-black text-white flex items-center gap-2">
+                  <Database className="w-6 h-6 text-emerald-400" />
+                  Database Backup & Legacy Restore
+                </h1>
+                <p className="text-xs text-slate-400">
+                  Import database backups from email (.json, .sql, .gz) or export your current database. All legacy formats from previous versions are automatically recognized and converted!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleExportDb}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                Export Current Database (.json)
+              </button>
+            </div>
+
+            <div className="bg-slate-900/60 p-6 rounded-2xl border border-indigo-500/30 space-y-6 shadow-xl">
+              <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl space-y-2">
+                <h3 className="text-sm font-bold text-indigo-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  Universal Old Database Compatibility Enabled
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  You can upload <strong>any database backup file</strong> you received via email or exported from an old version (even before statistics or analytics were added). The system automatically detects and converts user accounts, short links, click logs, and payment configurations without losing any data!
+                </p>
+              </div>
+
+              <form onSubmit={handleRestoreDb} className="space-y-5">
+                <div className="p-5 bg-slate-950 rounded-xl border border-slate-800 space-y-4">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Select Database File (.json, .sql, .json.gz)
+                  </label>
+                  
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <input
+                      type="file"
+                      accept=".json,.sql,.gz,.txt"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setRestoreFile(e.target.files[0]);
+                          setRestoreError("");
+                          setRestoreSuccess("");
+                        }
+                      }}
+                      className="block w-full text-xs text-slate-400 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-indigo-600/20 file:text-indigo-300 hover:file:bg-indigo-600/30 file:cursor-pointer cursor-pointer bg-slate-900 border border-slate-800 rounded-xl"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPasteJson(!showPasteJson)}
+                      className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer"
+                    >
+                      {showPasteJson ? "Hide Text Paste" : "Or Paste Raw JSON / SQL"}
+                    </button>
+                  </div>
+
+                  {restoreFile && (
+                    <div className="flex items-center gap-2 text-xs text-emerald-400 font-semibold pt-1">
+                      <FileJson className="w-4 h-4 flex-shrink-0" />
+                      <span>Selected file: <strong>{restoreFile.name}</strong> ({(restoreFile.size / 1024).toFixed(1)} KB)</span>
+                    </div>
+                  )}
+
+                  {showPasteJson && (
+                    <div className="pt-2 space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-400">
+                        Paste Raw JSON or SQL Database Backup
+                      </label>
+                      <textarea
+                        rows={8}
+                        placeholder='Paste full {"users":[], "links":[]} JSON database content or SQL dump here...'
+                        value={restoreJsonText}
+                        onChange={(e) => {
+                          setRestoreJsonText(e.target.value);
+                          setRestoreError("");
+                          setRestoreSuccess("");
+                        }}
+                        className="w-full p-3.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200 outline-none focus:border-indigo-500 transition font-mono leading-relaxed"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {restoreSuccess && (
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs font-bold text-emerald-400 flex items-center gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                    <span>{restoreSuccess}</span>
+                  </div>
+                )}
+
+                {restoreError && (
+                  <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs font-bold text-rose-400 flex items-center gap-2.5">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                    <span>{restoreError}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={restoreLoading || (!restoreFile && !restoreJsonText.trim())}
+                    className="px-8 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-xl transition cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    {restoreLoading ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4" />
+                    )}
+                    {restoreLoading ? "Restoring Database..." : "Restore / Import Database Now"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
 
         {/* TAB WORKSPACE: EXTERNAL ADLINKFLY APIS */}

@@ -1018,8 +1018,8 @@ function setupRoutes() {
     next();
   });
 
-  app.use(express.json({ limit: "25mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+  app.use(express.json({ limit: "100mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
   // API Middleware to retrieve and log requests
   app.use((req, res, next) => {
@@ -2558,6 +2558,17 @@ ${ticket.adminReply}
     }
   });
 
+function cleanNumber(val: any, fallback = 0): number {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === "number") return isNaN(val) ? fallback : val;
+  if (typeof val === "string") {
+    const cleaned = val.replace(/[^0-9.-]+/g, "");
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? fallback : num;
+  }
+  return fallback;
+}
+
 function parseSqlInsertValue(val: string): string {
   val = val.trim();
   if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) {
@@ -2570,29 +2581,58 @@ function parseSqlInsertValue(val: string): string {
 function normalizeAndMigrateDatabase(rawData: any): any {
   let data: any = rawData;
 
-  // 1. If input is string, try JSON parse, or clean up BOM / wrapping, or parse SQL
+  // 1. String cleaning and parsing
   if (typeof data === "string") {
     let str = data.trim();
-    // Remove UTF-8 BOM if present
     if (str.charCodeAt(0) === 0xFEFF) {
       str = str.slice(1);
     }
-    
-    // Try standard JSON.parse
-    try {
-      data = JSON.parse(str);
-    } catch (e) {
-      // Try to extract JSON object if wrapped in extra text
-      const firstBrace = str.indexOf("{");
-      const lastBrace = str.lastIndexOf("}");
-      if (firstBrace !== -1 && lastBrace > firstBrace) {
+
+    // Unescape if double JSON encoded e.g. "\"{\\\"users\\\": ...}\""
+    if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+      try {
+        const unquoted = JSON.parse(str);
+        if (typeof unquoted === "string") str = unquoted;
+        else if (typeof unquoted === "object" && unquoted !== null) data = unquoted;
+      } catch (e) {}
+    }
+
+    if (typeof data === "string") {
+      try {
+        data = JSON.parse(str);
+      } catch (e1) {
         try {
-          data = JSON.parse(str.substring(firstBrace, lastBrace + 1));
+          // Remove trailing commas before closing braces/brackets
+          const cleaned = str.replace(/,\s*([}\]])/g, "$1");
+          data = JSON.parse(cleaned);
         } catch (e2) {
-          data = parseSqlDump(str);
+          // Attempt JSON object or array extraction
+          const firstBrace = str.indexOf("{");
+          const lastBrace = str.lastIndexOf("}");
+          const firstBracket = str.indexOf("[");
+          const lastBracket = str.lastIndexOf("]");
+
+          let parsed = false;
+          if (firstBrace !== -1 && lastBrace > firstBrace) {
+            try {
+              const sub = str.substring(firstBrace, lastBrace + 1).replace(/,\s*([}\]])/g, "$1");
+              data = JSON.parse(sub);
+              parsed = true;
+            } catch (e3) {}
+          }
+
+          if (!parsed && firstBracket !== -1 && lastBracket > firstBracket) {
+            try {
+              const subArr = str.substring(firstBracket, lastBracket + 1).replace(/,\s*([}\]])/g, "$1");
+              data = JSON.parse(subArr);
+              parsed = true;
+            } catch (e4) {}
+          }
+
+          if (!parsed) {
+            data = parseSqlDump(str);
+          }
         }
-      } else {
-        data = parseSqlDump(str);
       }
     }
   }
@@ -2600,40 +2640,55 @@ function normalizeAndMigrateDatabase(rawData: any): any {
   // Helper to parse SQL dump
   function parseSqlDump(sql: string): any {
     const dbOut: any = { users: [], links: [], clicksLog: [], withdrawals: [], tickets: [], adFlyShorteners: [], settings: {} };
-    const insertRegex = /INSERT\s+INTO\s+[`"']?(\w+)[`"']?\s*(?:\([^)]+\))?\s*VALUES\s*([^;]+);/gi;
+    const insertRegex = /INSERT\s+INTO\s+[`"']?(\w+)[`"']?\s*(?:\(([^)]+)\))?\s*VALUES\s*([^;]+);/gi;
     let match;
     while ((match = insertRegex.exec(sql)) !== null) {
       const tableName = match[1].toLowerCase();
-      const valuesStr = match[2];
+      const colNamesStr = match[2];
+      const valuesStr = match[3];
+
+      let cols: string[] = [];
+      if (colNamesStr) {
+        cols = colNamesStr.split(",").map(c => c.trim().replace(/[`"']/g, "").toLowerCase());
+      }
+
       const rowMatches = valuesStr.match(/\((?:[^()']|'[^']*')*\)/g) || [];
       for (const rowStr of rowMatches) {
         const rawVals = rowStr.slice(1, -1).split(/,(?=(?:[^']*'[^']*')*[^']*$)/).map(v => parseSqlInsertValue(v));
+
+        const rowObj: any = {};
+        if (cols.length === rawVals.length) {
+          cols.forEach((col, i) => {
+            rowObj[col] = rawVals[i];
+          });
+        }
+
         if (tableName.includes("user") || tableName.includes("member") || tableName.includes("account")) {
           dbOut.users.push({
-            id: rawVals[0],
-            email: rawVals[1] || rawVals[0],
-            username: rawVals[1],
-            password: rawVals[2],
-            role: rawVals[3] || "user",
-            balance: parseFloat(rawVals[4] || "0") || 0
+            id: rowObj.id || rowObj.user_id || rawVals[0],
+            email: rowObj.email || rowObj.user_email || rawVals[1] || rawVals[0],
+            username: rowObj.username || rowObj.name || rawVals[1],
+            password: rowObj.password || rowObj.pass || rawVals[2],
+            role: rowObj.role || rawVals[3] || "user",
+            balance: cleanNumber(rowObj.balance || rowObj.wallet || rawVals[4])
           });
-        } else if (tableName.includes("link") || tableName.includes("url") || tableName.includes("shortener")) {
+        } else if (tableName.includes("link") || tableName.includes("url") || tableName.includes("shortener") || tableName.includes("alias")) {
           dbOut.links.push({
-            id: rawVals[0],
-            code: rawVals[1] || rawVals[0],
-            originalUrl: rawVals[2] || rawVals[1],
-            userId: rawVals[3] || "guest",
-            clicks: parseInt(rawVals[4] || "0", 10) || 0,
-            earnings: parseFloat(rawVals[5] || "0") || 0
+            id: rowObj.id || rowObj.link_id || rowObj.url_id || rawVals[0],
+            code: rowObj.code || rowObj.alias || rowObj.short_code || rawVals[1] || rawVals[0],
+            originalUrl: rowObj.original_url || rowObj.originalurl || rowObj.url || rowObj.long_url || rawVals[2] || rawVals[1],
+            userId: rowObj.user_id || rowObj.userid || rawVals[3] || "guest",
+            clicks: cleanNumber(rowObj.clicks || rowObj.views || rowObj.hits || rawVals[4]),
+            earnings: cleanNumber(rowObj.earnings || rowObj.revenue || rawVals[5])
           });
         } else if (tableName.includes("click") || tableName.includes("stat") || tableName.includes("view") || tableName.includes("log")) {
           dbOut.clicksLog.push({
-            id: rawVals[0],
-            linkId: rawVals[1],
-            userId: rawVals[2],
-            timestamp: rawVals[3] || new Date().toISOString(),
-            ip: rawVals[4] || "127.0.0.1",
-            earning: parseFloat(rawVals[5] || "0") || 0
+            id: rowObj.id || rawVals[0],
+            linkId: rowObj.link_id || rowObj.linkid || rowObj.url_id || rawVals[1],
+            userId: rowObj.user_id || rowObj.userid || rawVals[2],
+            timestamp: rowObj.timestamp || rowObj.created_at || rawVals[3] || new Date().toISOString(),
+            ip: rowObj.ip || rowObj.ip_address || rawVals[4] || "127.0.0.1",
+            earning: cleanNumber(rowObj.earning || rowObj.revenue || rowObj.payout || rawVals[5])
           });
         }
       }
@@ -2641,17 +2696,60 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     return dbOut;
   }
 
+  // 2. If data is an array at root level, categorize elements
+  if (Array.isArray(data)) {
+    const arrLinks: any[] = [];
+    const arrUsers: any[] = [];
+    const arrClicks: any[] = [];
+    const arrWithdrawals: any[] = [];
+
+    data.forEach((item: any) => {
+      if (item && typeof item === "object") {
+        if (item.url || item.originalUrl || item.original_url || item.long_url || item.alias || item.code || item.target_url) {
+          arrLinks.push(item);
+        } else if (item.email || item.user_email || item.username || item.password || item.pass) {
+          arrUsers.push(item);
+        } else if (item.ip || item.linkId || item.link_id || item.timestamp || item.user_ip) {
+          arrClicks.push(item);
+        } else if (item.amount || item.withdrawal_method || item.payment_method) {
+          arrWithdrawals.push(item);
+        }
+      }
+    });
+
+    data = { users: arrUsers, links: arrLinks, clicksLog: arrClicks, withdrawals: arrWithdrawals };
+  }
+
   if (typeof data !== "object" || data === null) {
     data = {};
   }
 
-  // 2. Unwrap nested object fields (e.g. data.data, data.db, data.database, data.result, data.tables, data.backup)
+  // 3. Unwrap nested container objects (e.g. data.data, data.db, data.database, data.result, data.tables, data.backup)
   if (!data.users && !data.links) {
     if (data.data && typeof data.data === "object") data = data.data;
     else if (data.db && typeof data.db === "object") data = data.db;
     else if (data.database && typeof data.database === "object") data = data.database;
     else if (data.backup && typeof data.backup === "object") data = data.backup;
     else if (data.tables && typeof data.tables === "object") data = data.tables;
+  }
+
+  // Auto-detect keys if property names are non-standard
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    Object.keys(data).forEach(k => {
+      const lowerK = k.toLowerCase();
+      if (!data.users && (lowerK.includes("user") || lowerK.includes("member") || lowerK.includes("account"))) {
+        data.users = data[k];
+      }
+      if (!data.links && (lowerK.includes("link") || lowerK.includes("url") || lowerK.includes("alias") || lowerK.includes("shortener") || lowerK.includes("slug"))) {
+        data.links = data[k];
+      }
+      if (!data.clicksLog && (lowerK.includes("click") || lowerK.includes("stat") || lowerK.includes("view") || lowerK.includes("log"))) {
+        data.clicksLog = data[k];
+      }
+      if (!data.withdrawals && (lowerK.includes("withdraw") || lowerK.includes("payout") || lowerK.includes("cashout"))) {
+        data.withdrawals = data[k];
+      }
+    });
   }
 
   // Helper to force object dictionaries or nested structures into arrays
@@ -2671,23 +2769,23 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     return [];
   }
 
-  // Extract raw sections with alias matching
-  let rawUsers = toArray(data.users || data.user || data.accounts || data.members || data.users_list);
-  let rawLinks = toArray(data.links || data.link || data.urls || data.shortened_links || data.short_links || data.links_list);
-  let rawClicks = toArray(data.clicksLog || data.clicks_log || data.click_logs || data.clicks || data.views || data.statistics || data.stats || data.logs);
-  let rawWithdrawals = toArray(data.withdrawals || data.payouts || data.withdrawal_requests);
-  let rawTickets = toArray(data.tickets || data.support_tickets || data.messages);
-  let rawAdFly = toArray(data.adFlyShorteners || data.external_shorteners || data.adfly_links);
+  // Extract raw sections
+  let rawUsers = toArray(data.users);
+  let rawLinks = toArray(data.links);
+  let rawClicks = toArray(data.clicksLog || data.clicks_log || data.click_logs);
+  let rawWithdrawals = toArray(data.withdrawals);
+  let rawTickets = toArray(data.tickets || data.support_tickets);
+  let rawAdFly = toArray(data.adFlyShorteners || data.external_shorteners);
   let rawSettings = (data.settings || data.config || data.options || data.site_settings || {});
 
-  // 3. Normalize USERS
+  // 4. Normalize USERS
   const usersMap = new Map<string, any>();
   const normalizedUsers: any[] = [];
 
   rawUsers.forEach((u: any, idx: number) => {
     if (!u || typeof u !== "object") return;
     const email = (u.email || u.user_email || u.username || u.name || u.login || `user_${idx}@example.com`).trim().toLowerCase();
-    const id = u.id || u._id || u.user_id || u.uid || `u-${idx + 1}`;
+    const id = u.id || u._id || u.user_id || u.uid || u.member_id || `u-${idx + 1}`;
     const role = (u.role === "admin" || u.is_admin || u.isAdmin || u.admin || u.type === "admin" || email === "freefiregtamcpe@gmail.com" || email === "teamthunderofficialyt@gmail.com") ? "admin" : "user";
     
     const userObj = {
@@ -2695,8 +2793,8 @@ function normalizeAndMigrateDatabase(rawData: any): any {
       email: u.email || email,
       username: u.username || u.name || email.split("@")[0],
       role,
-      balance: Number(u.balance ?? u.wallet ?? u.money ?? u.earnings ?? u.totalEarned ?? 0),
-      totalEarned: Number(u.totalEarned ?? u.total_earned ?? u.balance ?? 0),
+      balance: cleanNumber(u.balance ?? u.wallet ?? u.money ?? u.earnings ?? u.totalEarned ?? 0),
+      totalEarned: cleanNumber(u.totalEarned ?? u.total_earned ?? u.balance ?? 0),
       withdrawalMethod: u.withdrawalMethod || u.withdrawal_method || u.payment_method || "PayPal",
       withdrawalAccount: u.withdrawalAccount || u.withdrawal_account || u.payment_account || u.email || email,
       createdAt: u.createdAt || u.created_at || u.created || u.date || new Date().toISOString(),
@@ -2706,12 +2804,12 @@ function normalizeAndMigrateDatabase(rawData: any): any {
       enableFaucetMode: Boolean(u.enableFaucetMode ?? u.faucet_mode ?? false)
     };
 
-    usersMap.set(id, userObj);
+    usersMap.set(String(id), userObj);
     usersMap.set(email, userObj);
     normalizedUsers.push(userObj);
   });
 
-  // Ensure mandatory admin accounts exist so admins are never locked out after restore
+  // Mandatory admin accounts so admins are never locked out after restore
   const defaultAdmins = [
     { id: "admin-1", email: "freefiregtamcpe@gmail.com", role: "admin", balance: 100, totalEarned: 100, withdrawalMethod: "PayPal", withdrawalAccount: "admin_paypal@example.com", createdAt: new Date().toISOString(), banned: false, password: "Thunderffyt123@", apiToken: generateApiToken() },
     { id: "admin-2", email: "teamthunderofficialyt@gmail.com", role: "admin", balance: 0, totalEarned: 0, withdrawalMethod: "PayPal", withdrawalAccount: "teamthunder@example.com", createdAt: new Date().toISOString(), banned: false, password: "Thunderffyt123@", apiToken: generateApiToken() }
@@ -2720,7 +2818,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
   defaultAdmins.forEach(adminDef => {
     const existing = normalizedUsers.find(u => u.email.toLowerCase() === adminDef.email.toLowerCase());
     if (existing) {
-      existing.role = "admin"; // ensure admin authority
+      existing.role = "admin";
     } else {
       normalizedUsers.push(adminDef);
       usersMap.set(adminDef.id, adminDef);
@@ -2728,16 +2826,17 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     }
   });
 
-  // 4. Normalize LINKS
+  // 5. Normalize LINKS
+  const linkCodeToIdMap = new Map<string, string>();
   const normalizedLinks: any[] = [];
 
   rawLinks.forEach((l: any, idx: number) => {
     if (!l || typeof l !== "object") return;
-    const id = l.id || l._id || l.link_id || `l-${Math.random().toString(36).substring(2, 9)}`;
-    const code = l.code || l.alias || l.short_code || l.short_url || l.slug || l.key || Math.random().toString(36).substring(2, 8);
+    const id = String(l.id || l._id || l.link_id || l.url_id || `l-${Math.random().toString(36).substring(2, 9)}`);
+    const code = String(l.code || l.alias || l.short_code || l.short_url || l.slug || l.key || Math.random().toString(36).substring(2, 8));
     const originalUrl = l.originalUrl || l.original_url || l.url || l.long_url || l.target_url || l.destination_url || l.link || l.location || "https://google.com";
     
-    let userId = l.userId || l.user_id || l.author_id || l.owner_id || l.user || "guest";
+    let userId = String(l.userId || l.user_id || l.author_id || l.owner_id || l.user || "guest");
     let userEmail = l.userEmail || l.user_email || l.email;
     if (!userEmail && usersMap.has(userId)) {
       userEmail = usersMap.get(userId).email;
@@ -2752,9 +2851,9 @@ function normalizeAndMigrateDatabase(rawData: any): any {
       originalUrl,
       userId,
       userEmail,
-      cpm: Number(l.cpm ?? l.rate ?? 5),
-      clicks: Number(l.clicks ?? l.views ?? l.total_clicks ?? l.click_count ?? 0),
-      earnings: Number(l.earnings ?? l.total_earnings ?? l.revenue ?? l.earned ?? 0),
+      cpm: cleanNumber(l.cpm ?? l.rate ?? l.payout_rate ?? 5, 5),
+      clicks: cleanNumber(l.clicks ?? l.views ?? l.total_clicks ?? l.click_count ?? l.hits ?? 0, 0),
+      earnings: cleanNumber(l.earnings ?? l.total_earnings ?? l.revenue ?? l.earned ?? 0, 0),
       createdAt: l.createdAt || l.created_at || l.created || l.date || new Date().toISOString(),
       status: l.status || (l.active === false ? "inactive" : "active"),
       isApiGenerated: Boolean(l.isApiGenerated ?? l.is_api ?? l.api ?? false),
@@ -2762,7 +2861,10 @@ function normalizeAndMigrateDatabase(rawData: any): any {
       lastViewedAt: l.lastViewedAt || l.last_viewed_at || l.last_click || l.createdAt || l.created_at || new Date().toISOString()
     };
 
-    // Check for embedded clicks inside the link e.g. l.clicksList, l.viewsList, l.logs
+    linkCodeToIdMap.set(code, id);
+    linkCodeToIdMap.set(id, id);
+
+    // Check for embedded clicks
     if (Array.isArray(l.clicksList) || Array.isArray(l.viewsList) || Array.isArray(l.logs)) {
       const embeddedClicks = l.clicksList || l.viewsList || l.logs;
       embeddedClicks.forEach((c: any) => {
@@ -2771,7 +2873,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
           userId,
           timestamp: c.timestamp || c.created_at || c.date || new Date().toISOString(),
           ip: c.ip || c.ip_address || "127.0.0.1",
-          earning: Number(c.earning ?? c.revenue ?? 0),
+          earning: cleanNumber(c.earning ?? c.revenue ?? 0),
           country: c.country || "Global"
         });
       });
@@ -2780,13 +2882,15 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     normalizedLinks.push(linkObj);
   });
 
-  // 5. Normalize CLICKS LOG
+  // 6. Normalize CLICKS LOG
   const normalizedClicksLog: any[] = [];
   rawClicks.forEach((c: any) => {
     if (!c || typeof c !== "object") return;
-    const id = c.id || c._id || `c-${Math.random().toString(36).substring(2, 9)}`;
-    const linkId = c.linkId || c.link_id || c.url_id || c.alias || (normalizedLinks[0] ? normalizedLinks[0].id : "l-1");
-    const userId = c.userId || c.user_id || "guest";
+    const id = String(c.id || c._id || `c-${Math.random().toString(36).substring(2, 9)}`);
+    
+    let rawLinkId = String(c.linkId || c.link_id || c.url_id || c.alias || c.code || "");
+    let linkId = linkCodeToIdMap.get(rawLinkId) || rawLinkId || (normalizedLinks[0] ? normalizedLinks[0].id : "l-1");
+    let userId = String(c.userId || c.user_id || "guest");
     
     normalizedClicksLog.push({
       id,
@@ -2794,12 +2898,12 @@ function normalizeAndMigrateDatabase(rawData: any): any {
       userId,
       timestamp: c.timestamp || c.created_at || c.date || c.time || c.created || new Date().toISOString(),
       ip: c.ip || c.ip_address || c.user_ip || "127.0.0.1",
-      earning: Number(c.earning ?? c.earnings ?? c.revenue ?? c.payout ?? c.amount ?? 0),
+      earning: cleanNumber(c.earning ?? c.earnings ?? c.revenue ?? c.payout ?? c.amount ?? 0, 0),
       country: c.country || c.country_code || c.location || "Global"
     });
   });
 
-  // Recalculate link statistics if clicks was 0 but logs exist
+  // Recalculate link statistics if clicks count was 0
   const linkClicksCountMap = new Map<string, number>();
   const linkEarningsMap = new Map<string, number>();
   normalizedClicksLog.forEach(c => {
@@ -2816,12 +2920,12 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     }
   });
 
-  // 6. Normalize WITHDRAWALS
+  // 7. Normalize WITHDRAWALS
   const normalizedWithdrawals: any[] = rawWithdrawals.map((w: any, idx: number) => ({
-    id: w.id || w._id || `w-${idx + 1}`,
-    userId: w.userId || w.user_id || "guest",
+    id: String(w.id || w._id || `w-${idx + 1}`),
+    userId: String(w.userId || w.user_id || "guest"),
     userEmail: w.userEmail || w.user_email || w.email || "guest",
-    amount: Number(w.amount ?? w.sum ?? 0),
+    amount: cleanNumber(w.amount ?? w.sum ?? 0),
     method: w.method || w.withdrawal_method || w.payment_method || "PayPal",
     account: w.account || w.withdrawal_account || w.payment_account || "N/A",
     status: w.status || "pending",
@@ -2829,10 +2933,10 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     processedAt: w.processedAt || w.processed_at || w.updated_at
   })).filter(Boolean);
 
-  // 7. Normalize TICKETS
+  // 8. Normalize TICKETS
   const normalizedTickets: any[] = rawTickets.map((t: any, idx: number) => ({
-    id: t.id || t._id || `t-${idx + 1}`,
-    userId: t.userId || t.user_id || "guest",
+    id: String(t.id || t._id || `t-${idx + 1}`),
+    userId: String(t.userId || t.user_id || "guest"),
     userEmail: t.userEmail || t.user_email || t.email || "guest",
     subject: t.subject || t.title || "Support Request",
     message: t.message || t.body || t.content || "",
@@ -2841,9 +2945,9 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     replies: Array.isArray(t.replies) ? t.replies : []
   })).filter(Boolean);
 
-  // 8. Normalize ADFLY SHORTENERS
+  // 9. Normalize ADFLY SHORTENERS
   const normalizedAdFly: any[] = rawAdFly.map((a: any, idx: number) => ({
-    id: a.id || a._id || `adfly-${idx + 1}`,
+    id: String(a.id || a._id || `adfly-${idx + 1}`),
     name: a.name || a.title || "External Shortener",
     apiUrl: a.apiUrl || a.api_url || a.url || "",
     apiToken: a.apiToken || a.api_token || a.token || "",
@@ -2851,15 +2955,15 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     active: a.active !== undefined ? Boolean(a.active) : true
   })).filter(Boolean);
 
-  // 9. Normalize SETTINGS
+  // 10. Normalize SETTINGS
   const normalizedSettings = {
     siteName: rawSettings.siteName || rawSettings.site_name || rawSettings.title || "TG LINKS",
     siteTitle: rawSettings.siteTitle || rawSettings.site_title || "Shorten Links and Earn Money",
     siteDescription: rawSettings.siteDescription || rawSettings.site_description || "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
-    globalCpm: Number(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 5),
-    minWithdrawal: Number(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 2),
+    globalCpm: cleanNumber(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 5, 5),
+    minWithdrawal: cleanNumber(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 2, 2),
     withdrawalMethods: Array.isArray(rawSettings.withdrawalMethods) ? rawSettings.withdrawalMethods : ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
-    adPagesCount: Number(rawSettings.adPagesCount ?? rawSettings.ad_pages_count ?? 1),
+    adPagesCount: cleanNumber(rawSettings.adPagesCount ?? rawSettings.ad_pages_count ?? 1, 1),
     bannerAd728x90: rawSettings.bannerAd728x90 || rawSettings.banner_728x90 || `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center"><span class="text-xs uppercase tracking-widest font-bold opacity-75">Sponsor Banner (728x90)</span></div>`,
     bannerAd300x250: rawSettings.bannerAd300x250 || rawSettings.banner_300x250 || `<div class="w-[300px] h-[250px] bg-gradient-to-br from-purple-500 to-pink-500 flex flex-col items-center justify-center border border-purple-300 text-white rounded-lg shadow-sm p-6 text-center mx-auto"><span class="text-xs uppercase tracking-widest font-bold opacity-75">Premium Space (300x250)</span></div>`,
     bannerAd320x50: rawSettings.bannerAd320x50 || rawSettings.banner_320x50 || `<div class="w-80 h-12 bg-gradient-to-r from-teal-500 to-emerald-600 flex items-center justify-between border border-teal-300 text-white rounded-lg shadow-sm px-4 mx-auto"><span class="text-xs font-bold uppercase tracking-wide">Ad: Secure VPN</span></div>`,
@@ -2887,7 +2991,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     tickets: normalizedTickets,
     adFlyShorteners: normalizedAdFly,
     settings: normalizedSettings,
-    deletedLinksCount: Number(data.deletedLinksCount ?? data.deleted_links_count ?? 0)
+    deletedLinksCount: cleanNumber(data.deletedLinksCount ?? data.deleted_links_count ?? 0, 0)
   };
 }
 
