@@ -54,6 +54,14 @@ export interface ClickLog {
   ip: string;
   earning: number;
   country: string;
+  referrer?: string;
+}
+
+export interface TrafficSource {
+  source: string;
+  clicks: number;
+  earnings: number;
+  lastSeen: string;
 }
 
 export interface Withdrawal {
@@ -65,6 +73,9 @@ export interface Withdrawal {
   account: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
+  userFaucetMode?: boolean;
+  totalUserClicks?: number;
+  trafficSources?: TrafficSource[];
 }
 
 export interface SystemSettings {

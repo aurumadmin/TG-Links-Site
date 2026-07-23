@@ -1680,6 +1680,8 @@ function setupRoutes() {
     const currentCpm = getCurrentCpmForLink(link, db);
     const earningAmount = hasPaidClickToday ? 0 : (currentCpm / 1000);
 
+    const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || req.query.referrer || "Direct / Unknown") as string;
+
     // Save click log
     const clickId = "c-" + Math.random().toString(36).substring(2, 9);
     const click: ClickLog = {
@@ -1689,7 +1691,8 @@ function setupRoutes() {
       timestamp: new Date().toISOString(),
       ip: String(ip),
       earning: earningAmount,
-      country: "Global"
+      country: "Global",
+      referrer: rawReferrer
     };
     db.clicksLog.push(click);
 
@@ -2370,7 +2373,7 @@ ${ticket.message}
 
   app.post("/api/admin/users/:id/update", requireAdmin, (req, res) => {
     const { id } = req.params;
-    const { role, balance, customCpm, banned } = req.body;
+    const { role, balance, customCpm, banned, enableFaucetMode } = req.body;
     const db = loadDb();
 
     const user = db.users.find((u: any) => u && u.id === id);
@@ -2380,10 +2383,69 @@ ${ticket.message}
     if (balance !== undefined) user.balance = Number(balance);
     if (customCpm !== undefined) user.customCpm = customCpm === null ? undefined : Number(customCpm);
     if (banned !== undefined) user.banned = banned;
+    if (enableFaucetMode !== undefined) user.enableFaucetMode = Boolean(enableFaucetMode);
 
     saveDb(db);
     const { password: _, ...userSafe } = user;
     res.json({ success: true, user: userSafe });
+  });
+
+  app.post("/api/admin/users/:id/faucet-mode", requireAdmin, (req, res) => {
+    const { id } = req.params;
+    const { enableFaucetMode } = req.body;
+    const db = loadDb();
+
+    const user = db.users.find((u: any) => u && u.id === id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.enableFaucetMode = Boolean(enableFaucetMode);
+    saveDb(db);
+    const { password: _, ...userSafe } = user;
+    res.json({ success: true, user: userSafe });
+  });
+
+  app.get("/api/admin/users/:id/traffic-sources", requireAdmin, (req, res) => {
+    const { id } = req.params;
+    const db = loadDb();
+
+    const user = db.users.find((u: any) => u && u.id === id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const userLinks = db.links.filter((l: any) => l.userId === id);
+    const userLinkIds = new Set(userLinks.map((l: any) => l.id));
+    const userClicks = db.clicksLog.filter((c: any) => c.userId === id || userLinkIds.has(c.linkId));
+
+    const referrerMap = new Map<string, { count: number; totalEarning: number; lastSeen: string }>();
+    userClicks.forEach((c: any) => {
+      let ref = c.referrer || c.referer || c.trafficSource || "Direct / Unknown";
+      if (typeof ref === "string" && ref.trim()) {
+        ref = ref.trim();
+      } else {
+        ref = "Direct / Unknown";
+      }
+      const existing = referrerMap.get(ref) || { count: 0, totalEarning: 0, lastSeen: c.timestamp || "" };
+      existing.count += 1;
+      existing.totalEarning += (c.earning || 0);
+      if (!existing.lastSeen || (c.timestamp && c.timestamp > existing.lastSeen)) {
+        existing.lastSeen = c.timestamp;
+      }
+      referrerMap.set(ref, existing);
+    });
+
+    const trafficSources = Array.from(referrerMap.entries()).map(([source, stats]) => ({
+      source,
+      clicks: stats.count,
+      earnings: Number(stats.totalEarning.toFixed(6)),
+      lastSeen: stats.lastSeen
+    })).sort((a, b) => b.clicks - a.clicks);
+
+    res.json({
+      userId: id,
+      userEmail: user.email,
+      enableFaucetMode: !!user.enableFaucetMode,
+      totalClicks: userClicks.length,
+      trafficSources
+    });
   });
 
   app.delete("/api/admin/users/:id", requireAdmin, (req, res) => {
@@ -2419,7 +2481,45 @@ ${ticket.message}
 
   app.get("/api/admin/withdrawals", requireAdmin, (req, res) => {
     const db = loadDb();
-    res.json({ withdrawals: db.withdrawals });
+    const withdrawalsWithDetails = db.withdrawals.map((w: any) => {
+      const user = db.users.find((u: any) => u.id === w.userId);
+      const userLinks = db.links.filter((l: any) => l.userId === w.userId);
+      const userLinkIds = new Set(userLinks.map((l: any) => l.id));
+      const userClicks = db.clicksLog.filter((c: any) => c.userId === w.userId || userLinkIds.has(c.linkId));
+
+      const referrerMap = new Map<string, { count: number; totalEarning: number; lastSeen: string }>();
+      userClicks.forEach((c: any) => {
+        let ref = c.referrer || c.referer || c.trafficSource || "Direct / Unknown";
+        if (typeof ref === "string" && ref.trim()) {
+          ref = ref.trim();
+        } else {
+          ref = "Direct / Unknown";
+        }
+        const existing = referrerMap.get(ref) || { count: 0, totalEarning: 0, lastSeen: c.timestamp || "" };
+        existing.count += 1;
+        existing.totalEarning += (c.earning || 0);
+        if (!existing.lastSeen || (c.timestamp && c.timestamp > existing.lastSeen)) {
+          existing.lastSeen = c.timestamp;
+        }
+        referrerMap.set(ref, existing);
+      });
+
+      const trafficSources = Array.from(referrerMap.entries()).map(([source, stats]) => ({
+        source,
+        clicks: stats.count,
+        earnings: Number(stats.totalEarning.toFixed(6)),
+        lastSeen: stats.lastSeen
+      })).sort((a, b) => b.clicks - a.clicks);
+
+      return {
+        ...w,
+        userFaucetMode: !!user?.enableFaucetMode,
+        userEmail: user?.email || w.userEmail,
+        totalUserClicks: userClicks.length,
+        trafficSources
+      };
+    });
+    res.json({ withdrawals: withdrawalsWithDetails });
   });
 
   // --- ADMIN SUPPORT TICKETS ENDPOINTS ---

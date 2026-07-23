@@ -56,13 +56,15 @@ import {
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings } from "./SiteLogo";
 
+type AdminTab = "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views" | "backup";
+
 interface AdminPageProps {
-  initialTab?: "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views";
+  initialTab?: AdminTab;
   onBackToDashboard: () => void;
 }
 
 export default function AdminPage({ initialTab, onBackToDashboard }: AdminPageProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views">(initialTab || "overview");
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab || "overview");
   
   // Data states
   const [adminStats, setAdminStats] = useState<any>(null);
@@ -86,7 +88,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     }
   }, [initialTab]);
 
-  const changeTab = (tab: "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views", path: string) => {
+  const changeTab = (tab: AdminTab, path: string) => {
     setActiveTab(tab);
     if (window.location.pathname !== path) {
       window.history.pushState({}, "", path);
@@ -123,6 +125,21 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [editBalance, setEditBalance] = useState("");
   const [editCustomCpm, setEditCustomCpm] = useState("");
   const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
+  const [editFaucetMode, setEditFaucetMode] = useState(false);
+  const [userFaucetFilter, setUserFaucetFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+
+  // Traffic Sources Modal State
+  const [trafficModalUser, setTrafficModalUser] = useState<{ id: string; email: string; enableFaucetMode: boolean } | null>(null);
+  const [trafficModalLoading, setTrafficModalLoading] = useState(false);
+  const [trafficModalData, setTrafficModalData] = useState<{
+    userId: string;
+    userEmail: string;
+    enableFaucetMode: boolean;
+    totalClicks: number;
+    trafficSources: { source: string; clicks: number; earnings: number; lastSeen: string }[];
+  } | null>(null);
+  const [trafficSourceSearch, setTrafficSourceSearch] = useState("");
 
   // New AdLinkFly API state
   const [apiName, setApiName] = useState("");
@@ -338,6 +355,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     setEditBalance(String(u.balance));
     setEditCustomCpm(u.customCpm ? String(u.customCpm) : "");
     setEditRole(u.role);
+    setEditFaucetMode(!!u.enableFaucetMode);
   };
 
   const handleSaveUser = async (userId: string) => {
@@ -350,7 +368,8 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         body: JSON.stringify({
           balance: isNaN(balanceNum) ? 0 : balanceNum,
           customCpm: cpmNum,
-          role: editRole
+          role: editRole,
+          enableFaucetMode: editFaucetMode
         })
       });
 
@@ -360,6 +379,46 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       }
     } catch (err) {
       alert("Failed to update user.");
+    }
+  };
+
+  const handleToggleUserFaucetMode = async (userId: string, currentStatus: boolean) => {
+    try {
+      const res = await fetchApi(`/admin/users/${userId}/faucet-mode`, {
+        method: "POST",
+        body: JSON.stringify({ enableFaucetMode: !currentStatus })
+      });
+      if (res.success) {
+        setUsersList((prev) => prev.map((u) => u.id === userId ? { ...u, enableFaucetMode: !currentStatus } : u));
+        setWithdrawalsList((prev) => prev.map((w) => w.userId === userId ? { ...w, userFaucetMode: !currentStatus } : w));
+        if (trafficModalData && trafficModalData.userId === userId) {
+          setTrafficModalData((prev: any) => prev ? { ...prev, enableFaucetMode: !currentStatus } : null);
+        }
+        if (trafficModalUser && trafficModalUser.id === userId) {
+          setTrafficModalUser((prev) => prev ? { ...prev, enableFaucetMode: !currentStatus } : null);
+        }
+      } else {
+        alert("Failed to update faucet mode status.");
+      }
+    } catch (err) {
+      alert("Failed to update faucet mode status.");
+    }
+  };
+
+  const handleOpenTrafficModal = async (userId: string, userEmail: string, currentFaucetMode?: boolean) => {
+    setTrafficModalUser({ id: userId, email: userEmail, enableFaucetMode: !!currentFaucetMode });
+    setTrafficModalLoading(true);
+    setTrafficModalData(null);
+    setTrafficSourceSearch("");
+    try {
+      const res = await fetchApi(`/admin/users/${userId}/traffic-sources`);
+      if (res) {
+        setTrafficModalData(res);
+      }
+    } catch (err) {
+      console.error("Failed to load traffic sources:", err);
+    } finally {
+      setTrafficModalLoading(false);
     }
   };
 
@@ -762,9 +821,47 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         {/* TAB WORKSPACE: USERS */}
         {activeTab === "users" && (
           <div className="bg-slate-900/40 rounded-xl border border-slate-800/80 overflow-hidden" id="admin_users">
-            <div className="p-6 border-b border-slate-800/60 bg-slate-900/20">
-              <h2 className="text-lg font-extrabold text-white">Registered Publisher Users</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Control publisher roles, wallet balances, custom CPM rates, and account access.</p>
+            <div className="p-6 border-b border-slate-800/60 bg-slate-900/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-extrabold text-white">Registered Publisher Users</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Control publisher roles, wallet balances, custom CPM rates, faucet settings, and inspect traffic sources.</p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Search Bar */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search user email or ID..."
+                    value={userSearchQuery}
+                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 outline-none focus:border-indigo-500 transition w-48 sm:w-56"
+                  />
+                </div>
+
+                {/* Faucet Filter Pills */}
+                <div className="flex items-center bg-slate-950 p-1 border border-slate-800 rounded-xl text-[11px] font-bold">
+                  <button
+                    onClick={() => setUserFaucetFilter("all")}
+                    className={`px-3 py-1 rounded-lg transition ${userFaucetFilter === "all" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+                  >
+                    All Users ({usersList.length})
+                  </button>
+                  <button
+                    onClick={() => setUserFaucetFilter("enabled")}
+                    className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${userFaucetFilter === "enabled" ? "bg-amber-600 text-white" : "text-amber-400/80 hover:text-amber-300"}`}
+                  >
+                    🚰 Faucet ON ({usersList.filter(u => u.enableFaucetMode).length})
+                  </button>
+                  <button
+                    onClick={() => setUserFaucetFilter("disabled")}
+                    className={`px-3 py-1 rounded-lg transition ${userFaucetFilter === "disabled" ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300"}`}
+                  >
+                    Faucet OFF
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -775,12 +872,24 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     <th className="py-4 px-6">Role</th>
                     <th className="py-4 px-6 text-right">Wallet Balance</th>
                     <th className="py-4 px-6 text-center">Custom CPM</th>
+                    <th className="py-4 px-6 text-center">Faucet Mode</th>
+                    <th className="py-4 px-6 text-center">Traffic Sources</th>
                     <th className="py-4 px-6 text-center">Registered Date</th>
                     <th className="py-4 px-6 text-center">Actions / Edit</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-slate-300 font-medium">
-                  {usersList.map((u) => {
+                  {usersList
+                    .filter((u) => {
+                      if (userFaucetFilter === "enabled" && !u.enableFaucetMode) return false;
+                      if (userFaucetFilter === "disabled" && u.enableFaucetMode) return false;
+                      if (userSearchQuery.trim()) {
+                        const q = userSearchQuery.toLowerCase();
+                        return u.email.toLowerCase().includes(q) || u.id.toLowerCase().includes(q);
+                      }
+                      return true;
+                    })
+                    .map((u) => {
                     const isEditing = editingUserId === u.id;
                     return (
                       <tr key={u.id} className={`hover:bg-slate-900/20 transition ${u.banned ? "bg-rose-950/10" : ""}`}>
@@ -848,6 +957,40 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                             )
                           )}
                         </td>
+                        <td className="py-4 px-6 text-center">
+                          {isEditing ? (
+                            <button
+                              type="button"
+                              onClick={() => setEditFaucetMode(!editFaucetMode)}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border transition ${editFaucetMode ? "bg-amber-500/20 text-amber-300 border-amber-500/40" : "bg-slate-950 text-slate-500 border-slate-800"}`}
+                            >
+                              {editFaucetMode ? "🚰 ENABLED" : "DISABLED"}
+                            </button>
+                          ) : (
+                            <div className="flex items-center justify-center gap-1.5">
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${u.enableFaucetMode ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-850 border-slate-800 text-slate-500"}`}>
+                                {u.enableFaucetMode ? "🚰 ON" : "OFF"}
+                              </span>
+                              <button
+                                onClick={() => handleToggleUserFaucetMode(u.id, !!u.enableFaucetMode)}
+                                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition cursor-pointer"
+                                title={u.enableFaucetMode ? "Disable Faucet Mode" : "Enable Faucet Mode"}
+                              >
+                                {u.enableFaucetMode ? <ToggleRight className="w-4 h-4 text-amber-400" /> : <ToggleLeft className="w-4 h-4 text-slate-500" />}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-4 px-6 text-center">
+                          <button
+                            onClick={() => handleOpenTrafficModal(u.id, u.email, u.enableFaucetMode)}
+                            className="px-2.5 py-1 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 border border-indigo-500/20 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition cursor-pointer"
+                            title="Inspect Referrers and Traffic Sources for this publisher"
+                          >
+                            <Globe className="w-3 h-3 text-indigo-400" />
+                            Inspect
+                          </button>
+                        </td>
                         <td className="py-4 px-6 text-center text-slate-500 font-semibold">
                           {new Date(u.createdAt).toLocaleDateString()}
                         </td>
@@ -875,7 +1018,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                                 <button
                                   onClick={() => handleStartEditUser(u)}
                                   className="p-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded transition"
-                                  title="Edit role, balance, custom CPM"
+                                  title="Edit role, balance, custom CPM, faucet settings"
                                 >
                                   <Edit2 className="w-3.5 h-3.5" />
                                 </button>
@@ -992,16 +1135,17 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
           <div className="bg-slate-900/40 rounded-xl border border-slate-800/80 overflow-hidden" id="admin_withdrawals">
             <div className="p-6 border-b border-slate-800/60 bg-slate-900/20">
               <h2 className="text-lg font-extrabold text-white">Fund Withdrawal Payout Requests</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Review, approve, or reject withdrawal submissions from publishers. Rejecting automatically refunds balance.</p>
+              <p className="text-xs text-slate-400 mt-0.5">Review, approve, or reject withdrawal submissions from publishers. Verify traffic referrers and Faucet Mode status before approving.</p>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase border-b border-slate-800/60">
-                    <th className="py-4 px-6">Publisher Details</th>
+                    <th className="py-4 px-6">Publisher & Faucet Mode</th>
                     <th className="py-4 px-6">Method & Account</th>
                     <th className="py-4 px-6 text-right">Requested Amount</th>
+                    <th className="py-4 px-6">Traffic Sources (Referrers)</th>
                     <th className="py-4 px-6 text-center">Status</th>
                     <th className="py-4 px-6 text-center">Process Request</th>
                   </tr>
@@ -1013,6 +1157,19 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                         <span className="font-bold text-white block">{w.userEmail}</span>
                         <span className="text-[10px] text-slate-500 block font-mono">Req ID: {w.id}</span>
                         <span className="text-[10px] text-slate-500 block">Date: {new Date(w.createdAt).toLocaleString()}</span>
+                        
+                        <div className="flex items-center gap-1.5 mt-1.5">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${w.userFaucetMode ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-800 text-slate-400 border-slate-700"}`}>
+                            {w.userFaucetMode ? "🚰 FAUCET MODE ON" : "🌐 ORGANIC TRAFFIC"}
+                          </span>
+                          <button
+                            onClick={() => handleToggleUserFaucetMode(w.userId, !!w.userFaucetMode)}
+                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition cursor-pointer"
+                            title={w.userFaucetMode ? "Disable Faucet Mode for user" : "Enable Faucet Mode for user"}
+                          >
+                            {w.userFaucetMode ? <ToggleRight className="w-4 h-4 text-amber-400" /> : <ToggleLeft className="w-4 h-4 text-slate-500" />}
+                          </button>
+                        </div>
                       </td>
                       <td className="py-4 px-6">
                         <span className="font-bold text-slate-200 block text-xs">{w.method}</span>
@@ -1020,6 +1177,30 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       </td>
                       <td className="py-4 px-6 text-right font-black text-white text-sm">
                         ${w.amount.toFixed(2)}
+                      </td>
+                      <td className="py-4 px-6">
+                        <div className="space-y-1.5">
+                          {w.trafficSources && w.trafficSources.length > 0 ? (
+                            <div className="text-[11px] font-medium text-slate-300">
+                              <span className="font-bold text-white font-mono block truncate max-w-[180px]">
+                                Top: {w.trafficSources[0].source}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {w.trafficSources[0].clicks} views (${w.trafficSources[0].earnings.toFixed(4)})
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 block italic">No click logs recorded yet</span>
+                          )}
+
+                          <button
+                            onClick={() => handleOpenTrafficModal(w.userId, w.userEmail, w.userFaucetMode)}
+                            className="px-2.5 py-1 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 border border-indigo-500/20 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition cursor-pointer"
+                          >
+                            <Globe className="w-3 h-3 text-indigo-400" />
+                            Inspect All Sources ({w.trafficSources?.length || 0})
+                          </button>
+                        </div>
                       </td>
                       <td className="py-4 px-6 text-center">
                         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase border ${w.status === "approved" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : w.status === "rejected" ? "bg-rose-500/10 border-rose-500/20 text-rose-400" : "bg-amber-500/10 border-amber-500/20 text-amber-400"}`}>
@@ -3120,6 +3301,180 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
             </div>
           </div>
         )}
+
+      {/* TRAFFIC SOURCES & REFERRERS INSPECTION MODAL */}
+      {trafficModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+                  <Globe className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    Traffic Sources & Referrers Inspection
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Publisher: <strong className="text-white">{trafficModalUser.email}</strong> (ID: <span className="font-mono">{trafficModalUser.id}</span>)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setTrafficModalUser(null); setTrafficModalData(null); }}
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              {/* User Faucet Status Card */}
+              <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+                    <span>Faucet Mode Setting:</span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${trafficModalUser.enableFaucetMode ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-slate-800 text-slate-400 border-slate-700"}`}>
+                      {trafficModalUser.enableFaucetMode ? "🚰 ENABLED (Faucet Publisher)" : "🌐 DISABLED (Organic Traffic)"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    {trafficModalUser.enableFaucetMode 
+                      ? "This user is flagged as a crypto faucet publisher. Views use faucet APIs and daily IP limits."
+                      : "User is currently in standard organic traffic mode. You can toggle their Faucet Mode setting below."}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => handleToggleUserFaucetMode(trafficModalUser.id, trafficModalUser.enableFaucetMode)}
+                  className={`px-4 py-2 font-bold text-xs rounded-xl transition cursor-pointer shrink-0 border ${trafficModalUser.enableFaucetMode ? "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700" : "bg-amber-600 hover:bg-amber-700 text-white border-amber-500/30 shadow-lg shadow-amber-900/20"}`}
+                >
+                  {trafficModalUser.enableFaucetMode ? "Disable Faucet Mode" : "Enable Faucet Mode"}
+                </button>
+              </div>
+
+              {/* Traffic Sources Breakdown */}
+              {trafficModalLoading ? (
+                <div className="py-12 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-3">
+                  <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
+                  <span>Gathering referrer logs & traffic sources for publisher...</span>
+                </div>
+              ) : trafficModalData ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-center">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase">Total Click Logs</p>
+                      <p className="text-lg font-black text-white mt-0.5">{trafficModalData.totalClicks.toLocaleString()}</p>
+                    </div>
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-center">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase">Unique Referrer Domains</p>
+                      <p className="text-lg font-black text-indigo-400 mt-0.5">{trafficModalData.trafficSources.length}</p>
+                    </div>
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-center col-span-2 sm:col-span-1">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase">Top Source Share</p>
+                      <p className="text-lg font-black text-emerald-400 mt-0.5">
+                        {trafficModalData.trafficSources.length > 0 && trafficModalData.totalClicks > 0
+                          ? `${Math.round((trafficModalData.trafficSources[0].clicks / trafficModalData.totalClicks) * 100)}%`
+                          : "N/A"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Search Referrers */}
+                  {trafficModalData.trafficSources.length > 5 && (
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Filter referrers by domain or URL..."
+                        value={trafficSourceSearch}
+                        onChange={(e) => setTrafficSourceSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 outline-none focus:border-indigo-500 transition"
+                      />
+                    </div>
+                  )}
+
+                  {/* Sources List */}
+                  <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/50">
+                    <div className="p-3 bg-slate-950 border-b border-slate-800 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Referrer Domain / Source</span>
+                      <div className="flex items-center gap-8 pr-2">
+                        <span>Clicks</span>
+                        <span>Earnings</span>
+                      </div>
+                    </div>
+
+                    {trafficModalData.trafficSources.length === 0 ? (
+                      <div className="p-8 text-center text-slate-500 text-xs">
+                        No traffic click logs recorded for this publisher yet.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-800/60 max-h-72 overflow-y-auto">
+                        {trafficModalData.trafficSources
+                          .filter((s) => !trafficSourceSearch || s.source.toLowerCase().includes(trafficSourceSearch.toLowerCase()))
+                          .map((s, idx) => {
+                            const pct = trafficModalData.totalClicks > 0 ? Math.round((s.clicks / trafficModalData.totalClicks) * 100) : 0;
+                            const isDirect = s.source === "Direct / Unknown";
+                            const isFaucetDomain = s.source.toLowerCase().includes("faucet") || s.source.toLowerCase().includes("claim") || s.source.toLowerCase().includes("pay");
+
+                            return (
+                              <div key={idx} className="p-3.5 hover:bg-slate-900/50 transition flex items-center justify-between gap-4 text-xs">
+                                <div className="space-y-1 min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-white truncate font-mono text-[11px]">{s.source}</span>
+                                    {isDirect && (
+                                      <span className="px-1.5 py-0.2 bg-slate-800 text-slate-400 text-[9px] rounded font-semibold">Direct</span>
+                                    )}
+                                    {isFaucetDomain && (
+                                      <span className="px-1.5 py-0.2 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] rounded font-bold">Faucet Source</span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                                    <span>Share: <strong>{pct}%</strong></span>
+                                    {s.lastSeen && <span>Last Active: {new Date(s.lastSeen).toLocaleString()}</span>}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-6 shrink-0 text-right">
+                                  <div>
+                                    <span className="font-extrabold text-white text-xs block">{s.clicks.toLocaleString()}</span>
+                                    <span className="text-[9px] text-slate-500 font-medium">views</span>
+                                  </div>
+                                  <div className="min-w-[60px]">
+                                    <span className="font-black text-emerald-400 text-xs block">${s.earnings.toFixed(4)}</span>
+                                    <span className="text-[9px] text-slate-500 font-medium">earned</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 text-center text-slate-500 text-xs">
+                  Failed to load traffic source statistics.
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex justify-between items-center text-xs text-slate-400">
+              <span>Inspect referrers to verify publisher traffic validity before approving withdrawals.</span>
+              <button
+                onClick={() => { setTrafficModalUser(null); setTrafficModalData(null); }}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </main>
     </div>
   );

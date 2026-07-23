@@ -1176,7 +1176,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                 <h3 className="font-extrabold text-white text-base mb-4">Request Fund Withdrawal</h3>
                 
                 {/* Active Payout Settings Display */}
-                <div className="mb-6 p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs space-y-1">
+                <div className="mb-4 p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs space-y-1">
                   <p className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">Active Payout Destination</p>
                   {userMethod && userAccount ? (
                     <>
@@ -1192,6 +1192,21 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                       ⚠️ No payout method configured. Please add payout details in the <button onClick={() => setActiveTab("settings")} className="underline font-bold text-indigo-400">Settings tab</button> before submitting request.
                     </div>
                   )}
+                </div>
+
+                {/* Account Faucet Mode Status */}
+                <div className="mb-6 p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">Account Traffic Mode</p>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${faucetModeEnabled ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-800 text-slate-400 border-slate-700"}`}>
+                      {faucetModeEnabled ? "🚰 FAUCET MODE ON" : "🌐 ORGANIC TRAFFIC"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium mt-1">
+                    {faucetModeEnabled 
+                      ? "Your account is set to Crypto Faucet Mode. Admins verify traffic referrers prior to payout approval."
+                      : "Organic traffic mode active. You can toggle Faucet Mode in your account Settings."}
+                  </p>
                 </div>
 
                 {withdrawError && (
