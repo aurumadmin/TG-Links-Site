@@ -2558,6 +2558,339 @@ ${ticket.adminReply}
     }
   });
 
+function parseSqlInsertValue(val: string): string {
+  val = val.trim();
+  if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) {
+    return val.slice(1, -1).replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (val.toUpperCase() === "NULL") return "";
+  return val;
+}
+
+function normalizeAndMigrateDatabase(rawData: any): any {
+  let data: any = rawData;
+
+  // 1. If input is string, try JSON parse, or clean up BOM / wrapping, or parse SQL
+  if (typeof data === "string") {
+    let str = data.trim();
+    // Remove UTF-8 BOM if present
+    if (str.charCodeAt(0) === 0xFEFF) {
+      str = str.slice(1);
+    }
+    
+    // Try standard JSON.parse
+    try {
+      data = JSON.parse(str);
+    } catch (e) {
+      // Try to extract JSON object if wrapped in extra text
+      const firstBrace = str.indexOf("{");
+      const lastBrace = str.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          data = JSON.parse(str.substring(firstBrace, lastBrace + 1));
+        } catch (e2) {
+          data = parseSqlDump(str);
+        }
+      } else {
+        data = parseSqlDump(str);
+      }
+    }
+  }
+
+  // Helper to parse SQL dump
+  function parseSqlDump(sql: string): any {
+    const dbOut: any = { users: [], links: [], clicksLog: [], withdrawals: [], tickets: [], adFlyShorteners: [], settings: {} };
+    const insertRegex = /INSERT\s+INTO\s+[`"']?(\w+)[`"']?\s*(?:\([^)]+\))?\s*VALUES\s*([^;]+);/gi;
+    let match;
+    while ((match = insertRegex.exec(sql)) !== null) {
+      const tableName = match[1].toLowerCase();
+      const valuesStr = match[2];
+      const rowMatches = valuesStr.match(/\((?:[^()']|'[^']*')*\)/g) || [];
+      for (const rowStr of rowMatches) {
+        const rawVals = rowStr.slice(1, -1).split(/,(?=(?:[^']*'[^']*')*[^']*$)/).map(v => parseSqlInsertValue(v));
+        if (tableName.includes("user") || tableName.includes("member") || tableName.includes("account")) {
+          dbOut.users.push({
+            id: rawVals[0],
+            email: rawVals[1] || rawVals[0],
+            username: rawVals[1],
+            password: rawVals[2],
+            role: rawVals[3] || "user",
+            balance: parseFloat(rawVals[4] || "0") || 0
+          });
+        } else if (tableName.includes("link") || tableName.includes("url") || tableName.includes("shortener")) {
+          dbOut.links.push({
+            id: rawVals[0],
+            code: rawVals[1] || rawVals[0],
+            originalUrl: rawVals[2] || rawVals[1],
+            userId: rawVals[3] || "guest",
+            clicks: parseInt(rawVals[4] || "0", 10) || 0,
+            earnings: parseFloat(rawVals[5] || "0") || 0
+          });
+        } else if (tableName.includes("click") || tableName.includes("stat") || tableName.includes("view") || tableName.includes("log")) {
+          dbOut.clicksLog.push({
+            id: rawVals[0],
+            linkId: rawVals[1],
+            userId: rawVals[2],
+            timestamp: rawVals[3] || new Date().toISOString(),
+            ip: rawVals[4] || "127.0.0.1",
+            earning: parseFloat(rawVals[5] || "0") || 0
+          });
+        }
+      }
+    }
+    return dbOut;
+  }
+
+  if (typeof data !== "object" || data === null) {
+    data = {};
+  }
+
+  // 2. Unwrap nested object fields (e.g. data.data, data.db, data.database, data.result, data.tables, data.backup)
+  if (!data.users && !data.links) {
+    if (data.data && typeof data.data === "object") data = data.data;
+    else if (data.db && typeof data.db === "object") data = data.db;
+    else if (data.database && typeof data.database === "object") data = data.database;
+    else if (data.backup && typeof data.backup === "object") data = data.backup;
+    else if (data.tables && typeof data.tables === "object") data = data.tables;
+  }
+
+  // Helper to force object dictionaries or nested structures into arrays
+  function toArray(val: any): any[] {
+    if (!val) return [];
+    if (Array.isArray(val)) return val;
+    if (typeof val === "object") {
+      return Object.keys(val).map(key => {
+        const item = val[key];
+        if (typeof item === "object" && item !== null) {
+          if (!item.id && !item._id) item.id = key;
+          return item;
+        }
+        return { id: key, value: item };
+      });
+    }
+    return [];
+  }
+
+  // Extract raw sections with alias matching
+  let rawUsers = toArray(data.users || data.user || data.accounts || data.members || data.users_list);
+  let rawLinks = toArray(data.links || data.link || data.urls || data.shortened_links || data.short_links || data.links_list);
+  let rawClicks = toArray(data.clicksLog || data.clicks_log || data.click_logs || data.clicks || data.views || data.statistics || data.stats || data.logs);
+  let rawWithdrawals = toArray(data.withdrawals || data.payouts || data.withdrawal_requests);
+  let rawTickets = toArray(data.tickets || data.support_tickets || data.messages);
+  let rawAdFly = toArray(data.adFlyShorteners || data.external_shorteners || data.adfly_links);
+  let rawSettings = (data.settings || data.config || data.options || data.site_settings || {});
+
+  // 3. Normalize USERS
+  const usersMap = new Map<string, any>();
+  const normalizedUsers: any[] = [];
+
+  rawUsers.forEach((u: any, idx: number) => {
+    if (!u || typeof u !== "object") return;
+    const email = (u.email || u.user_email || u.username || u.name || u.login || `user_${idx}@example.com`).trim().toLowerCase();
+    const id = u.id || u._id || u.user_id || u.uid || `u-${idx + 1}`;
+    const role = (u.role === "admin" || u.is_admin || u.isAdmin || u.admin || u.type === "admin" || email === "freefiregtamcpe@gmail.com" || email === "teamthunderofficialyt@gmail.com") ? "admin" : "user";
+    
+    const userObj = {
+      id,
+      email: u.email || email,
+      username: u.username || u.name || email.split("@")[0],
+      role,
+      balance: Number(u.balance ?? u.wallet ?? u.money ?? u.earnings ?? u.totalEarned ?? 0),
+      totalEarned: Number(u.totalEarned ?? u.total_earned ?? u.balance ?? 0),
+      withdrawalMethod: u.withdrawalMethod || u.withdrawal_method || u.payment_method || "PayPal",
+      withdrawalAccount: u.withdrawalAccount || u.withdrawal_account || u.payment_account || u.email || email,
+      createdAt: u.createdAt || u.created_at || u.created || u.date || new Date().toISOString(),
+      banned: Boolean(u.banned ?? u.is_banned ?? false),
+      password: u.password || u.pass || u.password_hash || u.hash || "Thunderffyt123@",
+      apiToken: u.apiToken || u.api_token || u.token || generateApiToken(),
+      enableFaucetMode: Boolean(u.enableFaucetMode ?? u.faucet_mode ?? false)
+    };
+
+    usersMap.set(id, userObj);
+    usersMap.set(email, userObj);
+    normalizedUsers.push(userObj);
+  });
+
+  // Ensure mandatory admin accounts exist so admins are never locked out after restore
+  const defaultAdmins = [
+    { id: "admin-1", email: "freefiregtamcpe@gmail.com", role: "admin", balance: 100, totalEarned: 100, withdrawalMethod: "PayPal", withdrawalAccount: "admin_paypal@example.com", createdAt: new Date().toISOString(), banned: false, password: "Thunderffyt123@", apiToken: generateApiToken() },
+    { id: "admin-2", email: "teamthunderofficialyt@gmail.com", role: "admin", balance: 0, totalEarned: 0, withdrawalMethod: "PayPal", withdrawalAccount: "teamthunder@example.com", createdAt: new Date().toISOString(), banned: false, password: "Thunderffyt123@", apiToken: generateApiToken() }
+  ];
+
+  defaultAdmins.forEach(adminDef => {
+    const existing = normalizedUsers.find(u => u.email.toLowerCase() === adminDef.email.toLowerCase());
+    if (existing) {
+      existing.role = "admin"; // ensure admin authority
+    } else {
+      normalizedUsers.push(adminDef);
+      usersMap.set(adminDef.id, adminDef);
+      usersMap.set(adminDef.email, adminDef);
+    }
+  });
+
+  // 4. Normalize LINKS
+  const normalizedLinks: any[] = [];
+
+  rawLinks.forEach((l: any, idx: number) => {
+    if (!l || typeof l !== "object") return;
+    const id = l.id || l._id || l.link_id || `l-${Math.random().toString(36).substring(2, 9)}`;
+    const code = l.code || l.alias || l.short_code || l.short_url || l.slug || l.key || Math.random().toString(36).substring(2, 8);
+    const originalUrl = l.originalUrl || l.original_url || l.url || l.long_url || l.target_url || l.destination_url || l.link || l.location || "https://google.com";
+    
+    let userId = l.userId || l.user_id || l.author_id || l.owner_id || l.user || "guest";
+    let userEmail = l.userEmail || l.user_email || l.email;
+    if (!userEmail && usersMap.has(userId)) {
+      userEmail = usersMap.get(userId).email;
+    } else if (userEmail && usersMap.has(userEmail)) {
+      userId = usersMap.get(userEmail).id;
+    }
+    if (!userEmail) userEmail = "guest";
+
+    const linkObj = {
+      id,
+      code,
+      originalUrl,
+      userId,
+      userEmail,
+      cpm: Number(l.cpm ?? l.rate ?? 5),
+      clicks: Number(l.clicks ?? l.views ?? l.total_clicks ?? l.click_count ?? 0),
+      earnings: Number(l.earnings ?? l.total_earnings ?? l.revenue ?? l.earned ?? 0),
+      createdAt: l.createdAt || l.created_at || l.created || l.date || new Date().toISOString(),
+      status: l.status || (l.active === false ? "inactive" : "active"),
+      isApiGenerated: Boolean(l.isApiGenerated ?? l.is_api ?? l.api ?? false),
+      isFaucetApi: Boolean(l.isFaucetApi ?? l.faucet_api ?? false),
+      lastViewedAt: l.lastViewedAt || l.last_viewed_at || l.last_click || l.createdAt || l.created_at || new Date().toISOString()
+    };
+
+    // Check for embedded clicks inside the link e.g. l.clicksList, l.viewsList, l.logs
+    if (Array.isArray(l.clicksList) || Array.isArray(l.viewsList) || Array.isArray(l.logs)) {
+      const embeddedClicks = l.clicksList || l.viewsList || l.logs;
+      embeddedClicks.forEach((c: any) => {
+        rawClicks.push({
+          linkId: id,
+          userId,
+          timestamp: c.timestamp || c.created_at || c.date || new Date().toISOString(),
+          ip: c.ip || c.ip_address || "127.0.0.1",
+          earning: Number(c.earning ?? c.revenue ?? 0),
+          country: c.country || "Global"
+        });
+      });
+    }
+
+    normalizedLinks.push(linkObj);
+  });
+
+  // 5. Normalize CLICKS LOG
+  const normalizedClicksLog: any[] = [];
+  rawClicks.forEach((c: any) => {
+    if (!c || typeof c !== "object") return;
+    const id = c.id || c._id || `c-${Math.random().toString(36).substring(2, 9)}`;
+    const linkId = c.linkId || c.link_id || c.url_id || c.alias || (normalizedLinks[0] ? normalizedLinks[0].id : "l-1");
+    const userId = c.userId || c.user_id || "guest";
+    
+    normalizedClicksLog.push({
+      id,
+      linkId,
+      userId,
+      timestamp: c.timestamp || c.created_at || c.date || c.time || c.created || new Date().toISOString(),
+      ip: c.ip || c.ip_address || c.user_ip || "127.0.0.1",
+      earning: Number(c.earning ?? c.earnings ?? c.revenue ?? c.payout ?? c.amount ?? 0),
+      country: c.country || c.country_code || c.location || "Global"
+    });
+  });
+
+  // Recalculate link statistics if clicks was 0 but logs exist
+  const linkClicksCountMap = new Map<string, number>();
+  const linkEarningsMap = new Map<string, number>();
+  normalizedClicksLog.forEach(c => {
+    linkClicksCountMap.set(c.linkId, (linkClicksCountMap.get(c.linkId) || 0) + 1);
+    linkEarningsMap.set(c.linkId, (linkEarningsMap.get(c.linkId) || 0) + Number(c.earning || 0));
+  });
+
+  normalizedLinks.forEach(l => {
+    if (l.clicks === 0 && linkClicksCountMap.has(l.id)) {
+      l.clicks = linkClicksCountMap.get(l.id)!;
+    }
+    if (l.earnings === 0 && linkEarningsMap.has(l.id)) {
+      l.earnings = Number(linkEarningsMap.get(l.id)!.toFixed(4));
+    }
+  });
+
+  // 6. Normalize WITHDRAWALS
+  const normalizedWithdrawals: any[] = rawWithdrawals.map((w: any, idx: number) => ({
+    id: w.id || w._id || `w-${idx + 1}`,
+    userId: w.userId || w.user_id || "guest",
+    userEmail: w.userEmail || w.user_email || w.email || "guest",
+    amount: Number(w.amount ?? w.sum ?? 0),
+    method: w.method || w.withdrawal_method || w.payment_method || "PayPal",
+    account: w.account || w.withdrawal_account || w.payment_account || "N/A",
+    status: w.status || "pending",
+    requestedAt: w.requestedAt || w.requested_at || w.created_at || w.date || new Date().toISOString(),
+    processedAt: w.processedAt || w.processed_at || w.updated_at
+  })).filter(Boolean);
+
+  // 7. Normalize TICKETS
+  const normalizedTickets: any[] = rawTickets.map((t: any, idx: number) => ({
+    id: t.id || t._id || `t-${idx + 1}`,
+    userId: t.userId || t.user_id || "guest",
+    userEmail: t.userEmail || t.user_email || t.email || "guest",
+    subject: t.subject || t.title || "Support Request",
+    message: t.message || t.body || t.content || "",
+    status: t.status || "open",
+    createdAt: t.createdAt || t.created_at || t.date || new Date().toISOString(),
+    replies: Array.isArray(t.replies) ? t.replies : []
+  })).filter(Boolean);
+
+  // 8. Normalize ADFLY SHORTENERS
+  const normalizedAdFly: any[] = rawAdFly.map((a: any, idx: number) => ({
+    id: a.id || a._id || `adfly-${idx + 1}`,
+    name: a.name || a.title || "External Shortener",
+    apiUrl: a.apiUrl || a.api_url || a.url || "",
+    apiToken: a.apiToken || a.api_token || a.token || "",
+    alias: a.alias || a.code || "",
+    active: a.active !== undefined ? Boolean(a.active) : true
+  })).filter(Boolean);
+
+  // 9. Normalize SETTINGS
+  const normalizedSettings = {
+    siteName: rawSettings.siteName || rawSettings.site_name || rawSettings.title || "TG LINKS",
+    siteTitle: rawSettings.siteTitle || rawSettings.site_title || "Shorten Links and Earn Money",
+    siteDescription: rawSettings.siteDescription || rawSettings.site_description || "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
+    globalCpm: Number(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 5),
+    minWithdrawal: Number(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 2),
+    withdrawalMethods: Array.isArray(rawSettings.withdrawalMethods) ? rawSettings.withdrawalMethods : ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
+    adPagesCount: Number(rawSettings.adPagesCount ?? rawSettings.ad_pages_count ?? 1),
+    bannerAd728x90: rawSettings.bannerAd728x90 || rawSettings.banner_728x90 || `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center"><span class="text-xs uppercase tracking-widest font-bold opacity-75">Sponsor Banner (728x90)</span></div>`,
+    bannerAd300x250: rawSettings.bannerAd300x250 || rawSettings.banner_300x250 || `<div class="w-[300px] h-[250px] bg-gradient-to-br from-purple-500 to-pink-500 flex flex-col items-center justify-center border border-purple-300 text-white rounded-lg shadow-sm p-6 text-center mx-auto"><span class="text-xs uppercase tracking-widest font-bold opacity-75">Premium Space (300x250)</span></div>`,
+    bannerAd320x50: rawSettings.bannerAd320x50 || rawSettings.banner_320x50 || `<div class="w-80 h-12 bg-gradient-to-r from-teal-500 to-emerald-600 flex items-center justify-between border border-teal-300 text-white rounded-lg shadow-sm px-4 mx-auto"><span class="text-xs font-bold uppercase tracking-wide">Ad: Secure VPN</span></div>`,
+    popunderCode: rawSettings.popunderCode || rawSettings.popunder || "",
+    globalHeaderCode: rawSettings.globalHeaderCode || rawSettings.header_code || "",
+    faviconUrl: rawSettings.faviconUrl || rawSettings.favicon || "",
+    logoUrl: rawSettings.logoUrl || rawSettings.logo || "",
+    enableOwnAds: rawSettings.enableOwnAds !== undefined ? Boolean(rawSettings.enableOwnAds) : true,
+    enableNeonAdGate: rawSettings.enableNeonAdGate !== undefined ? Boolean(rawSettings.enableNeonAdGate) : false,
+    neonTodayAdCode: rawSettings.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`,
+    enableFaucetMode: rawSettings.enableFaucetMode !== undefined ? Boolean(rawSettings.enableFaucetMode) : false,
+    smtpHost: rawSettings.smtpHost || "",
+    smtpPort: rawSettings.smtpPort || 587,
+    smtpUser: rawSettings.smtpUser || "",
+    smtpPass: rawSettings.smtpPass || "",
+    backupSenderEmail: rawSettings.backupSenderEmail || "",
+    backupReceiverEmail: rawSettings.backupReceiverEmail || ""
+  };
+
+  return {
+    users: normalizedUsers,
+    links: normalizedLinks,
+    clicksLog: normalizedClicksLog,
+    withdrawals: normalizedWithdrawals,
+    tickets: normalizedTickets,
+    adFlyShorteners: normalizedAdFly,
+    settings: normalizedSettings,
+    deletedLinksCount: Number(data.deletedLinksCount ?? data.deleted_links_count ?? 0)
+  };
+}
+
   app.get("/api/admin/export-db", requireAdmin, (req, res) => {
     const db = loadDb();
     res.setHeader("Content-Type", "application/json");
@@ -2603,39 +2936,21 @@ ${ticket.adminReply}
         return res.status(400).json({ error: "Extracted database backup content is empty." });
       }
 
-      let parsed: any;
-      try {
-        parsed = JSON.parse(rawString);
-      } catch (parseErr: any) {
-        return res.status(400).json({ error: "Invalid JSON format: " + parseErr.message });
-      }
-
-      if (typeof parsed !== "object" || parsed === null) {
-        return res.status(400).json({ error: "Invalid database structure: expected a JSON object." });
-      }
-
-      // Repair/ensure key fields exist so nothing crashes
-      if (!Array.isArray(parsed.users)) parsed.users = [];
-      if (!Array.isArray(parsed.links)) parsed.links = [];
-      if (!Array.isArray(parsed.clicksLog)) parsed.clicksLog = [];
-      if (!Array.isArray(parsed.withdrawals)) parsed.withdrawals = [];
-      if (!Array.isArray(parsed.tickets)) parsed.tickets = [];
-      if (!Array.isArray(parsed.adFlyShorteners)) parsed.adFlyShorteners = [];
-      if (typeof parsed.settings !== "object" || !parsed.settings) parsed.settings = {};
-      if (parsed.deletedLinksCount === undefined) parsed.deletedLinksCount = 0;
+      // Normalize and migrate database from any legacy format
+      const migratedDb = normalizeAndMigrateDatabase(rawString);
 
       // Save database to memory and disk
-      saveDb(parsed);
+      saveDb(migratedDb);
 
-      const usersCount = parsed.users.length;
-      const linksCount = parsed.links.length;
-      const clicksCount = parsed.clicksLog.length;
+      const usersCount = migratedDb.users.length;
+      const linksCount = migratedDb.links.length;
+      const clicksCount = migratedDb.clicksLog.length;
 
-      console.log(`[Restore DB] Successfully restored database! Users: ${usersCount}, Links: ${linksCount}, Clicks: ${clicksCount}`);
+      console.log(`[Restore DB] Successfully restored and migrated database! Users: ${usersCount}, Links: ${linksCount}, Clicks: ${clicksCount}`);
 
       return res.json({
         success: true,
-        message: `Database restored successfully! Re-loaded ${usersCount} users, ${linksCount} links, and ${clicksCount} click logs.`,
+        message: `Database restored & migrated successfully! Loaded ${usersCount} users, ${linksCount} links, and ${clicksCount} click logs.`,
         summary: {
           usersCount,
           linksCount,
