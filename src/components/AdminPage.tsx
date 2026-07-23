@@ -195,20 +195,37 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [restoreJsonText, setRestoreJsonText] = useState("");
   const [showPasteJson, setShowPasteJson] = useState(false);
 
-  const handleExportDb = async () => {
+  const [emailBackupLoading, setEmailBackupLoading] = useState(false);
+  const [emailBackupSuccess, setEmailBackupSuccess] = useState("");
+  const [emailBackupError, setEmailBackupError] = useState("");
+  const [copiedCurl, setCopiedCurl] = useState(false);
+
+  // Direct Stream Export to avoid browser memory overhead for >25MB databases
+  const handleExportDb = (format: "gz" | "json" = "gz") => {
     try {
-      const data = await fetchApi("/admin/export-db");
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `tglinks_database_backup_${new Date().toISOString().split("T")[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const userId = localStorage.getItem("tglinks_user_id") || "";
+      const downloadUrl = `/api/admin/export-db-download?format=${format}&token=${encodeURIComponent(userId)}`;
+      window.open(downloadUrl, "_blank");
     } catch (err: any) {
       alert("Failed to export database: " + (err.message || err));
+    }
+  };
+
+  const handleTriggerEmailBackup = async () => {
+    setEmailBackupLoading(true);
+    setEmailBackupSuccess("");
+    setEmailBackupError("");
+    try {
+      const res = await fetchApi("/admin/trigger-email-backup", { method: "POST" });
+      if (res.success) {
+        setEmailBackupSuccess(res.message || "Compressed database backup emailed successfully!");
+      } else {
+        setEmailBackupError(res.error || "Failed to send email backup.");
+      }
+    } catch (err: any) {
+      setEmailBackupError(err.message || "Failed to trigger email backup.");
+    } finally {
+      setEmailBackupLoading(false);
     }
   };
 
@@ -2361,24 +2378,103 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         {/* TAB WORKSPACE: DATABASE BACKUP & RESTORE */}
         {activeTab === "backup" && (
           <div className="space-y-6" id="admin_backup">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
                 <h1 className="text-2xl font-black text-white flex items-center gap-2">
                   <Database className="w-6 h-6 text-emerald-400" />
-                  Database Backup & Legacy Restore
+                  Database Stream Backup & Legacy Restore
                 </h1>
                 <p className="text-xs text-slate-400">
-                  Import database backups from email (.json, .sql, .gz) or export your current database. All legacy formats from previous versions are automatically recognized and converted!
+                  Optimized for large databases (&gt;25MB). Stream compressed backups directly, trigger automated SMTP email backups, or import legacy backups (.json, .sql, .gz).
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleExportDb}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                Export Current Database (.json)
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleExportDb("gz")}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition cursor-pointer"
+                  title="Recommended for large databases (>25MB). Shrinks DB by ~90% with instant direct stream download."
+                >
+                  <Download className="w-4 h-4" />
+                  Download Gzipped DB (.json.gz)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportDb("json")}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Raw DB (.json)
+                </button>
+              </div>
+            </div>
+
+            {/* AUTOMATED & INSTANT EXPORT OPTIONS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* INSTANT EMAIL BACKUP CARD */}
+              <div className="bg-slate-900/80 p-5 rounded-2xl border border-indigo-500/30 space-y-3 shadow-xl">
+                <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
+                  <Mail className="w-4 h-4 text-indigo-400" />
+                  <h3>Instant SMTP Email Backup</h3>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Triggers an immediate Gzipped database backup attachment (.json.gz) sent to your configured backup email via SMTP.
+                </p>
+                
+                {emailBackupSuccess && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs font-bold text-emerald-400 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{emailBackupSuccess}</span>
+                  </div>
+                )}
+
+                {emailBackupError && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs font-bold text-rose-400 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{emailBackupError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleTriggerEmailBackup}
+                  disabled={emailBackupLoading}
+                  className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
+                >
+                  {emailBackupLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                  {emailBackupLoading ? "Compressing & Sending Email..." : "Send DB Backup To Email Now"}
+                </button>
+              </div>
+
+              {/* AUTOMATED CRON / CURL ENDPOINT CARD */}
+              <div className="bg-slate-900/80 p-5 rounded-2xl border border-purple-500/30 space-y-3 shadow-xl">
+                <div className="flex items-center gap-2 text-purple-400 font-bold text-sm">
+                  <ShieldCheck className="w-4 h-4 text-purple-400" />
+                  <h3>Automated External Cron / cURL Link</h3>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Use this secure API URL in your server's crontab or external backup script to fetch automatic Gzip DB dumps anytime:
+                </p>
+
+                <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-[11px] font-mono text-purple-300 break-all select-all flex items-center justify-between gap-2">
+                  <span className="truncate">
+                    {typeof window !== "undefined" ? `${window.location.origin}/api/admin/export-db-download?format=gz&token=${localStorage.getItem("tglinks_user_id") || "ADMIN_TOKEN"}` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const token = localStorage.getItem("tglinks_user_id") || "ADMIN_TOKEN";
+                      const url = `${window.location.origin}/api/admin/export-db-download?format=gz&token=${token}`;
+                      navigator.clipboard.writeText(`curl -s "${url}" -o backup_db.json.gz`);
+                      setCopiedCurl(true);
+                      setTimeout(() => setCopiedCurl(false), 3000);
+                    }}
+                    className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold rounded-lg shrink-0 transition cursor-pointer"
+                  >
+                    {copiedCurl ? "Copied!" : "Copy cURL"}
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="bg-slate-900/60 p-6 rounded-2xl border border-indigo-500/30 space-y-6 shadow-xl">

@@ -3095,11 +3095,75 @@ function normalizeAndMigrateDatabase(rawData: any): any {
   };
 }
 
+  // --- DATABASE EXPORT & RESTORE ENDPOINTS ---
+  
+  // Standard JSON export (legacy API route)
   app.get("/api/admin/export-db", requireAdmin, (req, res) => {
     const db = loadDb();
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", `attachment; filename=tglinks_database_${Date.now()}.json`);
     res.json(db);
+  });
+
+  // Direct Stream Download Endpoint for large databases (>25MB handling via streaming / Gzip)
+  app.get("/api/admin/export-db-download", (req, res) => {
+    try {
+      // Authenticate via Bearer header or URL token query param for cURL / external cron support
+      const token = (req.query.token as string) || (req.headers.authorization ? req.headers.authorization.replace("Bearer ", "") : "");
+      if (!token) {
+        return res.status(401).send("Authentication token required.");
+      }
+
+      const db = loadDb();
+      const user = db.users.find((u: any) => u.id === token && u.role === "admin" && !u.banned);
+      if (!user) {
+        return res.status(403).send("Admin privilege required.");
+      }
+
+      const format = String(req.query.format || "gz").toLowerCase();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+      if (format === "gz" || format === "gzip") {
+        // Gzip compression reduces 25MB+ JSON down to ~1.5MB - 3MB!
+        const rawJsonString = JSON.stringify(db, null, 2);
+        const compressedBuffer = zlib.gzipSync(Buffer.from(rawJsonString, "utf-8"));
+
+        res.setHeader("Content-Type", "application/gzip");
+        res.setHeader("Content-Disposition", `attachment; filename=tglinks_database_${timestamp}.json.gz`);
+        res.setHeader("Content-Length", compressedBuffer.length);
+        return res.end(compressedBuffer);
+      } else {
+        // Direct stream download of raw JSON file
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Content-Disposition", `attachment; filename=tglinks_database_${timestamp}.json`);
+
+        if (fs.existsSync(DB_FILE)) {
+          const readStream = fs.createReadStream(DB_FILE);
+          return readStream.pipe(res);
+        } else {
+          return res.send(JSON.stringify(db, null, 2));
+        }
+      }
+    } catch (err: any) {
+      console.error("[Export DB Download] Stream error:", err);
+      return res.status(500).send("Failed to stream database export.");
+    }
+  });
+
+  // Instant SMTP Email Backup Trigger Endpoint
+  app.post("/api/admin/trigger-email-backup", requireAdmin, async (req, res) => {
+    try {
+      const db = loadDb();
+      const settings = db.settings || {};
+      const result = await sendEmailBackup(settings, true);
+      if (result.success) {
+        res.json({ success: true, message: "Compressed database backup (.json.gz) emailed successfully via SMTP!" });
+      } else {
+        res.status(500).json({ success: false, error: result.error || "Failed to send email backup." });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to trigger email backup." });
+    }
   });
 
   app.post("/api/admin/restore-db", requireAdmin, (req, res) => {
