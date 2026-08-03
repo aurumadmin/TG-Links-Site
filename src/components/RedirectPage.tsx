@@ -105,9 +105,9 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
   const countdownInterval = useRef<any>(null);
 
-  // Sponsored Premium Traffic Network Popup Modal State (triggers on page 2 when finished 10s)
+  // Sponsored Premium Traffic Network Popup Modal State (triggers on page 2 when finished 12s)
   const [showPopupAd, setShowPopupAd] = useState(false);
-  const [popupTimer, setPopupTimer] = useState(10);
+  const [popupTimer, setPopupTimer] = useState(12);
   const [popupTimerFinished, setPopupTimerFinished] = useState(false);
   const [popupClosed, setPopupClosed] = useState(false);
   const [popupHasBeenTriggered, setPopupHasBeenTriggered] = useState(false);
@@ -459,7 +459,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     const isSecondPage = currentStep === 2 || (settings?.enableOfferWall && currentStep > 1);
     if (isSecondPage && isTimerFinished && !popupHasBeenTriggered && !popupClosed) {
       setShowPopupAd(true);
-      setPopupTimer(10);
+      setPopupTimer(12);
       setPopupTimerFinished(false);
       setPopupHasBeenTriggered(true);
     }
@@ -1287,8 +1287,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
       {/* SPONSORED PREMIUM TRAFFIC NETWORK POPUP MODAL */}
       {showPopupAd && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-300">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl max-w-4xl w-full p-5 sm:p-6 relative text-white my-auto flex flex-col space-y-4">
+        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-300">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl max-w-6xl w-full p-4 sm:p-6 relative text-white my-auto flex flex-col space-y-4">
             
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1340,7 +1340,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                 )}
                 <span>
                   {popupTimerFinished
-                    ? "10 Seconds Sponsor Verification Complete! You can now close this popup."
+                    ? "12 Seconds Sponsor Verification Complete! You can now close this popup."
                     : `Please view the sponsored traffic ad for ${popupTimer} seconds to unlock the close button.`}
                 </span>
               </div>
@@ -1354,7 +1354,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               <iframe
                 src="https://www.rotate4all.com/promote/pt13azaa9mf1"
                 title="Sponsored Traffic Partner Modal"
-                className="w-full h-[400px] sm:h-[480px] border-0"
+                className="w-full h-[580px] sm:h-[650px] border-0"
                 referrerPolicy="unsafe-url"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               />
