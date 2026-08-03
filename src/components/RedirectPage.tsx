@@ -105,6 +105,13 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
   const countdownInterval = useRef<any>(null);
 
+  // Sponsored Premium Traffic Network Popup Modal State (triggers on page 2 when finished 10s)
+  const [showPopupAd, setShowPopupAd] = useState(false);
+  const [popupTimer, setPopupTimer] = useState(10);
+  const [popupTimerFinished, setPopupTimerFinished] = useState(false);
+  const [popupClosed, setPopupClosed] = useState(false);
+  const [popupHasBeenTriggered, setPopupHasBeenTriggered] = useState(false);
+
   // Offer Wall State
   const [offerCompleted, setOfferCompleted] = useState<boolean[]>([false, false, false, false]);
   const [activeOfferIndex, setActiveOfferIndex] = useState<number | null>(null);
@@ -445,6 +452,113 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       if (interval) clearInterval(interval);
     };
   }, [offerTimerActive, offerTimer, activeOfferIndex]);
+
+  // Trigger Sponsored Premium Traffic Network Popup when second page (after offerwall page) finishes 10s countdown
+  useEffect(() => {
+    // Check if on second page (currentStep === 2 or step 2 after offerwall) and timer finished
+    const isSecondPage = currentStep === 2 || (settings?.enableOfferWall && currentStep > 1);
+    if (isSecondPage && isTimerFinished && !popupHasBeenTriggered && !popupClosed) {
+      setShowPopupAd(true);
+      setPopupTimer(10);
+      setPopupTimerFinished(false);
+      setPopupHasBeenTriggered(true);
+    }
+  }, [currentStep, isTimerFinished, popupHasBeenTriggered, popupClosed, settings]);
+
+  // Popup 10s Timer Countdown
+  useEffect(() => {
+    let interval: any = null;
+    if (showPopupAd && popupTimer > 0) {
+      interval = setInterval(() => {
+        setPopupTimer((prev) => {
+          if (prev <= 1) {
+            setPopupTimerFinished(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [showPopupAd, popupTimer]);
+
+  // Dynamic Browser Tab Title for Offerwall Timer, Popup Ad, and Gate Countdown
+  useEffect(() => {
+    const siteName = settings?.siteName || settings?.siteTitle || "TG LINKS";
+
+    // 0. Popup Ad Active
+    if (showPopupAd) {
+      if (popupTimer > 0) {
+        document.title = `⏳ (${popupTimer}s) Sponsored Ad - ${siteName}`;
+      } else {
+        document.title = `✅ Close Ad Available! - ${siteName}`;
+      }
+      return;
+    }
+
+    // 1. Offer Wall Active / In Progress
+    if (
+      settings?.enableOfferWall &&
+      currentStep === 1 &&
+      activeOfferIndex !== null &&
+      offerClicked[activeOfferIndex] &&
+      !offerCompleted[activeOfferIndex]
+    ) {
+      if (offerTimer > 0) {
+        if (offerTimerActive) {
+          document.title = `⏳ (${offerTimer}s) Please Wait... - ${siteName}`;
+        } else {
+          document.title = `⏸️ (${offerTimer}s) Timer Paused - Stay on Ad Page! - ${siteName}`;
+        }
+      } else {
+        document.title = `✅ Offer Step ${activeOfferIndex + 1} Verified! - ${siteName}`;
+      }
+      return;
+    }
+
+    // 2. Regular Gate Step Timer
+    if (!isTimerFinished && timer > 0 && !loading && !error && !redirecting && settings?.enableOwnAds) {
+      document.title = `⏳ (${timer}s) Please Wait... - ${siteName}`;
+      return;
+    }
+
+    // 3. All offers or timers ready / default state
+    if (settings?.enableOfferWall && currentStep === 1) {
+      const totalOffers = settings?.offerWallCount || 4;
+      const allDone = Array.from({ length: totalOffers }).every((_, idx) => offerCompleted[idx]);
+      if (allDone) {
+        document.title = `✅ All Steps Completed! Get Link - ${siteName}`;
+        return;
+      }
+    } else if (isTimerFinished) {
+      document.title = `✅ Click Below to Continue - ${siteName}`;
+      return;
+    }
+
+    // Fallback default
+    document.title = settings?.siteTitle || settings?.siteName || "TG LINKS";
+
+    return () => {
+      document.title = settings?.siteTitle || settings?.siteName || "TG LINKS";
+    };
+  }, [
+    showPopupAd,
+    popupTimer,
+    offerTimer,
+    offerTimerActive,
+    activeOfferIndex,
+    offerClicked,
+    offerCompleted,
+    timer,
+    isTimerFinished,
+    currentStep,
+    settings,
+    loading,
+    error,
+    redirecting
+  ]);
 
   // 2. Timer management
   useEffect(() => {
@@ -1145,8 +1259,12 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         )}
       </div>
 
-      {/* PTP PAID-TO-PROMOTE SPONSOR AREA (at the very bottom of the page after all continue options and banners) */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12 mb-8" id="ptp_sponsor_area">
+      {/* PTP PAID-TO-PROMOTE SPONSOR AREA (appears after second page timer / popup completion) */}
+      <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12 mb-8 transition-all duration-700 ${
+        (currentStep === 2 || (settings?.enableOfferWall && currentStep > 1))
+          ? (popupTimerFinished || popupClosed ? "opacity-100 translate-y-0 block" : "opacity-0 translate-y-4 hidden")
+          : "block opacity-100"
+      }`} id="ptp_sponsor_area">
         <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 shadow-2xl backdrop-blur-md">
           <div className="flex items-center gap-2 mb-4 border-b border-slate-800/60 pb-3">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -1166,6 +1284,99 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           </p>
         </div>
       </div>
+
+      {/* SPONSORED PREMIUM TRAFFIC NETWORK POPUP MODAL */}
+      {showPopupAd && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-300">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl max-w-4xl w-full p-5 sm:p-6 relative text-white my-auto flex flex-col space-y-4">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+                <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  Sponsored Premium Traffic Network
+                </h3>
+              </div>
+
+              {/* Close Button */}
+              <button
+                disabled={!popupTimerFinished}
+                onClick={() => {
+                  setShowPopupAd(false);
+                  setPopupClosed(true);
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                  popupTimerFinished
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 active:scale-95 cursor-pointer animate-pulse"
+                    : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-75"
+                }`}
+              >
+                {popupTimerFinished ? (
+                  <>
+                    <span>Close Ad</span>
+                    <span className="font-mono text-sm">✕</span>
+                  </>
+                ) : (
+                  <>
+                    <Hourglass className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                    <span>Wait {popupTimer}s</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Timer Notification Banner */}
+            <div className={`px-4 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between transition-colors ${
+              popupTimerFinished
+                ? "bg-emerald-950/50 border border-emerald-800/60 text-emerald-300"
+                : "bg-amber-950/50 border border-amber-800/60 text-amber-300"
+            }`}>
+              <div className="flex items-center gap-2">
+                {popupTimerFinished ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <Hourglass className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+                )}
+                <span>
+                  {popupTimerFinished
+                    ? "10 Seconds Sponsor Verification Complete! You can now close this popup."
+                    : `Please view the sponsored traffic ad for ${popupTimer} seconds to unlock the close button.`}
+                </span>
+              </div>
+              <span className="font-mono font-bold text-sm shrink-0">
+                {popupTimer > 0 ? `${popupTimer}s` : "READY"}
+              </span>
+            </div>
+
+            {/* Iframe Banner Container */}
+            <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex justify-center items-center">
+              <iframe
+                src="https://www.rotate4all.com/promote/pt13azaa9mf1"
+                title="Sponsored Traffic Partner Modal"
+                className="w-full h-[400px] sm:h-[480px] border-0"
+                referrerPolicy="unsafe-url"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              />
+            </div>
+
+            {/* Modal Footer Note */}
+            <div className="flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-2 pt-1">
+              <span>Verified Traffic Partner: Rotate4All Network</span>
+              {popupTimerFinished ? (
+                <span className="text-emerald-400 font-bold">
+                  ✓ Close button unlocked! Ads below have been revealed.
+                </span>
+              ) : (
+                <span className="text-slate-500">
+                  Close button will enable automatically in {popupTimer}s
+                </span>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Footer copyright */}
       <footer className="bg-slate-950 text-slate-500 text-center py-6 border-t border-slate-900 text-xs flex flex-col items-center justify-center gap-2">
