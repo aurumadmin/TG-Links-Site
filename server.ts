@@ -2635,6 +2635,32 @@ ${ticket.adminReply}
     });
   });
 
+  // Public site settings endpoint
+  app.get("/api/settings", (req, res) => {
+    const db = loadDb();
+    const s = db.settings || {};
+    res.json({
+      siteName: s.siteName || "TG LINKS",
+      siteTitle: s.siteTitle || "Shorten Links and Earn Money",
+      siteDescription: s.siteDescription || "",
+      globalCpm: s.globalCpm || 5,
+      minWithdrawal: s.minWithdrawal || 2,
+      withdrawalMethods: s.withdrawalMethods || ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
+      adPagesCount: s.adPagesCount || 1,
+      bannerAd728x90: s.bannerAd728x90 || "",
+      bannerAd300x250: s.bannerAd300x250 || "",
+      bannerAd320x50: s.bannerAd320x50 || "",
+      popunderCode: s.popunderCode || "",
+      globalHeaderCode: s.globalHeaderCode || "",
+      faviconUrl: s.faviconUrl || "",
+      logoUrl: s.logoUrl || "",
+      enableOwnAds: s.enableOwnAds !== undefined ? s.enableOwnAds : true,
+      enableNeonAdGate: s.enableNeonAdGate !== undefined ? s.enableNeonAdGate : false,
+      neonTodayAdCode: s.neonTodayAdCode || "",
+      enableFaucetMode: s.enableFaucetMode !== undefined ? s.enableFaucetMode : false
+    });
+  });
+
   app.post("/api/admin/settings", requireAdmin, (req, res) => {
     const newSettings = req.body;
     const db = loadDb();

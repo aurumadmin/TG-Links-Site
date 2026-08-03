@@ -7,6 +7,7 @@ import AuthPage from "./components/AuthPage";
 import { User } from "./types";
 import { fetchApi } from "./lib/api";
 import { getCachedSettings, saveCachedSettings } from "./components/SiteLogo";
+import TopLoadingBar from "./components/TopLoadingBar";
 
 export default function App() {
   const [user, setUser] = useState<User | null>(() => {
@@ -66,6 +67,23 @@ export default function App() {
         console.error("Error setting public site settings:", err);
         setIsSettingsLoaded(true);
       });
+
+    const handleSettingsUpdated = () => {
+      const c = getCachedSettings();
+      if (c) {
+        setSiteSettings(c);
+        applyBranding(c);
+      }
+      fetchApi("/settings").then((res) => {
+        if (!res) return;
+        setSiteSettings(res);
+        saveCachedSettings(res);
+        applyBranding(res);
+      }).catch(() => {});
+    };
+
+    window.addEventListener("site_settings_updated", handleSettingsUpdated);
+    return () => window.removeEventListener("site_settings_updated", handleSettingsUpdated);
   }, []);
 
   // Parse path into state

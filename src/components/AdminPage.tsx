@@ -54,7 +54,8 @@ import {
   ChevronUp
 } from "lucide-react";
 import { motion } from "motion/react";
-import SiteLogo, { getCachedSettings } from "./SiteLogo";
+import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
+import TopLoadingBar from "./TopLoadingBar";
 
 type AdminTab = "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views" | "backup";
 
@@ -73,6 +74,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [withdrawalsList, setWithdrawalsList] = useState<Withdrawal[]>([]);
   const [ticketsList, setTicketsList] = useState<SupportTicket[]>([]);
   const [sysSettings, setSysSettings] = useState<SystemSettings | null>(() => getCachedSettings());
+  const [isAdminLoading, setIsAdminLoading] = useState(true);
   const [externalApis, setExternalApis] = useState<AdFlyShortener[]>([]);
   const [alsoSetFavicon, setAlsoSetFavicon] = useState(true);
 
@@ -292,6 +294,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   };
 
   const loadAdminData = async () => {
+    setIsAdminLoading(true);
     try {
       const [stats, users, links, withdrawals, tickets, settings, apis, viewsReport] = await Promise.all([
         fetchApi("/admin/stats"),
@@ -304,23 +307,28 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         fetchApi("/admin/views-report")
       ]);
 
-      setAdminStats(stats);
-      setUsersList(users.users);
-      setLinksList(links.links);
-      setWithdrawalsList(withdrawals.withdrawals);
+      if (stats) setAdminStats(stats);
+      if (users?.users) setUsersList(users.users);
+      if (links?.links) setLinksList(links.links);
+      if (withdrawals?.withdrawals) setWithdrawalsList(withdrawals.withdrawals);
       if (tickets?.tickets) {
         setTicketsList(tickets.tickets);
       }
-      setSysSettings(settings.settings);
-      if (settings.gdrive) {
+      if (settings?.settings) {
+        setSysSettings(settings.settings);
+        saveCachedSettings(settings.settings);
+      }
+      if (settings?.gdrive) {
         setGdriveInfo(settings.gdrive);
       }
-      setExternalApis(apis.shorteners);
+      if (apis?.shorteners) setExternalApis(apis.shorteners);
       if (viewsReport) {
         setViewsReportData(viewsReport);
       }
     } catch (err) {
       console.error("Failed to load admin panel data:", err);
+    } finally {
+      setIsAdminLoading(false);
     }
   };
 
@@ -500,6 +508,12 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       });
       if (res.success) {
         setSettingsSuccess("System general settings and advertisement codes updated successfully!");
+        if (res.settings) {
+          saveCachedSettings(res.settings);
+        } else {
+          saveCachedSettings(sysSettings);
+        }
+        window.dispatchEvent(new Event("site_settings_updated"));
         loadAdminData();
       }
     } catch (err: any) {
@@ -604,6 +618,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row" id="admin_root">
+      <TopLoadingBar isLoading={isAdminLoading} />
       
       {/* ADMIN SIDEBAR */}
       <aside className="w-full md:w-64 bg-slate-900 text-slate-400 flex flex-col border-r border-slate-800/80" id="admin_sidebar">

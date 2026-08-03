@@ -46,7 +46,8 @@ import {
   ResponsiveContainer 
 } from "recharts";
 
-import SiteLogo, { getCachedSettings } from "./SiteLogo";
+import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
+import TopLoadingBar from "./TopLoadingBar";
 
 const getBaseShortUrl = () => {
   const hostname = window.location.hostname;
@@ -69,6 +70,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
   const [links, setLinks] = useState<Link[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [settings, setSettings] = useState<SystemSettings | null>(() => getCachedSettings());
+  const [isDashboardLoading, setIsDashboardLoading] = useState(true);
 
   useEffect(() => {
     if (initialTab) {
@@ -182,6 +184,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
   };
 
   const loadDashboardData = async () => {
+    setIsDashboardLoading(true);
     try {
       const [statsRes, linksRes, withdrawsRes, settingsRes] = await Promise.all([
         fetchApi(`/dashboard/stats/${user.id}`),
@@ -190,15 +193,21 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
         fetchApi("/settings")
       ]);
 
-      setStats(statsRes);
-      setLinks(linksRes.links);
-      setWithdrawals(withdrawsRes.withdrawals);
-      setSettings(settingsRes);
+      if (statsRes) setStats(statsRes);
+      if (linksRes?.links) setLinks(linksRes.links);
+      if (withdrawsRes?.withdrawals) setWithdrawals(withdrawsRes.withdrawals);
+      if (settingsRes) {
+        setSettings(settingsRes);
+        saveCachedSettings(settingsRes);
+      }
       
       // Update local profile states with fresh DB values if any
       const freshUser = await fetchApi("/auth/me");
       if (freshUser && freshUser.user) {
         setCurrentUser(freshUser.user);
+        try {
+          localStorage.setItem("tglinks_user", JSON.stringify(freshUser.user));
+        } catch (e) {}
         setUserMethod(freshUser.user.withdrawalMethod || "");
         setUserAccount(freshUser.user.withdrawalAccount || "");
         setFaucetModeEnabled(!!freshUser.user.enableFaucetMode);
@@ -206,12 +215,21 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
       }
     } catch (err) {
       console.error("Failed to load dashboard statistics:", err);
+    } finally {
+      setIsDashboardLoading(false);
     }
   };
 
   useEffect(() => {
     loadDashboardData();
     loadUserTickets();
+
+    const handleSettingsUpdated = () => {
+      const cached = getCachedSettings();
+      if (cached) setSettings(cached);
+    };
+    window.addEventListener("site_settings_updated", handleSettingsUpdated);
+    return () => window.removeEventListener("site_settings_updated", handleSettingsUpdated);
   }, [user.id]);
 
   const handleShorten = async (e: React.FormEvent) => {
@@ -424,6 +442,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row relative" id="dashboard_root">
+      <TopLoadingBar isLoading={isDashboardLoading} />
       
       {/* Mobile Top Header Navigation */}
       <header className="flex md:hidden items-center justify-between bg-slate-900 border-b border-slate-800/80 px-5 py-4 sticky top-0 z-40 w-full" id="mobile_dashboard_header">
@@ -785,7 +804,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">Today's Views</p>
-                  <h3 className="text-xl font-black text-white mt-1 truncate">{stats?.todayViews || 0}</h3>
+                  {isDashboardLoading && !stats ? (
+                    <div className="h-6 w-16 bg-slate-800 animate-pulse rounded mt-1" />
+                  ) : (
+                    <h3 className="text-xl font-black text-white mt-1 truncate">{stats?.todayViews || 0}</h3>
+                  )}
                 </div>
               </div>
 
@@ -796,7 +819,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">Today's Earned</p>
-                  <h3 className="text-xl font-black text-emerald-400 mt-1 truncate">${stats?.todayEarnings ? stats.todayEarnings.toFixed(4) : "0.0000"}</h3>
+                  {isDashboardLoading && !stats ? (
+                    <div className="h-6 w-20 bg-slate-800 animate-pulse rounded mt-1" />
+                  ) : (
+                    <h3 className="text-xl font-black text-emerald-400 mt-1 truncate">${stats?.todayEarnings ? stats.todayEarnings.toFixed(4) : "0.0000"}</h3>
+                  )}
                 </div>
               </div>
 
@@ -807,7 +834,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">This Month Views</p>
-                  <h3 className="text-xl font-black text-white mt-1 truncate">{stats?.monthViews || 0}</h3>
+                  {isDashboardLoading && !stats ? (
+                    <div className="h-6 w-16 bg-slate-800 animate-pulse rounded mt-1" />
+                  ) : (
+                    <h3 className="text-xl font-black text-white mt-1 truncate">{stats?.monthViews || 0}</h3>
+                  )}
                 </div>
               </div>
 
@@ -818,7 +849,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">This Month Earned</p>
-                  <h3 className="text-xl font-black text-white mt-1 truncate">${stats?.monthEarnings ? stats.monthEarnings.toFixed(4) : "0.0000"}</h3>
+                  {isDashboardLoading && !stats ? (
+                    <div className="h-6 w-20 bg-slate-800 animate-pulse rounded mt-1" />
+                  ) : (
+                    <h3 className="text-xl font-black text-white mt-1 truncate">${stats?.monthEarnings ? stats.monthEarnings.toFixed(4) : "0.0000"}</h3>
+                  )}
                 </div>
               </div>
 
@@ -829,7 +864,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">Available Balance</p>
-                  <h3 className="text-xl font-black text-amber-400 mt-1 truncate">${stats?.balance ? stats.balance.toFixed(4) : "0.0000"}</h3>
+                  {isDashboardLoading && !stats ? (
+                    <div className="h-6 w-20 bg-slate-800 animate-pulse rounded mt-1" />
+                  ) : (
+                    <h3 className="text-xl font-black text-amber-400 mt-1 truncate">${stats?.balance ? stats.balance.toFixed(4) : "0.0000"}</h3>
+                  )}
                 </div>
               </div>
 
@@ -840,7 +879,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">Average CPM Rate</p>
-                  <h3 className="text-xl font-black text-white mt-1 truncate">${stats?.averageCpm ? stats.averageCpm.toFixed(2) : "5.00"}</h3>
+                  {isDashboardLoading && !stats ? (
+                    <div className="h-6 w-16 bg-slate-800 animate-pulse rounded mt-1" />
+                  ) : (
+                    <h3 className="text-xl font-black text-white mt-1 truncate">${stats?.averageCpm ? stats.averageCpm.toFixed(2) : "5.00"}</h3>
+                  )}
                 </div>
               </div>
             </div>
