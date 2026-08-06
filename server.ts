@@ -164,17 +164,27 @@ function getCurrentCpmForLink(link: any, db: any): number {
 }
 
 // Helper to syndicate a link with external AdLinkFly shortener APIs dynamically
-async function getExternalShortenedUrl(finalDestinationUrl: string, db: any, user?: any): Promise<{ id: string; url: string } | null> {
-  const isFaucetUser = user?.enableFaucetMode === true;
+async function getExternalShortenedUrl(
+  finalDestinationUrl: string, 
+  db: any, 
+  user?: any,
+  isFaucetModeOverride?: boolean
+): Promise<{ id: string; url: string } | null> {
+  // Determine if this request is for Faucet traffic
+  const isFaucetUser = isFaucetModeOverride !== undefined 
+    ? !!isFaucetModeOverride 
+    : !!user?.enableFaucetMode;
+
   const enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
     if (!api.enabled) return false;
-    // Faucet users only use Faucet APIs, standard users only use standard APIs
+    // Strict separation: Faucet shorteners ONLY for Faucet users/traffic, Normal shorteners ONLY for Normal users/traffic
     const apiIsFaucet = !!api.isFaucetApi;
     return apiIsFaucet === isFaucetUser;
   });
+
   if (enabledApis.length === 0) return null;
 
-  // Sort by priority descending (highest priority / top rank first). If equal, maintain set order
+  // Sort by priority/rank order (highest priority first). If equal, maintain set order (Rank #1, Rank #2, etc.)
   const sortedApis = [...enabledApis].sort((a: any, b: any) => {
     const pA = Number(a.priority || 0);
     const pB = Number(b.priority || 0);
@@ -191,14 +201,10 @@ async function getExternalShortenedUrl(finalDestinationUrl: string, db: any, use
         return (f as any)(...args);
       };
 
-  // Chain shorteners starting from the last rank towards the first rank so visitor completes Rank 1 -> Rank 2 -> ... -> finalDestination
-  let currentTargetUrl = finalDestinationUrl;
-  let lastSuccessfulApiId = "";
-  let hasChainedAny = false;
-
-  const reversedApis = [...sortedApis].reverse();
-
-  for (const selectedApi of reversedApis) {
+  // Select the top-ranked shortener API first and pass the final destination URL to it directly.
+  // DO NOT chain shorteners inside each other!
+  // If the top-ranked shortener fails or times out, fall back to the next eligible shortener in rank order.
+  for (const selectedApi of sortedApis) {
     try {
       let cleanApiUrl = selectedApi.apiUrl.trim();
       if (!cleanApiUrl.startsWith("http://") && !cleanApiUrl.startsWith("https://")) {
@@ -210,7 +216,7 @@ async function getExternalShortenedUrl(finalDestinationUrl: string, db: any, use
       if (!cleanApiUrl.includes("/api") && !cleanApiUrl.endsWith("/api")) {
         cleanApiUrl += "/api";
       }
-      const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(currentTargetUrl)}`;
+      const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(finalDestinationUrl)}`;
 
       // Use AbortController for a standard 8 seconds timeout
       const controller = new AbortController();
@@ -230,19 +236,17 @@ async function getExternalShortenedUrl(finalDestinationUrl: string, db: any, use
           }
         }
       } catch (e) {
-        // Not valid JSON, check if the response body itself is a plain-text URL
+        // Not valid JSON, check if plain-text URL
         const trimmedText = text.trim();
         if (/^https?:\/\//i.test(trimmedText)) {
           shortenedUrl = trimmedText;
         }
       }
 
-      if (shortenedUrl) {
-        currentTargetUrl = shortenedUrl;
-        lastSuccessfulApiId = selectedApi.id;
-        hasChainedAny = true;
+      if (shortenedUrl && /^https?:\/\//i.test(shortenedUrl)) {
+        return { id: selectedApi.id, url: shortenedUrl };
       } else {
-        console.warn(`External shortener API ${selectedApi.name} returned an empty/unrecognized response:`, text);
+        console.warn(`External shortener API ${selectedApi.name} returned an invalid or empty response:`, text);
       }
     } catch (err: any) {
       if (err.name === "AbortError") {
@@ -253,9 +257,6 @@ async function getExternalShortenedUrl(finalDestinationUrl: string, db: any, use
     }
   }
 
-  if (hasChainedAny) {
-    return { id: lastSuccessfulApiId, url: currentTargetUrl };
-  }
   return null;
 }
 
@@ -1232,7 +1233,8 @@ function setupRoutes() {
 
     const intermediateUrl = `${protocol}://${host}/go-final/${code}`;
 
-    const external = await getExternalShortenedUrl(intermediateUrl, db, user);
+    const isFaucetMode = !!user?.enableFaucetMode;
+    const external = await getExternalShortenedUrl(intermediateUrl, db, user, isFaucetMode);
     if (external) {
       adFlyShortenerId = external.id;
       adFlyShortenedUrl = external.url;
@@ -1352,7 +1354,8 @@ function setupRoutes() {
     const host = getRequestHost(req);
     const intermediateUrl = `${protocol}://${host}/go-final/${code}`;
 
-    const external = await getExternalShortenedUrl(intermediateUrl, db, user);
+    const isFaucetMode = !!user?.enableFaucetMode;
+    const external = await getExternalShortenedUrl(intermediateUrl, db, user, isFaucetMode);
     if (external) {
       adFlyShortenerId = external.id;
       adFlyShortenedUrl = external.url;
@@ -1532,14 +1535,33 @@ function setupRoutes() {
     const host = getRequestHost(req);
     const finalLandingUrl = `${protocol}://${host}/go-final/${link.code}`;
 
-    // Dynamically retrieve the external shortened URL(s)
+    // Dynamically retrieve or re-evaluate the external shortened URL
     let adFlyShortenedUrl = link.adFlyShortenedUrl;
-    if (!adFlyShortenedUrl) {
-      const external = await getExternalShortenedUrl(finalLandingUrl, db, user);
+    
+    // Check if cached shortener matches the link's current faucet mode and is still enabled
+    let needRegenerate = !adFlyShortenedUrl;
+    if (adFlyShortenedUrl && link.adFlyShortenerId) {
+      const existingShortener = (db.adFlyShorteners || []).find((s: any) => s.id === link.adFlyShortenerId);
+      if (existingShortener) {
+        const isFaucetShortener = !!existingShortener.isFaucetApi;
+        if (isFaucetShortener !== isFaucetMode || !existingShortener.enabled) {
+          needRegenerate = true;
+        }
+      } else {
+        needRegenerate = true;
+      }
+    }
+
+    if (needRegenerate) {
+      const external = await getExternalShortenedUrl(finalLandingUrl, db, user, isFaucetMode);
       if (external) {
         adFlyShortenedUrl = external.url;
         link.adFlyShortenedUrl = external.url;
         link.adFlyShortenerId = external.id;
+      } else {
+        adFlyShortenedUrl = undefined;
+        link.adFlyShortenedUrl = undefined;
+        link.adFlyShortenerId = undefined;
       }
     }
 

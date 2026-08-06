@@ -1259,42 +1259,16 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         )}
       </div>
 
-      {/* PTP PAID-TO-PROMOTE SPONSOR AREA (appears after second page timer / popup completion) */}
-      <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12 mb-8 transition-all duration-700 ${
-        (currentStep === 2 || (settings?.enableOfferWall && currentStep > 1))
-          ? (popupTimerFinished || popupClosed ? "opacity-100 translate-y-0 block" : "opacity-0 translate-y-4 hidden")
-          : "block opacity-100"
-      }`} id="ptp_sponsor_area">
-        <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 shadow-2xl backdrop-blur-md">
-          <div className="flex items-center gap-2 mb-4 border-b border-slate-800/60 pb-3">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-xs font-black text-slate-300 uppercase tracking-widest">Sponsored Premium Traffic Network</span>
-          </div>
-          <div className="w-full bg-slate-950 rounded-xl border border-slate-800/80 overflow-hidden shadow-inner">
-            <iframe
-              src="https://www.rotate4all.com/promote/pt13azaa9mf1"
-              title="Sponsored Traffic Partner"
-              className="w-full h-[600px] border-0"
-              referrerPolicy="unsafe-url"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            />
-          </div>
-          <p className="text-[10px] text-slate-500 text-center mt-3">
-            This portal is secured by TG Links Redirection Network. Traffic verification is powered by Rotate4All platform. Do not close this window while the traffic is resolving.
-          </p>
-        </div>
-      </div>
-
       {/* SPONSORED PREMIUM TRAFFIC NETWORK POPUP MODAL */}
       {showPopupAd && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-300">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl max-w-6xl w-full p-4 sm:p-6 relative text-white my-auto flex flex-col space-y-4">
+        <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-6 overflow-y-auto animate-in fade-in duration-300">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl max-w-6xl w-full p-3.5 sm:p-6 relative text-white my-auto flex flex-col space-y-3 sm:space-y-4 max-h-[98vh] sm:max-h-none overflow-y-auto">
             
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
-                <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 sm:pb-3 gap-2">
+              <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+                <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                <h3 className="text-xs sm:text-base font-black text-white uppercase tracking-wider truncate">
                   Sponsored Premium Traffic Network
                 </h3>
               </div>
@@ -1306,16 +1280,16 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   setShowPopupAd(false);
                   setPopupClosed(true);
                 }}
-                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                className={`px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shrink-0 ${
                   popupTimerFinished
-                    ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 active:scale-95 cursor-pointer animate-pulse"
-                    : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-75"
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 active:scale-95 cursor-pointer animate-pulse ring-2 ring-emerald-400/50"
+                    : "bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed opacity-80"
                 }`}
               >
                 {popupTimerFinished ? (
                   <>
                     <span>Close Ad</span>
-                    <span className="font-mono text-sm">✕</span>
+                    <span className="font-mono text-sm leading-none">✕</span>
                   </>
                 ) : (
                   <>
@@ -1327,49 +1301,49 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             </div>
 
             {/* Timer Notification Banner */}
-            <div className={`px-4 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between transition-colors ${
+            <div className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-xs font-medium flex items-center justify-between transition-colors gap-2 ${
               popupTimerFinished
                 ? "bg-emerald-950/50 border border-emerald-800/60 text-emerald-300"
                 : "bg-amber-950/50 border border-amber-800/60 text-amber-300"
             }`}>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                 {popupTimerFinished ? (
                   <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
                 ) : (
                   <Hourglass className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
                 )}
-                <span>
+                <span className="truncate sm:whitespace-normal">
                   {popupTimerFinished
-                    ? "12 Seconds Sponsor Verification Complete! You can now close this popup."
-                    : `Please view the sponsored traffic ad for ${popupTimer} seconds to unlock the close button.`}
+                    ? "Sponsor Verification Complete! Click 'Close Ad' above to proceed."
+                    : `Viewing sponsored ad: ${popupTimer}s left to unlock Close button.`}
                 </span>
               </div>
-              <span className="font-mono font-bold text-sm shrink-0">
+              <span className="font-mono font-bold text-xs sm:text-sm shrink-0 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800">
                 {popupTimer > 0 ? `${popupTimer}s` : "READY"}
               </span>
             </div>
 
-            {/* Iframe Banner Container */}
+            {/* Iframe Banner Container - Fully enlarged for mobile devices */}
             <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex justify-center items-center">
               <iframe
                 src="https://www.rotate4all.com/promote/pt13azaa9mf1"
                 title="Sponsored Traffic Partner Modal"
-                className="w-full h-[580px] sm:h-[650px] border-0"
+                className="w-full h-[520px] sm:h-[650px] border-0"
                 referrerPolicy="unsafe-url"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               />
             </div>
 
             {/* Modal Footer Note */}
-            <div className="flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-2 pt-1">
+            <div className="flex flex-col sm:flex-row items-center justify-between text-[10px] sm:text-[11px] text-slate-400 gap-1.5 sm:gap-2 pt-0.5">
               <span>Verified Traffic Partner: Rotate4All Network</span>
               {popupTimerFinished ? (
-                <span className="text-emerald-400 font-bold">
-                  ✓ Close button unlocked! Ads below have been revealed.
+                <span className="text-emerald-400 font-bold text-center sm:text-right">
+                  ✓ Close button unlocked! Click 'Close Ad' to dismiss.
                 </span>
               ) : (
-                <span className="text-slate-500">
-                  Close button will enable automatically in {popupTimer}s
+                <span className="text-slate-500 text-center sm:text-right">
+                  Close button unlocks automatically in {popupTimer}s
                 </span>
               )}
             </div>

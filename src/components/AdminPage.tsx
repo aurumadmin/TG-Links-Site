@@ -2606,10 +2606,10 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     What is Round-Robin Selection Weight & Rank Sequence?
                   </h4>
                   <p>
-                    <strong>Round-Robin Selection Weight (Priority)</strong> determines how link shortenings are routed across your external URL shorteners (e.g. ShrinkMe, AroLinks, AdFly). Shorteners with a higher weight number are selected first for syndication.
+                    <strong>Faucet vs Normal Separation:</strong> APIs flagged as <code>FAUCET ONLY</code> are used strictly for users running in Faucet Mode. Standard (unflagged) APIs are used strictly for normal organic traffic. Normal shorteners never appear for faucet traffic, and faucet shorteners never appear for normal traffic.
                   </p>
                   <p>
-                    <strong>Rank Sequence Order:</strong> The shorteners are called in the exact order shown in the table below (Rank #1, Rank #2, etc.). You can use the <strong>Move Up (▲)</strong> and <strong>Move Down (▼)</strong> buttons to rank your shorteners in your preferred sequence. If a primary shortener API fails or times out, the system automatically falls back to the next shortener in order!
+                    <strong>Rank Sequence Order & Fallback:</strong> Shorteners are selected directly by rank/priority order (Rank #1 first, Rank #2 second, etc.) within their respective category (Faucet or Normal). Shorteners are never chained inside each other. If a primary shortener API fails or times out, the system automatically falls back to the next shortener in order!
                   </p>
                 </div>
               </div>
