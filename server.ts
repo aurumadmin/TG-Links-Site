@@ -201,10 +201,16 @@ async function getExternalShortenedUrl(
         return (f as any)(...args);
       };
 
-  // Select the top-ranked shortener API first and pass the final destination URL to it directly.
-  // DO NOT chain shorteners inside each other!
-  // If the top-ranked shortener fails or times out, fall back to the next eligible shortener in rank order.
-  for (const selectedApi of sortedApis) {
+  // Chain active shorteners in sequence from Rank #1 down to the last Rank so visitor completes:
+  // Rank #1 -> Rank #2 -> Rank #3 ... -> finalDestinationUrl (/go-final/{code})
+  // To achieve this, we wrap starting from the last rank towards the first rank.
+  let currentTargetUrl = finalDestinationUrl;
+  let topSuccessfulApiId = "";
+  let hasChainedAny = false;
+
+  const reversedApis = [...sortedApis].reverse();
+
+  for (const selectedApi of reversedApis) {
     try {
       let cleanApiUrl = selectedApi.apiUrl.trim();
       if (!cleanApiUrl.startsWith("http://") && !cleanApiUrl.startsWith("https://")) {
@@ -216,9 +222,9 @@ async function getExternalShortenedUrl(
       if (!cleanApiUrl.includes("/api") && !cleanApiUrl.endsWith("/api")) {
         cleanApiUrl += "/api";
       }
-      const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(finalDestinationUrl)}`;
+      const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(currentTargetUrl)}`;
 
-      // Use AbortController for a standard 8 seconds timeout
+      // Use AbortController for an 8 seconds timeout per shortener API
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
@@ -244,7 +250,9 @@ async function getExternalShortenedUrl(
       }
 
       if (shortenedUrl && /^https?:\/\//i.test(shortenedUrl)) {
-        return { id: selectedApi.id, url: shortenedUrl };
+        currentTargetUrl = shortenedUrl;
+        topSuccessfulApiId = selectedApi.id;
+        hasChainedAny = true;
       } else {
         console.warn(`External shortener API ${selectedApi.name} returned an invalid or empty response:`, text);
       }
@@ -255,6 +263,10 @@ async function getExternalShortenedUrl(
         console.error(`Failed to syndicate with external shortener API ${selectedApi.name}:`, err);
       }
     }
+  }
+
+  if (hasChainedAny) {
+    return { id: topSuccessfulApiId, url: currentTargetUrl };
   }
 
   return null;
