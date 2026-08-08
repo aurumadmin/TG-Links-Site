@@ -1161,24 +1161,33 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   </div>
 
                   {/* TIMER DIGITS */}
-                  <div className="relative w-32 h-32 max-w-[128px] max-h-[128px] shrink-0 mx-auto flex items-center justify-center my-2 overflow-hidden">
-                    <svg width="128" height="128" viewBox="0 0 128 128" className="w-32 h-32 shrink-0 transform -rotate-90 block">
-                      <circle cx="64" cy="64" r="54" stroke="#0f172a" strokeWidth="7" fill="transparent" />
+                  <div 
+                    className="relative shrink-0 mx-auto flex items-center justify-center my-2 overflow-hidden"
+                    style={{ width: '120px', height: '120px', minWidth: '120px', minHeight: '120px', maxWidth: '120px', maxHeight: '120px' }}
+                  >
+                    <svg 
+                      width="120" 
+                      height="120" 
+                      viewBox="0 0 120 120" 
+                      style={{ width: '120px', height: '120px', maxWidth: '120px', maxHeight: '120px' }}
+                      className="shrink-0 transform -rotate-90 block"
+                    >
+                      <circle cx="60" cy="60" r="48" stroke="#0f172a" strokeWidth="6" fill="transparent" />
                       <circle 
-                        cx="64" 
-                        cy="64" 
-                        r="54" 
+                        cx="60" 
+                        cy="60" 
+                        r="48" 
                         stroke={isTimerFinished ? "#34d399" : "#6366f1"} 
-                        strokeWidth="7" 
+                        strokeWidth="6" 
                         fill="transparent" 
-                        strokeDasharray="339.29"
-                        strokeDashoffset={339.29 - (339.29 * timer) / 10}
+                        strokeDasharray="301.59"
+                        strokeDashoffset={301.59 - (301.59 * timer) / 10}
                         className="transition-all duration-1000"
                       />
                     </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                      <span className="text-3xl font-black text-white">{timer}s</span>
-                      <span className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                      <span className="text-2xl font-black text-white leading-none">{timer}s</span>
+                      <span className="text-[9px] text-slate-400 uppercase tracking-widest font-bold mt-1">
                         {(!popupClosed && (settings?.enableSponsoredAd1 !== false || settings?.enableSponsoredAd2) && (currentStep === 2 || (settings?.enableOfferWall && currentStep > 1)))
                           ? "PAUSED"
                           : "COUNTDOWN"}
