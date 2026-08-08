@@ -487,15 +487,15 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     };
   }, [offerTimerActive, offerTimer, activeOfferIndex]);
 
-  // Trigger Sponsored Premium Traffic Network Popup when second page (after offerwall page) finishes 10s countdown
+  // Trigger Sponsored Premium Traffic Network Popup when second page (after offerwall page) loads
   useEffect(() => {
-    // Check if on second page (currentStep === 2 or step 2 after offerwall) and timer finished
+    // Check if on second page (currentStep === 2 or step 2 after offerwall)
     const isSecondPage = currentStep === 2 || (settings?.enableOfferWall && currentStep > 1);
     const isAd1Enabled = settings?.enableSponsoredAd1 !== false;
     const isAd2Enabled = !!settings?.enableSponsoredAd2;
     const isAnySponsoredAdEnabled = isAd1Enabled || isAd2Enabled;
 
-    if (isSecondPage && isTimerFinished && !popupHasBeenTriggered && !popupClosed && isAnySponsoredAdEnabled) {
+    if (isSecondPage && !popupHasBeenTriggered && !popupClosed && isAnySponsoredAdEnabled) {
       if (isAd1Enabled) {
         setActivePopupIndex(1);
         setPopupTimer(settings?.sponsoredAd1Timer ?? 12);
@@ -507,7 +507,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       setPopupTimerFinished(false);
       setPopupHasBeenTriggered(true);
     }
-  }, [currentStep, isTimerFinished, popupHasBeenTriggered, popupClosed, settings]);
+  }, [currentStep, popupHasBeenTriggered, popupClosed, settings]);
 
   // Popup 10s Timer Countdown
   useEffect(() => {
@@ -608,6 +608,19 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   useEffect(() => {
     if (loading || error || redirecting || !settings || !settings.enableOwnAds) return;
 
+    const isSecondPage = currentStep === 2 || (settings?.enableOfferWall && currentStep > 1);
+    const isAd1Enabled = settings?.enableSponsoredAd1 !== false;
+    const isAd2Enabled = !!settings?.enableSponsoredAd2;
+    const isAnySponsoredAdEnabled = isAd1Enabled || isAd2Enabled;
+
+    // Hold main page timer if sponsored iframe popups are active or pending completion
+    if (isSecondPage && isAnySponsoredAdEnabled && !popupClosed) {
+      setIsTimerFinished(false);
+      setTimer(10);
+      if (countdownInterval.current) clearInterval(countdownInterval.current);
+      return;
+    }
+
     setIsTimerFinished(false);
     setTimer(10);
 
@@ -627,7 +640,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     return () => {
       if (countdownInterval.current) clearInterval(countdownInterval.current);
     };
-  }, [currentStep, loading, error, settings, redirecting]);
+  }, [currentStep, loading, error, settings, redirecting, popupClosed]);
 
   const verifyCaptcha = (e: React.FormEvent) => {
     e.preventDefault();
