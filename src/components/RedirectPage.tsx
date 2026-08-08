@@ -1162,7 +1162,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* TIMER DIGITS */}
                   <div className="relative w-32 h-32 mx-auto flex items-center justify-center my-2">
-                    <svg className="w-full h-full transform -rotate-90">
+                    <svg viewBox="0 0 128 128" className="w-full h-full transform -rotate-90">
                       <circle cx="64" cy="64" r="54" stroke="#0f172a" strokeWidth="7" fill="transparent" />
                       <circle 
                         cx="64" 
@@ -1178,7 +1178,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     </svg>
                     <div className="absolute flex flex-col items-center">
                       <span className="text-3xl font-black text-white">{timer}s</span>
-                      <span className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Countdown</span>
+                      <span className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">
+                        {(!popupClosed && (settings?.enableSponsoredAd1 !== false || settings?.enableSponsoredAd2) && (currentStep === 2 || (settings?.enableOfferWall && currentStep > 1)))
+                          ? "PAUSED"
+                          : "COUNTDOWN"}
+                      </span>
                     </div>
                   </div>
 
