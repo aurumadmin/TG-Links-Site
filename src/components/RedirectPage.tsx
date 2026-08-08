@@ -494,9 +494,21 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     const isAd2Enabled = !!settings?.enableSponsoredAd2;
     const isAnySponsoredAdEnabled = isAd1Enabled || isAd2Enabled;
 
+    const ad1Timer = settings?.sponsoredAd1Timer ?? 12;
+    const ad2Timer = settings?.sponsoredAd2Timer ?? 12;
+
+    let targetDuration = 12;
+    if (isAd1Enabled && isAd2Enabled) {
+      targetDuration = Math.max(ad1Timer, ad2Timer);
+    } else if (isAd1Enabled) {
+      targetDuration = ad1Timer;
+    } else if (isAd2Enabled) {
+      targetDuration = ad2Timer;
+    }
+
     if (isSecondPage && isTimerFinished && !popupHasBeenTriggered && !popupClosed && isAnySponsoredAdEnabled) {
       setShowPopupAd(true);
-      setPopupTimer(12);
+      setPopupTimer(targetDuration);
       setPopupTimerFinished(false);
       setPopupHasBeenTriggered(true);
     }
@@ -1402,12 +1414,15 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               {/* Sponsored Ad #1 */}
               {(settings?.enableSponsoredAd1 !== false) && (
                 <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col">
-                  {!!settings?.enableSponsoredAd2 && (
-                    <div className="bg-slate-900/80 px-3 py-1.5 border-b border-slate-800 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">Sponsored Ad #1</span>
+                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-emerald-400">Sponsored Traffic Ad #1</span>
                     </div>
-                  )}
+                    <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60 font-bold">
+                      Timer: {settings?.sponsoredAd1Timer ?? 12}s
+                    </span>
+                  </div>
                   <iframe
                     src={settings?.sponsoredAd1Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
                     title="Sponsored Traffic Partner Modal 1"
@@ -1423,12 +1438,15 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               {/* Sponsored Ad #2 */}
               {!!settings?.enableSponsoredAd2 && (
                 <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col">
-                  {(settings?.enableSponsoredAd1 !== false) && (
-                    <div className="bg-slate-900/80 px-3 py-1.5 border-b border-slate-800 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400">Sponsored Ad #2</span>
+                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                      <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-indigo-400">Sponsored Traffic Ad #2</span>
                     </div>
-                  )}
+                    <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-800/60 font-bold">
+                      Timer: {settings?.sponsoredAd2Timer ?? 12}s
+                    </span>
+                  </div>
                   <iframe
                     src={settings?.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
                     title="Sponsored Traffic Partner Modal 2"

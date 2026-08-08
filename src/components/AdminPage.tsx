@@ -2304,6 +2304,19 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                         className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
                       />
                     </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Popup Timer (Seconds)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="300"
+                        placeholder="12"
+                        value={sysSettings.sponsoredAd1Timer ?? 12}
+                        onChange={(e) => setSysSettings({ ...sysSettings, sponsoredAd1Timer: parseInt(e.target.value) || 12 })}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-xs font-bold text-white placeholder-slate-700"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">Required viewing countdown duration before visitor can close Popup Modal #1.</p>
+                    </div>
                   </div>
 
                   {/* Sponsored Ad #2 */}
@@ -2334,6 +2347,19 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                         onChange={(e) => setSysSettings({ ...sysSettings, sponsoredAd2Url: e.target.value })}
                         className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-indigo-400 placeholder-slate-700"
                       />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Popup Timer (Seconds)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="300"
+                        placeholder="12"
+                        value={sysSettings.sponsoredAd2Timer ?? 12}
+                        onChange={(e) => setSysSettings({ ...sysSettings, sponsoredAd2Timer: parseInt(e.target.value) || 12 })}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-bold text-white placeholder-slate-700"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">Required viewing countdown duration before visitor can close Popup Modal #2.</p>
                     </div>
                   </div>
                 </div>

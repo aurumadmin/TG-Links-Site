@@ -120,8 +120,10 @@ export interface SystemSettings {
   adRightCode?: string;
   enableSponsoredAd1?: boolean;
   sponsoredAd1Url?: string;
+  sponsoredAd1Timer?: number;
   enableSponsoredAd2?: boolean;
   sponsoredAd2Url?: string;
+  sponsoredAd2Timer?: number;
 }
 
 export interface DashboardStats {

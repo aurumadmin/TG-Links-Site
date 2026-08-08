@@ -659,8 +659,10 @@ function loadDb() {
       neonTodayAdCode: `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`,
       enableSponsoredAd1: true,
       sponsoredAd1Url: "https://www.rotate4all.com/promote/pt13azaa9mf1",
+      sponsoredAd1Timer: 12,
       enableSponsoredAd2: true,
-      sponsoredAd2Url: "https://www.rotate4all.com/promote/pt13azaa9mf1"
+      sponsoredAd2Url: "https://www.rotate4all.com/promote/pt13azaa9mf1",
+      sponsoredAd2Timer: 12
     }
   };
 
@@ -750,12 +752,20 @@ function loadDb() {
       db.settings.sponsoredAd1Url = "https://www.rotate4all.com/promote/pt13azaa9mf1";
       changed = true;
     }
+    if (!db.settings.sponsoredAd1Timer) {
+      db.settings.sponsoredAd1Timer = 12;
+      changed = true;
+    }
     if (db.settings.enableSponsoredAd2 === undefined) {
       db.settings.enableSponsoredAd2 = true;
       changed = true;
     }
     if (!db.settings.sponsoredAd2Url) {
       db.settings.sponsoredAd2Url = "https://www.rotate4all.com/promote/pt13azaa9mf1";
+      changed = true;
+    }
+    if (!db.settings.sponsoredAd2Timer) {
+      db.settings.sponsoredAd2Timer = 12;
       changed = true;
     }
   } else {
@@ -1606,8 +1616,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
         adRightCode: db.settings.adRightCode,
         enableSponsoredAd1: db.settings.enableSponsoredAd1 ?? true,
         sponsoredAd1Url: db.settings.sponsoredAd1Url || "https://www.rotate4all.com/promote/pt13azaa9mf1",
+        sponsoredAd1Timer: db.settings.sponsoredAd1Timer ?? 12,
         enableSponsoredAd2: db.settings.enableSponsoredAd2 ?? true,
-        sponsoredAd2Url: db.settings.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"
+        sponsoredAd2Url: db.settings.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1",
+        sponsoredAd2Timer: db.settings.sponsoredAd2Timer ?? 12
       }
     });
   });
