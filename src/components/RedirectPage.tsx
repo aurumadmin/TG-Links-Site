@@ -140,6 +140,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
   // Sponsored Premium Traffic Network Popup Modal State (triggers on page 2 when finished 12s)
   const [showPopupAd, setShowPopupAd] = useState(false);
+  const [activePopupIndex, setActivePopupIndex] = useState<1 | 2>(1);
   const [popupTimer, setPopupTimer] = useState(12);
   const [popupTimerFinished, setPopupTimerFinished] = useState(false);
   const [popupClosed, setPopupClosed] = useState(false);
@@ -494,21 +495,15 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     const isAd2Enabled = !!settings?.enableSponsoredAd2;
     const isAnySponsoredAdEnabled = isAd1Enabled || isAd2Enabled;
 
-    const ad1Timer = settings?.sponsoredAd1Timer ?? 12;
-    const ad2Timer = settings?.sponsoredAd2Timer ?? 12;
-
-    let targetDuration = 12;
-    if (isAd1Enabled && isAd2Enabled) {
-      targetDuration = Math.max(ad1Timer, ad2Timer);
-    } else if (isAd1Enabled) {
-      targetDuration = ad1Timer;
-    } else if (isAd2Enabled) {
-      targetDuration = ad2Timer;
-    }
-
     if (isSecondPage && isTimerFinished && !popupHasBeenTriggered && !popupClosed && isAnySponsoredAdEnabled) {
+      if (isAd1Enabled) {
+        setActivePopupIndex(1);
+        setPopupTimer(settings?.sponsoredAd1Timer ?? 12);
+      } else {
+        setActivePopupIndex(2);
+        setPopupTimer(settings?.sponsoredAd2Timer ?? 12);
+      }
       setShowPopupAd(true);
-      setPopupTimer(targetDuration);
       setPopupTimerFinished(false);
       setPopupHasBeenTriggered(true);
     }
@@ -1354,17 +1349,28 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 sm:pb-3 gap-2">
               <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                 <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-                <h3 className="text-xs sm:text-base font-black text-white uppercase tracking-wider truncate">
-                  Sponsored Premium Traffic Network
-                </h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-xs sm:text-base font-black text-white uppercase tracking-wider truncate">
+                    Sponsored Traffic Network
+                  </h3>
+                  <span className="px-2 py-0.5 bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-[10px] font-black uppercase rounded-full">
+                    Ad {activePopupIndex} of {(settings?.enableSponsoredAd1 !== false && !!settings?.enableSponsoredAd2) ? 2 : 1}
+                  </span>
+                </div>
               </div>
 
-              {/* Close Button */}
+              {/* Close / Next Button */}
               <button
                 disabled={!popupTimerFinished}
                 onClick={() => {
-                  setShowPopupAd(false);
-                  setPopupClosed(true);
+                  if (activePopupIndex === 1 && !!settings?.enableSponsoredAd2) {
+                    setActivePopupIndex(2);
+                    setPopupTimer(settings?.sponsoredAd2Timer ?? 12);
+                    setPopupTimerFinished(false);
+                  } else {
+                    setShowPopupAd(false);
+                    setPopupClosed(true);
+                  }
                 }}
                 className={`px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shrink-0 ${
                   popupTimerFinished
@@ -1373,10 +1379,17 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                 }`}
               >
                 {popupTimerFinished ? (
-                  <>
-                    <span>Close Ad</span>
-                    <span className="font-mono text-sm leading-none">✕</span>
-                  </>
+                  (activePopupIndex === 1 && !!settings?.enableSponsoredAd2) ? (
+                    <>
+                      <span>Next Sponsored Ad</span>
+                      <span className="font-mono text-sm leading-none">➔</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Close Ad</span>
+                      <span className="font-mono text-sm leading-none">✕</span>
+                    </>
+                  )
                 ) : (
                   <>
                     <Hourglass className="w-3.5 h-3.5 animate-spin text-amber-400" />
@@ -1400,8 +1413,10 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                 )}
                 <span className="truncate sm:whitespace-normal">
                   {popupTimerFinished
-                    ? "Sponsor Verification Complete! Click 'Close Ad' above to proceed."
-                    : `Viewing sponsored ad: ${popupTimer}s left to unlock Close button.`}
+                    ? (activePopupIndex === 1 && !!settings?.enableSponsoredAd2)
+                      ? "Sponsor Ad #1 Complete! Click 'Next Sponsored Ad' to continue to Ad #2."
+                      : "Sponsor Verification Complete! Click 'Close Ad' above to proceed."
+                    : `Viewing sponsored ad #${activePopupIndex}: ${popupTimer}s left to unlock button.`}
                 </span>
               </div>
               <span className="font-mono font-bold text-xs sm:text-sm shrink-0 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800">
@@ -1409,50 +1424,48 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               </span>
             </div>
 
-            {/* Iframe Banner Containers */}
-            <div className="w-full flex flex-col gap-4">
-              {/* Sponsored Ad #1 */}
-              {(settings?.enableSponsoredAd1 !== false) && (
+            {/* Iframe Banner Container (Single Full-Size Iframe Per Ad) */}
+            <div className="w-full flex flex-col">
+              {activePopupIndex === 1 && (settings?.enableSponsoredAd1 !== false) && (
                 <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col">
                   <div className="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                      <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-emerald-400">Sponsored Traffic Ad #1</span>
+                      <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-emerald-400">
+                        Sponsored Traffic Partner #1
+                      </span>
                     </div>
-                    <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60 font-bold">
+                    <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 px-2.5 py-0.5 rounded border border-emerald-800/60 font-bold">
                       Timer: {settings?.sponsoredAd1Timer ?? 12}s
                     </span>
                   </div>
                   <iframe
                     src={settings?.sponsoredAd1Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
                     title="Sponsored Traffic Partner Modal 1"
-                    className={`w-full border-0 ${
-                      settings?.enableSponsoredAd2 ? "h-[380px] sm:h-[480px]" : "h-[520px] sm:h-[650px]"
-                    }`}
+                    className="w-full border-0 h-[520px] sm:h-[650px]"
                     referrerPolicy="unsafe-url"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   />
                 </div>
               )}
 
-              {/* Sponsored Ad #2 */}
-              {!!settings?.enableSponsoredAd2 && (
+              {activePopupIndex === 2 && !!settings?.enableSponsoredAd2 && (
                 <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col">
                   <div className="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-                      <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-indigo-400">Sponsored Traffic Ad #2</span>
+                      <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-indigo-400">
+                        Sponsored Traffic Partner #2
+                      </span>
                     </div>
-                    <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-800/60 font-bold">
+                    <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/80 px-2.5 py-0.5 rounded border border-indigo-800/60 font-bold">
                       Timer: {settings?.sponsoredAd2Timer ?? 12}s
                     </span>
                   </div>
                   <iframe
                     src={settings?.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
                     title="Sponsored Traffic Partner Modal 2"
-                    className={`w-full border-0 ${
-                      (settings?.enableSponsoredAd1 !== false) ? "h-[380px] sm:h-[480px]" : "h-[520px] sm:h-[650px]"
-                    }`}
+                    className="w-full border-0 h-[520px] sm:h-[650px]"
                     referrerPolicy="unsafe-url"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   />
@@ -1465,11 +1478,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               <span>Verified Traffic Network Partners</span>
               {popupTimerFinished ? (
                 <span className="text-emerald-400 font-bold text-center sm:text-right">
-                  ✓ Close button unlocked! Click 'Close Ad' to dismiss.
+                  ✓ Step complete! Click '{(activePopupIndex === 1 && !!settings?.enableSponsoredAd2) ? "Next Sponsored Ad" : "Close Ad"}' to proceed.
                 </span>
               ) : (
                 <span className="text-slate-500 text-center sm:text-right">
-                  Close button unlocks automatically in {popupTimer}s
+                  Button unlocks automatically in {popupTimer}s
                 </span>
               )}
             </div>
