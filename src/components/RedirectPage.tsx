@@ -1161,8 +1161,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   </div>
 
                   {/* TIMER DIGITS */}
-                  <div className="relative w-32 h-32 mx-auto flex items-center justify-center my-2">
-                    <svg viewBox="0 0 128 128" className="w-full h-full transform -rotate-90">
+                  <div className="relative w-32 h-32 max-w-[128px] max-h-[128px] shrink-0 mx-auto flex items-center justify-center my-2 overflow-hidden">
+                    <svg width="128" height="128" viewBox="0 0 128 128" className="w-32 h-32 shrink-0 transform -rotate-90 block">
                       <circle cx="64" cy="64" r="54" stroke="#0f172a" strokeWidth="7" fill="transparent" />
                       <circle 
                         cx="64" 
@@ -1176,7 +1176,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                         className="transition-all duration-1000"
                       />
                     </svg>
-                    <div className="absolute flex flex-col items-center">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
                       <span className="text-3xl font-black text-white">{timer}s</span>
                       <span className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">
                         {(!popupClosed && (settings?.enableSponsoredAd1 !== false || settings?.enableSponsoredAd2) && (currentStep === 2 || (settings?.enableOfferWall && currentStep > 1)))
