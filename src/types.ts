@@ -118,6 +118,10 @@ export interface SystemSettings {
   adLeftCode?: string;
   adBottomCenterCode?: string;
   adRightCode?: string;
+  enableSponsoredAd1?: boolean;
+  sponsoredAd1Url?: string;
+  enableSponsoredAd2?: boolean;
+  sponsoredAd2Url?: string;
 }
 
 export interface DashboardStats {

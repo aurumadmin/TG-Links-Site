@@ -2259,6 +2259,85 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   <p className="text-[10px] text-slate-500 font-medium mt-1">Paste your custom neon.today iframe code snippet. Visitors will be forced to click inside this ad block to proceed.</p>
                 </div>
               </div>
+
+              {/* SPONSORED PREMIUM TRAFFIC NETWORK POPUP CONFIGURATION */}
+              <div className="mt-6 pt-6 border-t border-slate-800/80 space-y-4">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-white text-sm">Sponsored Premium Traffic Network Popups</h4>
+                    <p className="text-[11px] text-slate-400">
+                      Configure up to two Sponsored Premium Traffic Network iframe ads (e.g. Rotate4All, PTP traffic partners, or custom promo links). These appear in a high-visibility modal popup on the second redirection step.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
+                  {/* Sponsored Ad #1 */}
+                  <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-slate-800">
+                    <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                      <span className="text-xs font-black uppercase text-emerald-400 tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Sponsored Traffic Ad #1
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Status</label>
+                      <select
+                        value={sysSettings.enableSponsoredAd1 !== false ? "true" : "false"}
+                        onChange={(e) => setSysSettings({ ...sysSettings, enableSponsoredAd1: e.target.value === "true" })}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-xs font-bold text-white"
+                      >
+                        <option value="true" className="bg-slate-950 text-emerald-400">ENABLED (Active in Popup Modal)</option>
+                        <option value="false" className="bg-slate-950 text-slate-400">DISABLED</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Target Ad / Traffic URL #1</label>
+                      <input
+                        type="text"
+                        placeholder="https://www.rotate4all.com/promote/pt13azaa9mf1"
+                        value={sysSettings.sponsoredAd1Url || ""}
+                        onChange={(e) => setSysSettings({ ...sysSettings, sponsoredAd1Url: e.target.value })}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Sponsored Ad #2 */}
+                  <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-slate-800">
+                    <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                      <span className="text-xs font-black uppercase text-indigo-400 tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                        Sponsored Traffic Ad #2
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Status</label>
+                      <select
+                        value={sysSettings.enableSponsoredAd2 ? "true" : "false"}
+                        onChange={(e) => setSysSettings({ ...sysSettings, enableSponsoredAd2: e.target.value === "true" })}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-bold text-white"
+                      >
+                        <option value="true" className="bg-slate-950 text-indigo-400">ENABLED (Active in Popup Modal)</option>
+                        <option value="false" className="bg-slate-950 text-slate-400">DISABLED</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Target Ad / Traffic URL #2</label>
+                      <input
+                        type="text"
+                        placeholder="https://www.rotate4all.com/promote/pt13azaa9mf1"
+                        value={sysSettings.sponsoredAd2Url || ""}
+                        onChange={(e) => setSysSettings({ ...sysSettings, sponsoredAd2Url: e.target.value })}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-indigo-400 placeholder-slate-700"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* ADVERTISING BANNER HTML INJECTIONS */}

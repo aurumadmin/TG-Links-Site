@@ -187,26 +187,26 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                 {/* Payout Badge */}
                 <div className="inline-flex">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-950/40 text-xs font-bold text-indigo-400 border border-indigo-900/50">
-                    <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] uppercase font-black">New</span>
-                    Best URL Shortener
+                    <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] uppercase font-black">#1 Rated</span>
+                    Best Telegram URL Shortener ($7.00 CPM)
                     <ArrowRight className="w-3.5 h-3.5" />
                   </span>
                 </div>
 
                 {/* Hero Headings */}
                 <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight">
-                  Unlock the Power of <span className="text-emerald-400">Shortened</span> URLs
+                  <span className="text-indigo-400">TG Links</span> — Shorten URLs & <span className="text-emerald-400">Earn $7 CPM</span>
                   <br />
-                  <span className="text-slate-100">Monetize your </span>
+                  <span className="text-slate-100">Monetize Your </span>
                   <span className="text-indigo-400 inline-block relative">
-                    Links.
+                    Telegram Links.
                     <span className="absolute left-0 right-0 bottom-1 h-2 bg-indigo-950/80 -z-10 rounded-full"></span>
                   </span>
                 </h1>
 
                 {/* Hero Description */}
                 <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
-                  Step into the new age of monetization. Every link you share has potential, and we help you tap into it. Whether you're a content creator, influencer, or blogger, our URL shortener is not just about making links concise - it's about maximizing their value.
+                  Step into the highest paying Telegram link shortener network. Every link you share on TG channels, Telegram bots, blogs, or social networks generates real income with guaranteed $7.00 CPM payout rates, instant crypto withdrawals, and live real-time click tracking.
                 </p>
 
                 {/* Get Started Button */}
@@ -490,6 +490,105 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                     <p className="text-sm text-slate-400 leading-relaxed">Got questions? Our customer service team is online 24/7 to help approve payments and manage links.</p>
                   </div>
                 </div>
+              </div>
+            </section>
+
+            {/* RICH SEO ARTICLE & FAQ ACCORDION SECTION */}
+            <section className="py-20 bg-slate-900/60 border-t border-slate-800/80" id="seo_content_section">
+              <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+                
+                {/* Article Header */}
+                <div className="text-center space-y-3">
+                  <span className="text-xs font-bold uppercase tracking-widest text-emerald-400 px-3 py-1 bg-emerald-950/60 border border-emerald-900/50 rounded-full">
+                    #1 Telegram Link Monetization
+                  </span>
+                  <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+                    TG Links — The Ultimate Telegram Link Shortener & URL Shrinker
+                  </h2>
+                  <p className="text-slate-400 text-sm max-w-2xl mx-auto leading-relaxed">
+                    Designed specifically for Telegram channel owners, bot developers, group admins, and content creators looking for maximum CPM payouts and instant payment processing.
+                  </p>
+                </div>
+
+                {/* SEO Text Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-slate-300 text-sm leading-relaxed">
+                  <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-3">
+                    <h3 className="text-lg font-bold text-indigo-400 flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-indigo-400" />
+                      Highest Paying Telegram Link Shortener
+                    </h3>
+                    <p>
+                      <strong>TG Links</strong> is engineered to give publishers the absolute highest CPM rate in the industry. With a guaranteed <strong>$7.00 CPM</strong> worldwide rate, every 1,000 completed visitor views directly generates $7.00 in revenue.
+                    </p>
+                    <p>
+                      Whether you post download links, movie links, APK software, trading signals, or educational resources in your Telegram channels, TG Links transforms your audience into a daily revenue stream.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-3">
+                    <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
+                      <DollarSign className="w-5 h-5 text-emerald-400" />
+                      Instant API Shortening & Bot Integration
+                    </h3>
+                    <p>
+                      Easily automate link generation with our Developer API! Connect TG Links directly to your Telegram bots, auto-posting scripts, and web platforms using standard HTTP GET/POST endpoints.
+                    </p>
+                    <p>
+                      TG Links also supports <strong>Crypto Faucet Mode</strong>, enabling micro-task websites, PTCS, and faucet networks to route traffic cleanly without getting flagged or blocked.
+                    </p>
+                  </div>
+                </div>
+
+                {/* FAQ Accordion for Search Engines */}
+                <div className="space-y-4 pt-6">
+                  <h3 className="text-2xl font-black text-white text-center mb-6 flex items-center justify-center gap-2">
+                    <HelpCircle className="w-6 h-6 text-indigo-400" />
+                    Frequently Asked Questions (FAQ)
+                  </h3>
+
+                  <div className="space-y-3">
+                    <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
+                      <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
+                        <span>What is TG Links and how does it work?</span>
+                        <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
+                      </summary>
+                      <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
+                        TG Links is a free URL shortener platform that pays you whenever visitors click and complete shortener steps on your links. Simply shorten any long URL, share it across Telegram channels, social media, or websites, and get paid for every view.
+                      </p>
+                    </details>
+
+                    <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
+                      <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
+                        <span>What is the CPM rate on TG Links?</span>
+                        <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
+                      </summary>
+                      <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
+                        TG Links offers a guaranteed $7.00 CPM (Cost Per Mille) for traffic from all countries worldwide. Every 1,000 valid views equals $7.00 added directly to your account balance.
+                      </p>
+                    </details>
+
+                    <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
+                      <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
+                        <span>What is the minimum withdrawal amount and payment methods?</span>
+                        <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
+                      </summary>
+                      <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
+                        The minimum payout threshold is only $2.00! We support fast withdrawals via FaucetPay (USDT/TRX/BTC), UPI, PayTM, PhonePe, Bank Transfer, PayPal, and WebMoney.
+                      </p>
+                    </details>
+
+                    <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
+                      <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
+                        <span>Is TG Links safe for Telegram Channels and Bots?</span>
+                        <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
+                      </summary>
+                      <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
+                        Yes! TG Links uses high-reputation domain names and secure SSL redirection scripts specifically designed to bypass Telegram spam filters and work seamlessly inside Telegram in-app browsers.
+                      </p>
+                    </details>
+                  </div>
+                </div>
+
               </div>
             </section>
           </div>

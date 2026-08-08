@@ -42,7 +42,17 @@ const redirectWithoutReferrer = (url: string, enableThunderRedirect?: boolean) =
   }, 100);
 };
 
-const AdBlock = ({ htmlCode, placeholder }: { htmlCode?: string; placeholder: string }) => {
+const AdBlock = ({ 
+  htmlCode, 
+  placeholder,
+  size = "300x250",
+  className = ""
+}: { 
+  htmlCode?: string; 
+  placeholder: string;
+  size?: "300x250" | "728x90" | "300x600" | "320x50" | "468x60" | "auto";
+  className?: string;
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -62,10 +72,33 @@ const AdBlock = ({ htmlCode, placeholder }: { htmlCode?: string; placeholder: st
     }
   }, [htmlCode]);
 
+  let sizeContainerStyle = "min-h-[250px] w-full max-w-[300px]";
+  let sizeLabel = "300x250 Medium Rectangle";
+
+  if (size === "728x90") {
+    sizeContainerStyle = "min-h-[90px] w-full max-w-[728px]";
+    sizeLabel = "728x90 Leaderboard";
+  } else if (size === "300x600") {
+    sizeContainerStyle = "min-h-[600px] w-full max-w-[300px]";
+    sizeLabel = "300x600 Half Page Skyscraper";
+  } else if (size === "468x60") {
+    sizeContainerStyle = "min-h-[60px] w-full max-w-[468px]";
+    sizeLabel = "468x60 Banner";
+  } else if (size === "320x50") {
+    sizeContainerStyle = "min-h-[50px] w-full max-w-[320px]";
+    sizeLabel = "320x50 Mobile Banner";
+  }
+
   if (!htmlCode) {
     return (
-      <div className="bg-slate-900/60 border border-slate-800/40 rounded-xl py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider select-none hover:bg-slate-900 transition flex items-center justify-center min-h-[44px]">
-        {placeholder}
+      <div className={`bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border border-slate-800/80 rounded-2xl p-4 text-center select-none flex flex-col items-center justify-center space-y-2 shadow-2xl backdrop-blur-md relative overflow-hidden group hover:border-indigo-500/40 transition-all ${sizeContainerStyle} ${className}`}>
+        <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 via-purple-500/5 to-emerald-500/5 opacity-50 group-hover:opacity-100 transition-opacity"></div>
+        <span className="px-3 py-1 bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-[10px] font-black uppercase rounded-full tracking-widest shadow-sm relative z-10 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
+          SPONSOR UNIT
+        </span>
+        <span className="text-white font-black text-sm uppercase tracking-wide relative z-10 drop-shadow">{placeholder}</span>
+        <span className="text-[11px] font-mono text-emerald-400 font-bold bg-slate-900/90 px-2.5 py-0.5 rounded border border-slate-800 relative z-10">{sizeLabel}</span>
       </div>
     );
   }
@@ -73,7 +106,7 @@ const AdBlock = ({ htmlCode, placeholder }: { htmlCode?: string; placeholder: st
   return (
     <div 
       ref={containerRef} 
-      className="w-full flex justify-center items-center overflow-hidden rounded-xl bg-slate-950/40 border border-slate-800/40 p-2 min-h-[50px] shadow-inner"
+      className={`overflow-hidden flex justify-center items-center rounded-2xl bg-slate-950/80 border border-slate-800 p-2 shadow-2xl ${sizeContainerStyle} ${className}`}
     />
   );
 };
@@ -457,7 +490,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   useEffect(() => {
     // Check if on second page (currentStep === 2 or step 2 after offerwall) and timer finished
     const isSecondPage = currentStep === 2 || (settings?.enableOfferWall && currentStep > 1);
-    if (isSecondPage && isTimerFinished && !popupHasBeenTriggered && !popupClosed) {
+    const isAd1Enabled = settings?.enableSponsoredAd1 !== false;
+    const isAd2Enabled = !!settings?.enableSponsoredAd2;
+    const isAnySponsoredAdEnabled = isAd1Enabled || isAd2Enabled;
+
+    if (isSecondPage && isTimerFinished && !popupHasBeenTriggered && !popupClosed && isAnySponsoredAdEnabled) {
       setShowPopupAd(true);
       setPopupTimer(12);
       setPopupTimerFinished(false);
@@ -950,11 +987,13 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     </p>
                   </div>
 
-                  {/* AD PLACEMENT TOP BUTTONS */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <AdBlock htmlCode={settings?.adTopLeftCode} placeholder="AD TOP LEFT" />
-                    <AdBlock htmlCode={settings?.adTopCenterCode} placeholder="AD TOP CENTER" />
-                    <AdBlock htmlCode={settings?.adTopRightCode} placeholder="AD TOP RIGHT" />
+                  {/* TOP SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 468x60) */}
+                  <div className="flex flex-col items-center gap-4 py-4 border-b border-slate-800/60">
+                    <AdBlock htmlCode={settings?.adTopLeftCode} placeholder="Header Leaderboard Unit" size="728x90" />
+                    <div className="flex flex-wrap justify-center items-center gap-4 w-full">
+                      <AdBlock htmlCode={settings?.adTopCenterCode} placeholder="Top Medium Rectangle" size="300x250" />
+                      <AdBlock htmlCode={settings?.adTopRightCode} placeholder="Top Standard Banner" size="468x60" />
+                    </div>
                   </div>
 
                   {/* OFFERS LIST */}
@@ -1055,11 +1094,13 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     })}
                   </div>
 
-                  {/* AD PLACEMENT BOTTOM BUTTONS */}
-                  <div className="grid grid-cols-3 gap-3 pt-2">
-                    <AdBlock htmlCode={settings?.adLeftCode} placeholder="AD LEFT" />
-                    <AdBlock htmlCode={settings?.adBottomCenterCode} placeholder="AD BOTTOM CENTER" />
-                    <AdBlock htmlCode={settings?.adRightCode} placeholder="AD RIGHT" />
+                  {/* BOTTOM SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 320x50) */}
+                  <div className="flex flex-col items-center gap-4 pt-4 border-t border-slate-800/60">
+                    <div className="flex flex-wrap justify-center items-center gap-4 w-full">
+                      <AdBlock htmlCode={settings?.adLeftCode} placeholder="Bottom Medium Rectangle" size="300x250" />
+                      <AdBlock htmlCode={settings?.adRightCode} placeholder="Bottom Mobile Banner" size="320x50" />
+                    </div>
+                    <AdBlock htmlCode={settings?.adBottomCenterCode} placeholder="Footer Leaderboard Unit" size="728x90" />
                   </div>
 
                   {/* CONTINUE / PROCEED BUTTON */}
@@ -1087,27 +1128,31 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-                
-                {/* Redirection Box */}
-                <div className="p-6 bg-slate-950 border border-slate-850 rounded-xl text-center space-y-5">
-                  <p className="text-sm text-slate-400 leading-normal">
-                    Scroll down, complete the verification puzzle, and wait for the countdown to unlock the final shortened link.
-                  </p>
+              <div className="space-y-6" id="redirection_portal_interface">
+                <div className="p-6 sm:p-8 bg-slate-950 border border-slate-850 rounded-2xl text-center space-y-6 shadow-2xl max-w-2xl mx-auto">
+                  
+                  {/* TOP SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 468x60) */}
+                  <div className="flex flex-col items-center gap-4 py-4 border-b border-slate-800/60">
+                    <AdBlock htmlCode={settings?.adTopLeftCode} placeholder="Top Leaderboard Unit" size="728x90" />
+                    <div className="flex flex-wrap justify-center items-center gap-4 w-full">
+                      <AdBlock htmlCode={settings?.adTopCenterCode} placeholder="Top Medium Rectangle" size="300x250" />
+                      <AdBlock htmlCode={settings?.adTopRightCode} placeholder="Top Standard Banner" size="468x60" />
+                    </div>
+                  </div>
 
                   {/* TIMER DIGITS */}
-                  <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+                  <div className="relative w-32 h-32 mx-auto flex items-center justify-center my-2">
                     <svg className="w-full h-full transform -rotate-90">
-                      <circle cx="56" cy="56" r="48" stroke="#0f172a" strokeWidth="6" fill="transparent" />
+                      <circle cx="64" cy="64" r="54" stroke="#0f172a" strokeWidth="7" fill="transparent" />
                       <circle 
-                        cx="56" 
-                        cy="56" 
-                        r="48" 
+                        cx="64" 
+                        cy="64" 
+                        r="54" 
                         stroke={isTimerFinished ? "#34d399" : "#6366f1"} 
-                        strokeWidth="6" 
+                        strokeWidth="7" 
                         fill="transparent" 
-                        strokeDasharray="301.6"
-                        strokeDashoffset={301.6 - (301.6 * timer) / 10}
+                        strokeDasharray="339.29"
+                        strokeDashoffset={339.29 - (339.29 * timer) / 10}
                         className="transition-all duration-1000"
                       />
                     </svg>
@@ -1119,26 +1164,36 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* CAPTCHA CHALLENGE FORM */}
                   {!verifiedHuman && (
-                    <form onSubmit={verifyCaptcha} className="p-4 bg-slate-900 rounded-xl border border-slate-800 space-y-3">
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">🔒 Anti-Bot Verification Challenge</p>
-                      <p className="text-base font-black text-white tracking-wide">{captchaPrompt.q}</p>
+                    <form onSubmit={verifyCaptcha} className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 space-y-3 text-left">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <span>🔒</span> Anti-Bot Security Challenge
+                        </span>
+                        <span className="text-[10px] text-indigo-400 font-semibold bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-900/50">
+                          Solve To Continue
+                        </span>
+                      </div>
+
+                      <p className="text-base font-black text-white text-center py-1">{captchaPrompt.q}</p>
                       
                       {captchaError && (
-                        <p className="text-[10px] text-rose-500 font-bold">❌ Incorrect answer. Try again!</p>
+                        <p className="text-xs text-rose-400 font-bold text-center bg-rose-950/40 border border-rose-900/50 p-2 rounded-lg">
+                          ❌ Incorrect answer. Please try again!
+                        </p>
                       )}
 
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 pt-1">
                         <input
                           required
                           type="number"
-                          placeholder="Answer"
+                          placeholder="Type answer here..."
                           value={captchaAnswer}
                           onChange={(e) => setCaptchaAnswer(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-center text-white outline-none focus:border-indigo-500"
+                          className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-center font-bold text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                         />
                         <button
                           type="submit"
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg uppercase transition"
+                          className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl uppercase tracking-wider transition shadow-lg shadow-indigo-600/20 shrink-0"
                         >
                           Verify
                         </button>
@@ -1148,7 +1203,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* VERIFIED STATUS */}
                   {verifiedHuman && (
-                    <div className="p-3 bg-emerald-950/40 border border-emerald-900/50 text-emerald-400 text-xs font-bold rounded-lg flex items-center justify-center gap-2">
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-900/50 text-emerald-400 text-xs font-bold rounded-xl flex items-center justify-center gap-2">
                       <CheckCircle className="w-4 h-4 text-emerald-500" />
                       Human Verification Complete!
                     </div>
@@ -1156,7 +1211,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* NEON.TODAY SPONSOR AD GATE */}
                   {settings?.enableNeonAdGate && (
-                    <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-3 mt-4 text-left">
+                    <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-3 text-left">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                           🎯 Sponsored Ad Verification
@@ -1167,7 +1222,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                       </div>
                       
                       <p className="text-[11px] text-slate-400 leading-normal">
-                        Please click on the advertisement banner below to unlock your destination. Once clicked, you can instantly proceed.
+                        Please click on the advertisement banner below to unlock your destination link.
                       </p>
 
                       <div 
@@ -1189,18 +1244,27 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     </div>
                   )}
 
+                  {/* BOTTOM SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 320x50) */}
+                  <div className="flex flex-col items-center gap-4 pt-4 border-t border-slate-800/60">
+                    <div className="flex flex-wrap justify-center items-center gap-4 w-full">
+                      <AdBlock htmlCode={settings?.adLeftCode} placeholder="Bottom Medium Rectangle" size="300x250" />
+                      <AdBlock htmlCode={settings?.adRightCode} placeholder="Bottom Mobile Banner" size="320x50" />
+                    </div>
+                    <AdBlock htmlCode={settings?.adBottomCenterCode} placeholder="Footer Leaderboard Unit" size="728x90" />
+                  </div>
+
                   {/* SUBMIT STEP BUTTON */}
                   <button
                     disabled={!isTimerFinished || !verifiedHuman || (settings?.enableNeonAdGate && !adClicked)}
                     onClick={handleNextStep}
-                    className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-wider shadow-lg transition-all duration-150 flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white disabled:cursor-not-allowed"
+                    className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-wider shadow-xl transition-all duration-150 flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white disabled:cursor-not-allowed cursor-pointer"
                   >
                     {!isTimerFinished ? (
                       `Please wait... ${timer}s`
                     ) : !verifiedHuman ? (
                       "Complete Puzzle Verification First"
                     ) : (settings?.enableNeonAdGate && !adClicked) ? (
-                      "Click the Ad Below to Continue"
+                      "Click the Ad Above to Continue"
                     ) : hasMoreSteps ? (
                       <>
                         Proceed to Next Step
@@ -1214,30 +1278,6 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     )}
                   </button>
                 </div>
-
-                {/* Tips Section */}
-                <div className="space-y-4">
-                  <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
-                    <h4 className="font-bold text-sm text-white mb-1">How to reach target?</h4>
-                    <p className="text-xs text-slate-500 leading-normal space-y-1">
-                      <span>1. Solve the sum of numbers displayed on the math puzzle panel.</span>
-                      <br />
-                      <span>2. Wait 10 seconds for the SSL validation check to conclude.</span>
-                      {settings?.enableNeonAdGate && (
-                        <>
-                          <br />
-                          <span className="text-amber-400 font-semibold">3. Click on the neon.today advertisement banner to verify.</span>
-                        </>
-                      )}
-                      <br />
-                      <span>{settings?.enableNeonAdGate ? "4. " : "3. "}Click on the illuminated continue button to advance.</span>
-                    </p>
-                  </div>
-                  
-                  <div className="p-4 bg-indigo-950/20 border border-indigo-900/30 rounded-xl text-indigo-400 text-xs leading-normal font-semibold">
-                    ⚠️ <span className="font-bold">Notice to Visitors:</span> Ensure you have cookies enabled. Any programmatic automation or ad blocker extensions might freeze the timer. Disable ad-blockers to progress.
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -1250,13 +1290,47 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           )}
         </div>
 
-        {/* Right Column: 300x250 Sidebar Banner */}
-        {settings?.bannerAd300x250 && (
-          <div className="lg:col-span-4 bg-slate-900/40 rounded-2xl border border-slate-800 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md" id="banner_300x250">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 block text-center">SPONSOR ADVERTISEMENT</span>
-            <div className="w-full" dangerouslySetInnerHTML={{ __html: settings.bannerAd300x250 }} />
+        {/* Right Column: 300x600 / 300x250 Sidebar Banner Slots */}
+        <div className="lg:col-span-4 flex flex-col gap-6" id="sidebar_ads_container">
+          <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md min-h-[300px]" id="banner_300x250">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 block text-center">SPONSOR ADVERTISEMENT (300x250)</span>
+            {settings?.bannerAd300x250 ? (
+              <div className="w-full flex justify-center" dangerouslySetInnerHTML={{ __html: settings.bannerAd300x250 }} />
+            ) : (
+              <div className="w-full h-60 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-2xl border border-slate-800 flex flex-col items-center justify-center p-4 text-center space-y-2 shadow-2xl relative overflow-hidden">
+                <div className="absolute inset-0 bg-indigo-500/5"></div>
+                <span className="px-3 py-1 bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-[10px] font-black uppercase rounded-full tracking-widest relative z-10">
+                  300x250 Medium Rectangle
+                </span>
+                <p className="text-xs font-bold text-white relative z-10">High CPM Sponsor Slot</p>
+                <p className="text-[10px] font-mono text-emerald-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800 relative z-10">bannerAd300x250</p>
+              </div>
+            )}
           </div>
-        )}
+
+          <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md min-h-[620px]" id="banner_300x600">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 block text-center">SIDEBAR SKYSCRAPER (300x600)</span>
+            <div className="w-full h-[580px] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-2xl border border-slate-800 flex flex-col items-center justify-between p-6 text-center shadow-2xl relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-b from-purple-500/5 via-indigo-500/5 to-emerald-500/5"></div>
+              <div className="space-y-3 relative z-10 mt-6">
+                <span className="px-3 py-1 bg-purple-950/80 border border-purple-800/60 text-purple-300 text-[10px] font-black uppercase rounded-full tracking-widest">
+                  300x600 Skyscraper
+                </span>
+                <h4 className="text-base font-black text-white uppercase tracking-wider">Premium Ad Placement</h4>
+                <p className="text-xs text-slate-400 max-w-[220px]">Maximum viewability and CTR for premium ad networks.</p>
+              </div>
+
+              <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-2 relative z-10 w-full max-w-[240px]">
+                <p className="text-[10px] font-mono text-emerald-400 font-bold">300x600 Half-Page Slot</p>
+                <p className="text-[10px] text-slate-500">Auto-optimized for Google AdSense & Media.net</p>
+              </div>
+
+              <div className="mb-6 relative z-10">
+                <span className="text-[10px] text-slate-600 font-mono">TG LINKS AD SERVER</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* SPONSORED PREMIUM TRAFFIC NETWORK POPUP MODAL */}
@@ -1323,20 +1397,54 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               </span>
             </div>
 
-            {/* Iframe Banner Container - Fully enlarged for mobile devices */}
-            <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex justify-center items-center">
-              <iframe
-                src="https://www.rotate4all.com/promote/pt13azaa9mf1"
-                title="Sponsored Traffic Partner Modal"
-                className="w-full h-[520px] sm:h-[650px] border-0"
-                referrerPolicy="unsafe-url"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              />
+            {/* Iframe Banner Containers */}
+            <div className="w-full flex flex-col gap-4">
+              {/* Sponsored Ad #1 */}
+              {(settings?.enableSponsoredAd1 !== false) && (
+                <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col">
+                  {!!settings?.enableSponsoredAd2 && (
+                    <div className="bg-slate-900/80 px-3 py-1.5 border-b border-slate-800 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">Sponsored Ad #1</span>
+                    </div>
+                  )}
+                  <iframe
+                    src={settings?.sponsoredAd1Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
+                    title="Sponsored Traffic Partner Modal 1"
+                    className={`w-full border-0 ${
+                      settings?.enableSponsoredAd2 ? "h-[380px] sm:h-[480px]" : "h-[520px] sm:h-[650px]"
+                    }`}
+                    referrerPolicy="unsafe-url"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  />
+                </div>
+              )}
+
+              {/* Sponsored Ad #2 */}
+              {!!settings?.enableSponsoredAd2 && (
+                <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col">
+                  {(settings?.enableSponsoredAd1 !== false) && (
+                    <div className="bg-slate-900/80 px-3 py-1.5 border-b border-slate-800 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400">Sponsored Ad #2</span>
+                    </div>
+                  )}
+                  <iframe
+                    src={settings?.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
+                    title="Sponsored Traffic Partner Modal 2"
+                    className={`w-full border-0 ${
+                      (settings?.enableSponsoredAd1 !== false) ? "h-[380px] sm:h-[480px]" : "h-[520px] sm:h-[650px]"
+                    }`}
+                    referrerPolicy="unsafe-url"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Modal Footer Note */}
             <div className="flex flex-col sm:flex-row items-center justify-between text-[10px] sm:text-[11px] text-slate-400 gap-1.5 sm:gap-2 pt-0.5">
-              <span>Verified Traffic Partner: Rotate4All Network</span>
+              <span>Verified Traffic Network Partners</span>
               {popupTimerFinished ? (
                 <span className="text-emerald-400 font-bold text-center sm:text-right">
                   ✓ Close button unlocked! Click 'Close Ad' to dismiss.

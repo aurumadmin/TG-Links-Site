@@ -656,7 +656,11 @@ function loadDb() {
       logoUrl: "",
       enableOwnAds: true,
       enableNeonAdGate: false,
-      neonTodayAdCode: `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`
+      neonTodayAdCode: `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`,
+      enableSponsoredAd1: true,
+      sponsoredAd1Url: "https://www.rotate4all.com/promote/pt13azaa9mf1",
+      enableSponsoredAd2: true,
+      sponsoredAd2Url: "https://www.rotate4all.com/promote/pt13azaa9mf1"
     }
   };
 
@@ -736,6 +740,22 @@ function loadDb() {
     }
     if (db.settings.neonTodayAdCode === undefined) {
       db.settings.neonTodayAdCode = `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`;
+      changed = true;
+    }
+    if (db.settings.enableSponsoredAd1 === undefined) {
+      db.settings.enableSponsoredAd1 = true;
+      changed = true;
+    }
+    if (!db.settings.sponsoredAd1Url) {
+      db.settings.sponsoredAd1Url = "https://www.rotate4all.com/promote/pt13azaa9mf1";
+      changed = true;
+    }
+    if (db.settings.enableSponsoredAd2 === undefined) {
+      db.settings.enableSponsoredAd2 = true;
+      changed = true;
+    }
+    if (!db.settings.sponsoredAd2Url) {
+      db.settings.sponsoredAd2Url = "https://www.rotate4all.com/promote/pt13azaa9mf1";
       changed = true;
     }
   } else {
@@ -1308,6 +1328,95 @@ function setupRoutes() {
     });
   });
 
+  // --- SEO ROUTES (robots.txt & sitemap.xml) ---
+  app.get("/robots.txt", (req, res) => {
+    const protocol = req.headers["x-forwarded-proto"] || "https";
+    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.eu.cc";
+    const baseUrl = `${protocol}://${host}`;
+
+    res.type("text/plain");
+    res.send(
+`User-agent: *
+Allow: /
+Allow: /rates
+Allow: /auth
+Allow: /login
+Allow: /register
+Allow: /privacy
+Allow: /terms
+Allow: /dmca
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /api/
+
+Sitemap: ${baseUrl}/sitemap.xml`
+    );
+  });
+
+  app.get("/sitemap.xml", (req, res) => {
+    const protocol = req.headers["x-forwarded-proto"] || "https";
+    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.eu.cc";
+    const baseUrl = `${protocol}://${host}`;
+    const today = new Date().toISOString().split("T")[0];
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9 http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+  <url>
+    <loc>${baseUrl}/</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>${baseUrl}/rates</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${baseUrl}/auth</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${baseUrl}/login</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${baseUrl}/register</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${baseUrl}/privacy</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>${baseUrl}/terms</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>${baseUrl}/dmca</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+</urlset>`;
+
+    res.type("application/xml");
+    res.send(xml);
+  });
+
   // --- LINKS ENDPOINTS ---
   
   app.post("/api/links/shorten", async (req, res) => {
@@ -1494,7 +1603,11 @@ function setupRoutes() {
         adTopRightCode: db.settings.adTopRightCode,
         adLeftCode: db.settings.adLeftCode,
         adBottomCenterCode: db.settings.adBottomCenterCode,
-        adRightCode: db.settings.adRightCode
+        adRightCode: db.settings.adRightCode,
+        enableSponsoredAd1: db.settings.enableSponsoredAd1 ?? true,
+        sponsoredAd1Url: db.settings.sponsoredAd1Url || "https://www.rotate4all.com/promote/pt13azaa9mf1",
+        enableSponsoredAd2: db.settings.enableSponsoredAd2 ?? true,
+        sponsoredAd2Url: db.settings.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"
       }
     });
   });
