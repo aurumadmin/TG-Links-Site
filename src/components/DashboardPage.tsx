@@ -2252,48 +2252,52 @@ if( $result ) {
                     </div>
                   )}
 
-                  <form onSubmit={handleConvertBalance} className="space-y-4 max-w-xl">
+                  <form onSubmit={handleConvertBalance} className="space-y-4 max-w-md">
                     <div className="space-y-2">
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-                        Amount to Convert ($)
-                      </label>
-                      <div className="flex flex-col sm:flex-row items-stretch gap-3">
-                        <div className="relative flex-1 min-w-[200px]">
-                          <input
-                            required
-                            type="number"
-                            step="any"
-                            min="0.0001"
-                            placeholder="e.g. 5.00"
-                            value={convertAmount}
-                            onChange={(e) => setConvertAmount(e.target.value)}
-                            className="w-full h-12 pl-4 pr-16 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-sm font-bold text-white placeholder-slate-600"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setConvertAmount(Number(currentUser.balance || 0).toFixed(4))}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-extrabold uppercase rounded-lg transition cursor-pointer z-10"
-                          >
-                            MAX
-                          </button>
-                        </div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                          Amount to Convert ($)
+                        </label>
+                        <span className="text-xs text-slate-400 font-semibold">
+                          Publisher Balance: <strong className="text-emerald-400 font-mono">${Number(currentUser.balance || 0).toFixed(4)}</strong>
+                        </span>
+                      </div>
 
+                      <div className="relative">
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          min="0.0001"
+                          placeholder="Enter amount (e.g. 5.00)"
+                          value={convertAmount}
+                          onChange={(e) => setConvertAmount(e.target.value)}
+                          className="w-full h-12 pl-4 pr-24 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-sm font-bold text-white placeholder-slate-600 font-mono"
+                        />
                         <button
-                          type="submit"
-                          disabled={convertLoading || Number(currentUser.balance || 0) <= 0}
-                          className="h-12 px-6 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-600/20 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                          type="button"
+                          onClick={() => setConvertAmount(Number(currentUser.balance || 0).toFixed(4))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-extrabold uppercase rounded-lg transition cursor-pointer"
                         >
-                          {convertLoading ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <>
-                              <ArrowLeftRight className="w-4 h-4" />
-                              <span>Convert Funds</span>
-                            </>
-                          )}
+                          MAX
                         </button>
                       </div>
                     </div>
+
+                    <button
+                      type="submit"
+                      disabled={convertLoading || Number(currentUser.balance || 0) <= 0}
+                      className="w-full h-12 px-6 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {convertLoading ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <ArrowLeftRight className="w-4 h-4" />
+                          <span>Convert Funds Now</span>
+                        </>
+                      )}
+                    </button>
                   </form>
                 </div>
 
