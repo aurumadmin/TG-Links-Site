@@ -12,14 +12,9 @@ const ensureAbsoluteUrl = (url: string) => {
   return url;
 };
 
-const redirectWithoutReferrer = (url: string, enableThunderRedirect?: boolean) => {
+const redirectWithoutReferrer = (url: string) => {
   const target = ensureAbsoluteUrl(url);
   if (!target) return;
-  
-  if (enableThunderRedirect) {
-    window.location.href = `https://thunder-appz.eu.org/r?to=${encodeURIComponent(target)}`;
-    return;
-  }
   
   try {
     const meta = document.createElement("meta");
@@ -42,20 +37,42 @@ const redirectWithoutReferrer = (url: string, enableThunderRedirect?: boolean) =
   }, 100);
 };
 
+interface AdvertiserAdProp {
+  id: string;
+  title: string;
+  targetUrl?: string;
+  bannerImageUrl?: string;
+  adCode?: string;
+}
+
 const AdBlock = ({ 
   htmlCode, 
   placeholder,
   size = "300x250",
-  className = ""
+  className = "",
+  advertiserAd
 }: { 
   htmlCode?: string; 
   placeholder: string;
   size?: "300x250" | "728x90" | "300x600" | "320x50" | "468x60" | "auto";
   className?: string;
+  advertiserAd?: AdvertiserAdProp;
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const impressionTracked = useRef(false);
 
   useEffect(() => {
+    if (advertiserAd?.id && !impressionTracked.current) {
+      impressionTracked.current = true;
+      fetchApi("/api/advertiser/impression", {
+        method: "POST",
+        body: JSON.stringify({ campaignId: advertiserAd.id })
+      }).catch(err => console.error("Failed to track advertiser impression", err));
+    }
+  }, [advertiserAd]);
+
+  useEffect(() => {
+    if (advertiserAd) return;
     if (!htmlCode || !containerRef.current) return;
     
     // Clear old contents
@@ -70,7 +87,7 @@ const AdBlock = ({
       console.error("Failed to parse and execute ad HTML script block", e);
       containerRef.current.innerHTML = htmlCode;
     }
-  }, [htmlCode]);
+  }, [htmlCode, advertiserAd]);
 
   let sizeContainerStyle = "min-h-[250px] w-full max-w-[300px]";
   let sizeLabel = "300x250 Medium Rectangle";
@@ -87,6 +104,36 @@ const AdBlock = ({
   } else if (size === "320x50") {
     sizeContainerStyle = "min-h-[50px] w-full max-w-[320px]";
     sizeLabel = "320x50 Mobile Banner";
+  }
+
+  // If an advertiser ad exists, render advertiser ad overriding default admin ad!
+  if (advertiserAd) {
+    if (advertiserAd.bannerImageUrl && advertiserAd.targetUrl) {
+      return (
+        <div className={`overflow-hidden flex flex-col justify-center items-center rounded-2xl bg-slate-950/90 border border-amber-500/40 p-2 shadow-2xl relative ${sizeContainerStyle} ${className}`}>
+          <a 
+            href={ensureAbsoluteUrl(advertiserAd.targetUrl)} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="block w-full text-center hover:opacity-95 transition-opacity"
+          >
+            <img 
+              src={advertiserAd.bannerImageUrl} 
+              alt={advertiserAd.title || "Sponsored Ad"} 
+              className="max-w-full max-h-[580px] h-auto rounded-lg mx-auto object-contain shadow"
+            />
+          </a>
+          <span className="text-[10px] text-amber-400 font-mono mt-1 font-bold">Sponsored Ad • {advertiserAd.title}</span>
+        </div>
+      );
+    } else if (advertiserAd.adCode) {
+      return (
+        <div 
+          ref={containerRef} 
+          className={`overflow-hidden flex justify-center items-center rounded-2xl bg-slate-950/80 border border-amber-500/40 p-2 shadow-2xl ${sizeContainerStyle} ${className}`}
+        />
+      );
+    }
   }
 
   if (!htmlCode) {
@@ -396,7 +443,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult.isVpnOrProxy && !res.faucetLimitReached) {
           setRedirecting(true);
           if (res.link?.adFlyShortenedUrl) {
-            redirectWithoutReferrer(res.link.adFlyShortenedUrl, res.settings?.enableThunderRedirect);
+            redirectWithoutReferrer(res.link.adFlyShortenedUrl);
           } else {
             try {
               const clickRes = await fetchApi("/links/click", {
@@ -407,7 +454,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                 setFaucetLimitDetected(true);
                 setRedirecting(false);
               } else {
-                redirectWithoutReferrer(clickRes.adFlyShortenedUrl || clickRes.originalUrl, res.settings?.enableThunderRedirect);
+                redirectWithoutReferrer(clickRes.adFlyShortenedUrl || clickRes.originalUrl);
               }
             } catch {
               setFaucetLimitDetected(true);
@@ -476,6 +523,17 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               updated[activeOfferIndex] = true;
               return updated;
             });
+
+            // Track advertiser impression if extra offer wall task completed
+            const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd;
+            const baseCount = settings?.offerWallCount || 4;
+            if (extraOffer && activeOfferIndex === baseCount) {
+              fetchApi("/api/advertiser/impression", {
+                method: "POST",
+                body: JSON.stringify({ campaignId: extraOffer.id })
+              }).catch(err => console.error("Failed to track advertiser impression", err));
+            }
+
             return 0;
           }
           return prev - 1;
@@ -485,7 +543,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [offerTimerActive, offerTimer, activeOfferIndex]);
+  }, [offerTimerActive, offerTimer, activeOfferIndex, settings]);
 
   // Trigger Sponsored Premium Traffic Network Popup when second page (after offerwall page) loads
   useEffect(() => {
@@ -493,15 +551,19 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     const isSecondPage = currentStep === 2 || (settings?.enableOfferWall && currentStep > 1);
     const isAd1Enabled = settings?.enableSponsoredAd1 !== false;
     const isAd2Enabled = !!settings?.enableSponsoredAd2;
-    const isAnySponsoredAdEnabled = isAd1Enabled || isAd2Enabled;
+    const hasExtraPopupAd = !!settings?.activeAdvertiserAds?.extraSponsoredPopupAd;
+    const isAnySponsoredAdEnabled = isAd1Enabled || isAd2Enabled || hasExtraPopupAd;
 
     if (isSecondPage && !popupHasBeenTriggered && !popupClosed && isAnySponsoredAdEnabled) {
       if (isAd1Enabled) {
         setActivePopupIndex(1);
         setPopupTimer(settings?.sponsoredAd1Timer ?? 12);
-      } else {
+      } else if (isAd2Enabled) {
         setActivePopupIndex(2);
         setPopupTimer(settings?.sponsoredAd2Timer ?? 12);
+      } else {
+        setActivePopupIndex(3); // Advertiser popup
+        setPopupTimer(12);
       }
       setShowPopupAd(true);
       setPopupTimerFinished(false);
@@ -654,17 +716,23 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   };
 
   const handleViewOffer = (index: number) => {
-    const urls = [
-      settings?.offerWallUrl1,
-      settings?.offerWallUrl2,
-      settings?.offerWallUrl3,
-      settings?.offerWallUrl4
-    ];
-    let adUrl = ensureAbsoluteUrl(urls[index] || "https://www.google.com");
-    
-    if (settings?.enableThunderRedirect) {
-      adUrl = `https://thunder-appz.eu.org/r?to=${encodeURIComponent(adUrl)}`;
+    let rawUrl = "";
+    const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd;
+    const baseCount = settings?.offerWallCount || 4;
+
+    if (extraOffer && index === baseCount) {
+      rawUrl = extraOffer.targetUrl || "https://www.google.com";
+    } else {
+      const urls = [
+        settings?.offerWallUrl1,
+        settings?.offerWallUrl2,
+        settings?.offerWallUrl3,
+        settings?.offerWallUrl4
+      ];
+      rawUrl = urls[index] || "https://www.google.com";
     }
+
+    let adUrl = ensureAbsoluteUrl(rawUrl);
     
     // Open ad URL in a new tab
     window.open(adUrl, "_blank");
@@ -759,7 +827,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           return;
         }
 
-        redirectWithoutReferrer(targetUrl, settings?.enableThunderRedirect);
+        redirectWithoutReferrer(targetUrl);
       } catch (err: any) {
         setFaucetLimitDetected(true);
         setRedirecting(false);
@@ -1009,10 +1077,25 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* TOP SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 468x60) */}
                   <div className="flex flex-col items-center gap-4 py-4 border-b border-slate-800/60">
-                    <AdBlock htmlCode={settings?.adTopLeftCode} placeholder="Header Leaderboard Unit" size="728x90" />
+                    <AdBlock 
+                      htmlCode={settings?.adTopLeftCode || settings?.bannerAd728x90} 
+                      placeholder="Header Leaderboard Unit" 
+                      size="728x90" 
+                      advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_728x90"]}
+                    />
                     <div className="flex flex-wrap justify-center items-center gap-4 w-full">
-                      <AdBlock htmlCode={settings?.adTopCenterCode} placeholder="Top Medium Rectangle" size="300x250" />
-                      <AdBlock htmlCode={settings?.adTopRightCode} placeholder="Top Standard Banner" size="468x60" />
+                      <AdBlock 
+                        htmlCode={settings?.adTopCenterCode || settings?.bannerAd300x250} 
+                        placeholder="Top Medium Rectangle" 
+                        size="300x250" 
+                        advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_300x250"]}
+                      />
+                      <AdBlock 
+                        htmlCode={settings?.adTopRightCode} 
+                        placeholder="Top Standard Banner" 
+                        size="468x60" 
+                        advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_468x60"]}
+                      />
                     </div>
                   </div>
 
@@ -1117,10 +1200,25 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   {/* BOTTOM SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 320x50) */}
                   <div className="flex flex-col items-center gap-4 pt-4 border-t border-slate-800/60">
                     <div className="flex flex-wrap justify-center items-center gap-4 w-full">
-                      <AdBlock htmlCode={settings?.adLeftCode} placeholder="Bottom Medium Rectangle" size="300x250" />
-                      <AdBlock htmlCode={settings?.adRightCode} placeholder="Bottom Mobile Banner" size="320x50" />
+                      <AdBlock 
+                        htmlCode={settings?.adLeftCode || settings?.bannerAd300x250} 
+                        placeholder="Bottom Medium Rectangle" 
+                        size="300x250" 
+                        advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_left"] || settings?.activeAdvertiserAds?.activeBanners?.["banner_300x250"]}
+                      />
+                      <AdBlock 
+                        htmlCode={settings?.adRightCode || settings?.bannerAd320x50} 
+                        placeholder="Bottom Mobile Banner" 
+                        size="320x50" 
+                        advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_right"] || settings?.activeAdvertiserAds?.activeBanners?.["banner_320x50"]}
+                      />
                     </div>
-                    <AdBlock htmlCode={settings?.adBottomCenterCode} placeholder="Footer Leaderboard Unit" size="728x90" />
+                    <AdBlock 
+                      htmlCode={settings?.adBottomCenterCode || settings?.bannerAd728x90} 
+                      placeholder="Footer Leaderboard Unit" 
+                      size="728x90" 
+                      advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_728x90"]}
+                    />
                   </div>
 
                   {/* CONTINUE / PROCEED BUTTON */}
@@ -1153,44 +1251,59 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   
                   {/* TOP SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 468x60) */}
                   <div className="flex flex-col items-center gap-4 py-4 border-b border-slate-800/60">
-                    <AdBlock htmlCode={settings?.adTopLeftCode} placeholder="Top Leaderboard Unit" size="728x90" />
+                    <AdBlock 
+                      htmlCode={settings?.adTopLeftCode || settings?.bannerAd728x90} 
+                      placeholder="Top Leaderboard Unit" 
+                      size="728x90" 
+                      advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_728x90"]}
+                    />
                     <div className="flex flex-wrap justify-center items-center gap-4 w-full">
-                      <AdBlock htmlCode={settings?.adTopCenterCode} placeholder="Top Medium Rectangle" size="300x250" />
-                      <AdBlock htmlCode={settings?.adTopRightCode} placeholder="Top Standard Banner" size="468x60" />
+                      <AdBlock 
+                        htmlCode={settings?.adTopCenterCode || settings?.bannerAd300x250} 
+                        placeholder="Top Medium Rectangle" 
+                        size="300x250" 
+                        advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_300x250"]}
+                      />
+                      <AdBlock 
+                        htmlCode={settings?.adTopRightCode} 
+                        placeholder="Top Standard Banner" 
+                        size="468x60" 
+                        advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_468x60"]}
+                      />
                     </div>
                   </div>
 
                   {/* TIMER DIGITS */}
                   <div 
                     className="relative shrink-0 mx-auto flex items-center justify-center my-2 overflow-hidden"
-                    style={{ width: '120px', height: '120px', minWidth: '120px', minHeight: '120px', maxWidth: '120px', maxHeight: '120px' }}
+                    style={{ width: '80px', height: '80px', minWidth: '80px', minHeight: '80px', maxWidth: '80px', maxHeight: '80px' }}
                   >
                     <svg 
-                      width="120" 
-                      height="120" 
-                      viewBox="0 0 120 120" 
-                      style={{ width: '120px', height: '120px', maxWidth: '120px', maxHeight: '120px' }}
+                      width="80" 
+                      height="80" 
+                      viewBox="0 0 80 80" 
+                      style={{ width: '80px', height: '80px', maxWidth: '80px', maxHeight: '80px' }}
                       className="shrink-0 transform -rotate-90 block"
                     >
-                      <circle cx="60" cy="60" r="48" stroke="#0f172a" strokeWidth="6" fill="transparent" />
+                      <circle cx="40" cy="40" r="32" stroke="#0f172a" strokeWidth="4" fill="transparent" />
                       <circle 
-                        cx="60" 
-                        cy="60" 
-                        r="48" 
+                        cx="40" 
+                        cy="40" 
+                        r="32" 
                         stroke={isTimerFinished ? "#34d399" : "#6366f1"} 
-                        strokeWidth="6" 
+                        strokeWidth="4" 
                         fill="transparent" 
-                        strokeDasharray="301.59"
-                        strokeDashoffset={301.59 - (301.59 * timer) / 10}
+                        strokeDasharray="201.06"
+                        strokeDashoffset={201.06 - (201.06 * timer) / 10}
                         className="transition-all duration-1000"
                       />
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
-                      <span className="text-2xl font-black text-white leading-none">{timer}s</span>
-                      <span className="text-[9px] text-slate-400 uppercase tracking-widest font-bold mt-1">
+                      <span className="text-base font-black text-white leading-none">{timer}s</span>
+                      <span className="text-[8px] text-slate-400 uppercase tracking-widest font-bold mt-0.5">
                         {(!popupClosed && (settings?.enableSponsoredAd1 !== false || settings?.enableSponsoredAd2) && (currentStep === 2 || (settings?.enableOfferWall && currentStep > 1)))
                           ? "PAUSED"
-                          : "COUNTDOWN"}
+                          : "WAIT"}
                       </span>
                     </div>
                   </div>
@@ -1280,10 +1393,25 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   {/* BOTTOM SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 320x50) */}
                   <div className="flex flex-col items-center gap-4 pt-4 border-t border-slate-800/60">
                     <div className="flex flex-wrap justify-center items-center gap-4 w-full">
-                      <AdBlock htmlCode={settings?.adLeftCode} placeholder="Bottom Medium Rectangle" size="300x250" />
-                      <AdBlock htmlCode={settings?.adRightCode} placeholder="Bottom Mobile Banner" size="320x50" />
+                      <AdBlock 
+                        htmlCode={settings?.adLeftCode || settings?.bannerAd300x250} 
+                        placeholder="Bottom Medium Rectangle" 
+                        size="300x250" 
+                        advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_left"] || settings?.activeAdvertiserAds?.activeBanners?.["banner_300x250"]}
+                      />
+                      <AdBlock 
+                        htmlCode={settings?.adRightCode || settings?.bannerAd320x50} 
+                        placeholder="Bottom Mobile Banner" 
+                        size="320x50" 
+                        advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_right"] || settings?.activeAdvertiserAds?.activeBanners?.["banner_320x50"]}
+                      />
                     </div>
-                    <AdBlock htmlCode={settings?.adBottomCenterCode} placeholder="Footer Leaderboard Unit" size="728x90" />
+                    <AdBlock 
+                      htmlCode={settings?.adBottomCenterCode || settings?.bannerAd728x90} 
+                      placeholder="Footer Leaderboard Unit" 
+                      size="728x90" 
+                      advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_728x90"]}
+                    />
                   </div>
 
                   {/* SUBMIT STEP BUTTON */}
@@ -1327,41 +1455,22 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         <div className="lg:col-span-4 flex flex-col gap-6" id="sidebar_ads_container">
           <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md min-h-[300px]" id="banner_300x250">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 block text-center">SPONSOR ADVERTISEMENT (300x250)</span>
-            {settings?.bannerAd300x250 ? (
-              <div className="w-full flex justify-center" dangerouslySetInnerHTML={{ __html: settings.bannerAd300x250 }} />
-            ) : (
-              <div className="w-full h-60 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-2xl border border-slate-800 flex flex-col items-center justify-center p-4 text-center space-y-2 shadow-2xl relative overflow-hidden">
-                <div className="absolute inset-0 bg-indigo-500/5"></div>
-                <span className="px-3 py-1 bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-[10px] font-black uppercase rounded-full tracking-widest relative z-10">
-                  300x250 Medium Rectangle
-                </span>
-                <p className="text-xs font-bold text-white relative z-10">High CPM Sponsor Slot</p>
-                <p className="text-[10px] font-mono text-emerald-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800 relative z-10">bannerAd300x250</p>
-              </div>
-            )}
+            <AdBlock 
+              htmlCode={settings?.bannerAd300x250} 
+              placeholder="High CPM Sponsor Slot" 
+              size="300x250" 
+              advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_300x250"]}
+            />
           </div>
 
           <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md min-h-[620px]" id="banner_300x600">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 block text-center">SIDEBAR SKYSCRAPER (300x600)</span>
-            <div className="w-full h-[580px] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-2xl border border-slate-800 flex flex-col items-center justify-between p-6 text-center shadow-2xl relative overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-b from-purple-500/5 via-indigo-500/5 to-emerald-500/5"></div>
-              <div className="space-y-3 relative z-10 mt-6">
-                <span className="px-3 py-1 bg-purple-950/80 border border-purple-800/60 text-purple-300 text-[10px] font-black uppercase rounded-full tracking-widest">
-                  300x600 Skyscraper
-                </span>
-                <h4 className="text-base font-black text-white uppercase tracking-wider">Premium Ad Placement</h4>
-                <p className="text-xs text-slate-400 max-w-[220px]">Maximum viewability and CTR for premium ad networks.</p>
-              </div>
-
-              <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-2 relative z-10 w-full max-w-[240px]">
-                <p className="text-[10px] font-mono text-emerald-400 font-bold">300x600 Half-Page Slot</p>
-                <p className="text-[10px] text-slate-500">Auto-optimized for Google AdSense & Media.net</p>
-              </div>
-
-              <div className="mb-6 relative z-10">
-                <span className="text-[10px] text-slate-600 font-mono">TG LINKS AD SERVER</span>
-              </div>
-            </div>
+            <AdBlock 
+              htmlCode={settings?.ad300x600Code || settings?.bannerAd300x600} 
+              placeholder="300x600 Premium Skyscraper" 
+              size="300x600" 
+              advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_300x600"]}
+            />
           </div>
         </div>
       </div>
@@ -1380,7 +1489,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     Sponsored Traffic Network
                   </h3>
                   <span className="px-2 py-0.5 bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-[10px] font-black uppercase rounded-full">
-                    Ad {activePopupIndex} of {(settings?.enableSponsoredAd1 !== false && !!settings?.enableSponsoredAd2) ? 2 : 1}
+                    Ad {activePopupIndex === 3 ? ((settings?.enableSponsoredAd1 !== false ? 1 : 0) + (settings?.enableSponsoredAd2 ? 1 : 0) + 1) : activePopupIndex} of {
+                      (settings?.enableSponsoredAd1 !== false ? 1 : 0) + 
+                      (settings?.enableSponsoredAd2 ? 1 : 0) + 
+                      (settings?.activeAdvertiserAds?.extraSponsoredPopupAd ? 1 : 0)
+                    }
                   </span>
                 </div>
               </div>
@@ -1389,10 +1502,22 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               <button
                 disabled={!popupTimerFinished}
                 onClick={() => {
-                  if (activePopupIndex === 1 && !!settings?.enableSponsoredAd2) {
+                  const hasAd2 = !!settings?.enableSponsoredAd2;
+                  const extraAdvPopup = settings?.activeAdvertiserAds?.extraSponsoredPopupAd;
+
+                  if (activePopupIndex === 1 && hasAd2) {
                     setActivePopupIndex(2);
                     setPopupTimer(settings?.sponsoredAd2Timer ?? 12);
                     setPopupTimerFinished(false);
+                  } else if ((activePopupIndex === 1 && !hasAd2 && extraAdvPopup) || (activePopupIndex === 2 && extraAdvPopup)) {
+                    setActivePopupIndex(3);
+                    setPopupTimer(12);
+                    setPopupTimerFinished(false);
+                    // Track advertiser impression
+                    fetchApi("/api/advertiser/impression", {
+                      method: "POST",
+                      body: JSON.stringify({ campaignId: extraAdvPopup.id })
+                    }).catch(err => console.error("Failed to track advertiser impression", err));
                   } else {
                     setShowPopupAd(false);
                     setPopupClosed(true);
@@ -1405,7 +1530,9 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                 }`}
               >
                 {popupTimerFinished ? (
-                  (activePopupIndex === 1 && !!settings?.enableSponsoredAd2) ? (
+                  ((activePopupIndex === 1 && !!settings?.enableSponsoredAd2) || 
+                   (activePopupIndex === 1 && !settings?.enableSponsoredAd2 && !!settings?.activeAdvertiserAds?.extraSponsoredPopupAd) ||
+                   (activePopupIndex === 2 && !!settings?.activeAdvertiserAds?.extraSponsoredPopupAd)) ? (
                     <>
                       <span>Next Sponsored Ad</span>
                       <span className="font-mono text-sm leading-none">➔</span>
@@ -1491,6 +1618,29 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   <iframe
                     src={settings?.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
                     title="Sponsored Traffic Partner Modal 2"
+                    className="w-full border-0 h-[520px] sm:h-[650px]"
+                    referrerPolicy="unsafe-url"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  />
+                </div>
+              )}
+
+              {activePopupIndex === 3 && !!settings?.activeAdvertiserAds?.extraSponsoredPopupAd && (
+                <div className="w-full bg-slate-950 rounded-xl border border-amber-500/40 overflow-hidden shadow-inner flex flex-col">
+                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-amber-800/40 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                      <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-amber-400">
+                        Sponsored Advertiser Network • {settings.activeAdvertiserAds.extraSponsoredPopupAd.title || "Advertiser Promotion"}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-amber-300 bg-amber-950/80 px-2.5 py-0.5 rounded border border-amber-800/60 font-bold">
+                      Timer: 12s
+                    </span>
+                  </div>
+                  <iframe
+                    src={ensureAbsoluteUrl(settings.activeAdvertiserAds.extraSponsoredPopupAd.targetUrl || "https://www.google.com")}
+                    title="Sponsored Advertiser Promotion Modal"
                     className="w-full border-0 h-[520px] sm:h-[650px]"
                     referrerPolicy="unsafe-url"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"

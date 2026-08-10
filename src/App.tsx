@@ -114,6 +114,7 @@ export default function App() {
       else if (sub === "withdrawals") tab = "withdrawals";
       else if (sub === "tickets") tab = "tickets";
       else if (sub === "settings") tab = "settings";
+      else if (sub === "ad-settings" || sub === "ad_settings") tab = "ad_settings";
       else if (sub === "external" || sub === "external-apis") tab = "external";
       else if (sub === "views" || sub === "reports") tab = "views";
 
@@ -147,6 +148,7 @@ export default function App() {
       else if (path.includes("withdraw")) tab = "withdraw";
       else if (path.includes("tools") || path === "/api" || path === "/api-docs" || path === "/developer") tab = "tools";
       else if (path.includes("ticket")) tab = "contact";
+      else if (path.includes("advertiser")) tab = "advertiser";
       else if (path.includes("setting") || path === "/profile") tab = "settings";
 
       setActivePage("dashboard");

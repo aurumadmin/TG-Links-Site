@@ -4,6 +4,7 @@ import {
   User, 
   Link, 
   Withdrawal, 
+  DepositRequest,
   SystemSettings, 
   AdFlyShortener,
   SupportTicket 
@@ -51,13 +52,17 @@ import {
   Globe,
   Filter,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  CreditCard,
+  ExternalLink,
+  Target,
+  QrCode
 } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
 import TopLoadingBar from "./TopLoadingBar";
 
-type AdminTab = "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "external" | "views" | "backup";
+type AdminTab = "overview" | "users" | "links" | "withdrawals" | "deposits" | "tickets" | "settings" | "ad_settings" | "external" | "views" | "backup";
 
 interface AdminPageProps {
   initialTab?: AdminTab;
@@ -72,6 +77,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [usersList, setUsersList] = useState<User[]>([]);
   const [linksList, setLinksList] = useState<Link[]>([]);
   const [withdrawalsList, setWithdrawalsList] = useState<Withdrawal[]>([]);
+  const [depositsList, setDepositsList] = useState<DepositRequest[]>([]);
   const [ticketsList, setTicketsList] = useState<SupportTicket[]>([]);
   const [sysSettings, setSysSettings] = useState<SystemSettings | null>(() => getCachedSettings());
   const [isAdminLoading, setIsAdminLoading] = useState(true);
@@ -84,14 +90,30 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [viewSearchQuery, setViewSearchQuery] = useState("");
   const [selectedUserReportModal, setSelectedUserReportModal] = useState<any>(null);
 
+  // Settings Dropdown Menu state
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(() => {
+    return initialTab === "settings" || initialTab === "ad_settings" || initialTab === "backup" || initialTab === "external";
+  });
+
   useEffect(() => {
     if (initialTab) {
-      setActiveTab(initialTab);
+      if (initialTab === "views") {
+        setActiveTab("overview");
+      } else {
+        setActiveTab(initialTab);
+      }
+      if (initialTab === "settings" || initialTab === "ad_settings" || initialTab === "backup" || initialTab === "external") {
+        setIsSettingsOpen(true);
+      }
     }
   }, [initialTab]);
 
   const changeTab = (tab: AdminTab, path: string) => {
-    setActiveTab(tab);
+    const targetTab = tab === "views" ? "overview" : tab;
+    setActiveTab(targetTab);
+    if (targetTab === "settings" || targetTab === "ad_settings" || targetTab === "backup" || targetTab === "external") {
+      setIsSettingsOpen(true);
+    }
     if (window.location.pathname !== path) {
       window.history.pushState({}, "", path);
     }
@@ -293,14 +315,31 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     }
   };
 
+  const handleUpdateDepositStatus = async (id: string, status: "approved" | "rejected", note?: string) => {
+    try {
+      const res = await fetchApi(`/admin/deposits/${id}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status, adminNote: note || "" })
+      });
+      if (res.success) {
+        loadAdminData();
+      } else {
+        alert(res.error || "Failed to update deposit status.");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    }
+  };
+
   const loadAdminData = async () => {
     setIsAdminLoading(true);
     try {
-      const [stats, users, links, withdrawals, tickets, settings, apis, viewsReport] = await Promise.all([
+      const [stats, users, links, withdrawals, deposits, tickets, settings, apis, viewsReport] = await Promise.all([
         fetchApi("/admin/stats"),
         fetchApi("/admin/users"),
         fetchApi("/admin/links"),
         fetchApi("/admin/withdrawals"),
+        fetchApi("/admin/deposits"),
         fetchApi("/admin/tickets"),
         fetchApi("/admin/settings"),
         fetchApi("/admin/external-shorteners"),
@@ -311,6 +350,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       if (users?.users) setUsersList(users.users);
       if (links?.links) setLinksList(links.links);
       if (withdrawals?.withdrawals) setWithdrawalsList(withdrawals.withdrawals);
+      if (deposits?.deposits) setDepositsList(deposits.deposits);
       if (tickets?.tickets) {
         setTicketsList(tickets.tickets);
       }
@@ -674,6 +714,21 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
           </button>
 
           <button
+            onClick={() => changeTab("deposits", "/admin/deposits")}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "deposits" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
+          >
+            <CreditCard className="w-4 h-4 text-emerald-400" />
+            <div className="flex-grow text-left flex items-center justify-between">
+              <span>Deposit Requests</span>
+              {depositsList.filter(d => d.status === "pending").length > 0 && (
+                <span className="px-2 py-0.5 text-[10px] font-extrabold bg-emerald-500 text-slate-950 rounded-full animate-pulse">
+                  {depositsList.filter(d => d.status === "pending").length}
+                </span>
+              )}
+            </div>
+          </button>
+
+          <button
             onClick={() => changeTab("tickets", "/admin/tickets")}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "tickets" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
@@ -688,37 +743,79 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
             </div>
           </button>
 
-          <button
-            onClick={() => changeTab("settings", "/admin/settings")}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "settings" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
-          >
-            <Settings className="w-4 h-4" />
-            Ads & System Settings
-          </button>
+          {/* Collapsible Settings Dropdown */}
+          <div className="space-y-1 pt-1">
+            <button
+              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition cursor-pointer ${
+                (activeTab === "settings" || activeTab === "ad_settings" || activeTab === "backup" || activeTab === "external")
+                  ? "bg-indigo-600/20 text-indigo-300 font-bold border border-indigo-500/30"
+                  : "hover:bg-slate-850 hover:text-white text-slate-300 font-semibold"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Settings className="w-4 h-4 text-indigo-400" />
+                <span>Settings & System</span>
+              </div>
+              {isSettingsOpen ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
 
-          <button
-            onClick={() => changeTab("backup", "/admin/backup")}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "backup" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
-          >
-            <Database className="w-4 h-4 text-emerald-400" />
-            <span>Database Backup & Restore</span>
-          </button>
+            {isSettingsOpen && (
+              <div className="pl-3 space-y-1 border-l-2 border-slate-800/80 ml-4 my-1">
+                <button
+                  onClick={() => changeTab("settings", "/admin/settings")}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                    activeTab === "settings"
+                      ? "bg-indigo-600 text-white font-extrabold shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:bg-slate-850 hover:text-white font-semibold"
+                  }`}
+                >
+                  <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>System General Settings</span>
+                </button>
 
-          <button
-            onClick={() => changeTab("external", "/admin/external-apis")}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "external" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
-          >
-            <Cpu className="w-4 h-4" />
-            AdLinkFly External APIs
-          </button>
+                <button
+                  onClick={() => changeTab("ad_settings", "/admin/ad-settings")}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                    activeTab === "ad_settings"
+                      ? "bg-indigo-600 text-white font-extrabold shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:bg-slate-850 hover:text-white font-semibold"
+                  }`}
+                >
+                  <Target className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Ad Zones & CPM Rates</span>
+                </button>
 
-          <button
-            onClick={() => changeTab("views", "/admin/views")}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "views" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
-          >
-            <BarChart3 className="w-4 h-4 text-emerald-400" />
-            <span>All User Views Analytics</span>
-          </button>
+                <button
+                  onClick={() => changeTab("backup", "/admin/backup")}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                    activeTab === "backup"
+                      ? "bg-indigo-600 text-white font-extrabold shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:bg-slate-850 hover:text-white font-semibold"
+                  }`}
+                >
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Database Backup & Restore</span>
+                </button>
+
+                <button
+                  onClick={() => changeTab("external", "/admin/external-apis")}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                    activeTab === "external"
+                      ? "bg-indigo-600 text-white font-extrabold shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:bg-slate-850 hover:text-white font-semibold"
+                  }`}
+                >
+                  <Cpu className="w-3.5 h-3.5 text-amber-400" />
+                  <span>AdLinkFly External APIs</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="pt-4 mt-4 border-t border-slate-800/80">
             <button
@@ -799,53 +896,426 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </div>
             </div>
 
-            {/* QUICK ACTIONS ROW */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-800/80 space-y-4">
-                <h3 className="font-extrabold text-white text-sm">System Redirection Rules</h3>
-                <div className="p-4 bg-slate-950 rounded-xl text-xs space-y-2 border border-slate-800/60">
-                  <p className="flex justify-between font-medium">
-                    <span className="text-slate-400">Ad Redirection Steps:</span>
-                    <span className="font-bold text-indigo-400">{sysSettings?.adPagesCount || 1} Pages</span>
-                  </p>
-                  <p className="flex justify-between font-medium">
-                    <span className="text-slate-400">Default CPM rate:</span>
-                    <span className="font-bold text-emerald-400">${sysSettings?.globalCpm.toFixed(2) || "5.00"}</span>
-                  </p>
-                  <p className="flex justify-between font-medium">
-                    <span className="text-slate-400">"My own page" Ads:</span>
-                    <span className={`font-bold ${sysSettings?.enableOwnAds ? "text-emerald-400" : "text-rose-400"}`}>{sysSettings?.enableOwnAds ? "ENABLED" : "DISABLED"}</span>
-                  </p>
-                  <p className="flex justify-between font-medium">
-                    <span className="text-slate-400">Active AdLinkFly APIs:</span>
-                    <span className="font-bold text-indigo-400">{externalApis.filter(api => api.enabled).length} Enabled</span>
+            {/* ALL USER VIEWS ANALYTICS & REPORTS (EMBEDDED IN OVERVIEW) */}
+            <div className="space-y-8 pt-6 border-t border-slate-800/80" id="admin_views_analytics_embedded">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-3">
+                    <BarChart3 className="w-7 h-7 text-emerald-400" />
+                    <span>All User Views Analytics & Reports</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Comprehensive daily and monthly view analytics across all users and individual publisher view logs.
                   </p>
                 </div>
-                <button
-                  onClick={() => setActiveTab("settings")}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-sm transition"
-                >
-                  Configure Ads & CPM
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={loadAdminData}
+                    className="px-4 py-2.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4 text-indigo-400" />
+                    <span>Refresh Data</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-800/80 space-y-3">
-                <h3 className="font-extrabold text-white text-sm flex items-center gap-1.5 text-rose-400">
-                  <ShieldCheck className="w-5 h-5 text-rose-500" />
-                  Primary Admins Confirmed
-                </h3>
-                <p className="text-xs text-slate-400 leading-normal">
-                  The following email accounts are hardcoded with admin panel entry.
-                </p>
-                <div className="space-y-1">
-                  <div className="p-2.5 bg-slate-950 border border-slate-800/60 rounded-lg text-xs font-semibold text-rose-300 font-mono">
-                    freefiregtamcpe@gmail.com
+              {/* TOP METRIC CARDS */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/80 flex items-center gap-4 shadow-sm">
+                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <TrendingUp className="w-6 h-6" />
                   </div>
-                  <div className="p-2.5 bg-slate-950 border border-slate-800/60 rounded-lg text-xs font-semibold text-rose-300 font-mono">
-                    teamthunderofficialyt@gmail.com
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Views (All Time)</p>
+                    <h3 className="text-2xl font-black text-white mt-0.5">{viewsReportData?.totalViews || adminStats?.totalViews || 0}</h3>
+                    <p className="text-[11px] text-emerald-400/90 font-semibold mt-0.5">Recorded across all users</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/80 flex items-center gap-4 shadow-sm">
+                  <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                    <Calendar className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Today's System Views</p>
+                    <h3 className="text-2xl font-black text-white mt-0.5">{viewsReportData?.todayViews || 0}</h3>
+                    <p className="text-[11px] text-indigo-400/90 font-semibold mt-0.5">Logged today</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/80 flex items-center gap-4 shadow-sm">
+                  <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center">
+                    <BarChart3 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">This Month's Views</p>
+                    <h3 className="text-2xl font-black text-white mt-0.5">{viewsReportData?.monthViews || 0}</h3>
+                    <p className="text-[11px] text-purple-400/90 font-semibold mt-0.5">Logged this calendar month</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/80 flex items-center gap-4 shadow-sm">
+                  <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Publishers</p>
+                    <h3 className="text-2xl font-black text-white mt-0.5">{viewsReportData?.userBreakdown?.length || 0}</h3>
+                    <p className="text-[11px] text-amber-400/90 font-semibold mt-0.5">Users with recorded views</p>
                   </div>
                 </div>
               </div>
+
+              {/* SUB TAB CONTROLS */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-slate-900/60 p-2 rounded-2xl border border-slate-800">
+                <div className="flex items-center gap-1.5 overflow-x-auto p-1">
+                  <button
+                    onClick={() => setViewsSubTab("users")}
+                    className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                      viewsSubTab === "users"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                        : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>User Views Breakdown ({viewsReportData?.userBreakdown?.length || 0})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setViewsSubTab("daily")}
+                    className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                      viewsSubTab === "daily"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                        : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                    }`}
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>System Daily Views Report</span>
+                  </button>
+
+                  <button
+                    onClick={() => setViewsSubTab("monthly")}
+                    className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                      viewsSubTab === "monthly"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                        : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                    }`}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    <span>System Monthly Views Report</span>
+                  </button>
+
+                  <button
+                    onClick={() => setViewsSubTab("logs")}
+                    className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                      viewsSubTab === "logs"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                        : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Live Click Logs</span>
+                  </button>
+                </div>
+
+                {viewsSubTab === "users" && (
+                  <div className="relative min-w-[240px] px-2 sm:px-0">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={viewSearchQuery}
+                      onChange={(e) => setViewSearchQuery(e.target.value)}
+                      placeholder="Search publisher username/email..."
+                      className="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* SUB-VIEW 1: USER BREAKDOWN TABLE */}
+              {viewsSubTab === "users" && (
+                <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+                  <div className="p-6 border-b border-slate-800/60 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                        <Users className="w-4 h-4 text-indigo-400" />
+                        All Publisher Users View Breakdown
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        View total, daily, and monthly views and earnings received by each registered publisher account.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase tracking-wider border-b border-slate-800/60">
+                          <th className="py-4 px-6">Publisher Account</th>
+                          <th className="py-4 px-6 text-center">Today's Views</th>
+                          <th className="py-4 px-6 text-center">Month's Views</th>
+                          <th className="py-4 px-6 text-center">Total Views</th>
+                          <th className="py-4 px-6 text-right">Total Earnings</th>
+                          <th className="py-4 px-6 text-right">Avg CPM</th>
+                          <th className="py-4 px-6 text-center">Detailed Reports</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {viewsReportData?.userBreakdown
+                          ?.filter((u: any) => {
+                            if (!viewSearchQuery) return true;
+                            const q = viewSearchQuery.toLowerCase();
+                            return (
+                              (u.username && u.username.toLowerCase().includes(q)) ||
+                              (u.email && u.email.toLowerCase().includes(q)) ||
+                              (u.userId && u.userId.toLowerCase().includes(q)) ||
+                              (u.name && u.name.toLowerCase().includes(q))
+                            );
+                          })
+                          .map((u: any) => (
+                            <tr key={u.userId} className="hover:bg-slate-800/30 transition">
+                              <td className="py-4 px-6">
+                                <div className="font-extrabold text-white text-sm">{u.name || u.username}</div>
+                                <div className="text-slate-400 text-[11px] font-mono mt-0.5">{u.email || u.userId}</div>
+                              </td>
+
+                              <td className="py-4 px-6 text-center font-extrabold text-indigo-400 text-sm">
+                                {u.todayViews || 0}
+                              </td>
+
+                              <td className="py-4 px-6 text-center font-extrabold text-purple-400 text-sm">
+                                {u.monthViews || 0}
+                              </td>
+
+                              <td className="py-4 px-6 text-center">
+                                <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-black text-sm">
+                                  {u.totalViews || 0}
+                                </span>
+                              </td>
+
+                              <td className="py-4 px-6 text-right font-black text-emerald-400 text-sm">
+                                ${u.totalEarnings ? u.totalEarnings.toFixed(4) : "0.0000"}
+                              </td>
+
+                              <td className="py-4 px-6 text-right font-extrabold text-amber-400 text-xs">
+                                ${u.averageCpm ? u.averageCpm.toFixed(2) : "0.00"}
+                              </td>
+
+                              <td className="py-4 px-6 text-center">
+                                <button
+                                  onClick={() => setSelectedUserReportModal(u)}
+                                  className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 text-indigo-300 hover:text-white rounded-xl font-bold transition text-xs flex items-center gap-1.5 mx-auto cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>Daily & Monthly Logs</span>
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+
+                        {(!viewsReportData?.userBreakdown || viewsReportData?.userBreakdown?.length === 0) && (
+                          <tr>
+                            <td colSpan={7} className="text-center py-12 text-slate-500 italic">
+                              No publisher view activity recorded yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-VIEW 2: SYSTEM DAILY VIEWS REPORT */}
+              {viewsSubTab === "daily" && (
+                <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+                  <div className="p-6 border-b border-slate-800/60">
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-emerald-400" />
+                      System Daily Views Report (All Users)
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Day-by-day views count and total earnings generated across all publishers over the last 30 days.
+                    </p>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase tracking-wider border-b border-slate-800/60">
+                          <th className="py-4 px-6">Date</th>
+                          <th className="py-4 px-6 text-center">Total System Views</th>
+                          <th className="py-4 px-6 text-center">Active Viewing Publishers</th>
+                          <th className="py-4 px-6 text-right">System Earnings</th>
+                          <th className="py-4 px-6 text-right">Average CPM</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {viewsReportData?.dailyReports?.map((item: any) => (
+                          <tr key={item.date} className="hover:bg-slate-800/30 transition">
+                            <td className="py-4 px-6 font-extrabold text-white font-mono text-xs">
+                              {item.date}
+                            </td>
+
+                            <td className="py-4 px-6 text-center">
+                              <span className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-lg font-black text-sm">
+                                {item.views}
+                              </span>
+                            </td>
+
+                            <td className="py-4 px-6 text-center font-bold text-slate-300">
+                              {item.activeUsersCount || 0} users
+                            </td>
+
+                            <td className="py-4 px-6 text-right font-black text-emerald-400 text-sm">
+                              ${item.earnings ? item.earnings.toFixed(4) : "0.0000"}
+                            </td>
+
+                            <td className="py-4 px-6 text-right font-extrabold text-amber-400">
+                              ${item.cpm ? item.cpm.toFixed(2) : "0.00"}
+                            </td>
+                          </tr>
+                        ))}
+
+                        {(!viewsReportData?.dailyReports || viewsReportData?.dailyReports?.length === 0) && (
+                          <tr>
+                            <td colSpan={5} className="text-center py-12 text-slate-500 italic">
+                              No daily view records available yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-VIEW 3: SYSTEM MONTHLY VIEWS REPORT */}
+              {viewsSubTab === "monthly" && (
+                <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+                  <div className="p-6 border-b border-slate-800/60">
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-purple-400" />
+                      System Monthly Views Report (All Users)
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Month-by-month historical breakdown of total views, publisher earnings, and active accounts.
+                    </p>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase tracking-wider border-b border-slate-800/60">
+                          <th className="py-4 px-6">Month</th>
+                          <th className="py-4 px-6 text-center">Total Monthly Views</th>
+                          <th className="py-4 px-6 text-center">Active Viewing Publishers</th>
+                          <th className="py-4 px-6 text-right">Total Earnings</th>
+                          <th className="py-4 px-6 text-right">Average CPM</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {viewsReportData?.monthlyReports?.map((item: any) => (
+                          <tr key={item.month} className="hover:bg-slate-800/30 transition">
+                            <td className="py-4 px-6 font-extrabold text-white font-mono text-xs">
+                              {item.month}
+                            </td>
+
+                            <td className="py-4 px-6 text-center">
+                              <span className="px-3 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-lg font-black text-sm">
+                                {item.views}
+                              </span>
+                            </td>
+
+                            <td className="py-4 px-6 text-center font-bold text-slate-300">
+                              {item.activeUsersCount || 0} users
+                            </td>
+
+                            <td className="py-4 px-6 text-right font-black text-emerald-400 text-sm">
+                              ${item.earnings ? item.earnings.toFixed(4) : "0.0000"}
+                            </td>
+
+                            <td className="py-4 px-6 text-right font-extrabold text-amber-400">
+                              ${item.cpm ? item.cpm.toFixed(2) : "0.00"}
+                            </td>
+                          </tr>
+                        ))}
+
+                        {(!viewsReportData?.monthlyReports || viewsReportData?.monthlyReports?.length === 0) && (
+                          <tr>
+                            <td colSpan={5} className="text-center py-12 text-slate-500 italic">
+                              No monthly view records available yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-VIEW 4: LIVE CLICK LOGS */}
+              {viewsSubTab === "logs" && (
+                <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+                  <div className="p-6 border-b border-slate-800/60">
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-amber-400" />
+                      Live Recorded Views & Clicks Stream (Last 100)
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Real-time transaction log of verified views completed by visitors across all links.
+                    </p>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase tracking-wider border-b border-slate-800/60">
+                          <th className="py-4 px-6">Timestamp</th>
+                          <th className="py-4 px-6">Publisher</th>
+                          <th className="py-4 px-6">Link Code</th>
+                          <th className="py-4 px-6">Visitor IP</th>
+                          <th className="py-4 px-6 text-right">Earning</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {viewsReportData?.recentLogs?.map((log: any) => (
+                          <tr key={log.id} className="hover:bg-slate-800/30 transition">
+                            <td className="py-3 px-6 font-mono text-slate-300 text-[11px]">
+                              {new Date(log.timestamp).toLocaleString()}
+                            </td>
+
+                            <td className="py-3 px-6 font-bold text-white">
+                              {log.username}
+                            </td>
+
+                            <td className="py-3 px-6 font-mono text-indigo-400 font-bold">
+                              {log.linkCode}
+                            </td>
+
+                            <td className="py-3 px-6 font-mono text-slate-400 text-[11px]">
+                              {log.ip}
+                            </td>
+
+                            <td className="py-3 px-6 text-right font-black text-emerald-400">
+                              ${log.earning ? log.earning.toFixed(4) : "0.0000"}
+                            </td>
+                          </tr>
+                        ))}
+
+                        {(!viewsReportData?.recentLogs || viewsReportData?.recentLogs?.length === 0) && (
+                          <tr>
+                            <td colSpan={5} className="text-center py-12 text-slate-500 italic">
+                              No click logs recorded yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1269,6 +1739,123 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
           </div>
         )}
 
+        {/* TAB WORKSPACE: DEPOSIT REQUESTS */}
+        {activeTab === "deposits" && (
+          <div className="space-y-6" id="admin_deposits">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-2xl font-black text-white flex items-center gap-2">
+                  <CreditCard className="w-6 h-6 text-emerald-400" />
+                  <span>Advertiser Deposit Requests</span>
+                </h1>
+                <p className="text-xs text-slate-400 mt-1">
+                  Review manual UPI screenshot proofs and view automatic FaucetPay / OxaPay deposit transactions. Approving a request instantly credits the user's Advertiser Balance.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold rounded-lg">
+                  Pending: {depositsList.filter(d => d.status === "pending").length}
+                </span>
+                <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold rounded-lg">
+                  Approved: {depositsList.filter(d => d.status === "approved").length}
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+              {depositsList.length === 0 ? (
+                <div className="p-12 text-center text-slate-500 text-xs space-y-2">
+                  <CreditCard className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p>No deposit requests submitted yet.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="p-3.5">Deposit ID</th>
+                        <th className="p-3.5">User Email</th>
+                        <th className="p-3.5">Method</th>
+                        <th className="p-3.5">Amount</th>
+                        <th className="p-3.5">Proof / Txn ID</th>
+                        <th className="p-3.5">Date</th>
+                        <th className="p-3.5">Status</th>
+                        <th className="p-3.5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {depositsList.map((dep) => (
+                        <tr key={dep.id} className="hover:bg-slate-900/60">
+                          <td className="p-3.5 font-mono font-bold text-white">{dep.id}</td>
+                          <td className="p-3.5 font-bold text-indigo-300">{dep.userEmail}</td>
+                          <td className="p-3.5 uppercase font-mono text-[11px] text-amber-400">{dep.method}</td>
+                          <td className="p-3.5 font-mono font-bold text-emerald-400 text-sm">${dep.amount.toFixed(2)}</td>
+                          <td className="p-3.5">
+                            {dep.screenshotUrl ? (
+                              <a
+                                href={dep.screenshotUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg transition inline-flex items-center gap-1 text-[11px] font-bold"
+                              >
+                                <ExternalLink className="w-3 h-3" /> View Screenshot Proof
+                              </a>
+                            ) : (
+                              <span className="font-mono text-slate-400">{dep.gatewayTxnId || dep.txnId || "N/A"}</span>
+                            )}
+                            {dep.txnId && dep.screenshotUrl && (
+                              <div className="text-[10px] text-slate-400 font-mono mt-1">Txn: {dep.txnId}</div>
+                            )}
+                          </td>
+                          <td className="p-3.5 text-slate-400 text-[11px]">{new Date(dep.createdAt).toLocaleString()}</td>
+                          <td className="p-3.5">
+                            {dep.status === "approved" && (
+                              <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase rounded-lg">
+                                Approved
+                              </span>
+                            )}
+                            {dep.status === "pending" && (
+                              <span className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase rounded-lg animate-pulse">
+                                Pending
+                              </span>
+                            )}
+                            {dep.status === "rejected" && (
+                              <span className="px-2.5 py-1 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold uppercase rounded-lg">
+                                Rejected
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3.5 text-right">
+                            {dep.status === "pending" ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => handleUpdateDepositStatus(dep.id, "approved")}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Check className="w-3 h-3" /> Approve
+                                </button>
+                                <button
+                                  onClick={() => handleUpdateDepositStatus(dep.id, "rejected")}
+                                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
+                                >
+                                  <X className="w-3 h-3" /> Reject
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 text-xs font-medium">Completed</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* TAB WORKSPACE: SUPPORT TICKETS */}
         {activeTab === "tickets" && (
           <div className="space-y-6" id="admin_tickets">
@@ -1473,15 +2060,18 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
             
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div>
-                <h1 className="text-2xl font-black text-white">Ads Networks & General Settings</h1>
-                <p className="text-xs text-slate-400">Configure portal name, landing text, CPM payouts, page count, and paste advertisement blocks.</p>
+                <h1 className="text-2xl font-black text-white flex items-center gap-2">
+                  <Settings className="w-6 h-6 text-indigo-400" />
+                  System General Settings
+                </h1>
+                <p className="text-xs text-slate-400">Configure portal logo, branding, deposit gateways, minimum withdrawal limits, UPI QR Code, and SMTP backups.</p>
               </div>
               <button
                 type="submit"
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition"
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition cursor-pointer"
               >
                 <Save className="w-4 h-4" />
-                Save All Changes
+                Save System Settings
               </button>
             </div>
 
@@ -2090,6 +2680,45 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </form>
             </div>
 
+          </form>
+        )}
+
+        {/* TAB WORKSPACE: AD ZONES & ADVERTISING SETTINGS */}
+        {activeTab === "ad_settings" && sysSettings && (
+          <form onSubmit={handleSaveSettings} className="space-y-8" id="admin_ad_settings">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-2xl font-black text-white flex items-center gap-2">
+                  <Target className="w-6 h-6 text-amber-400" />
+                  Ad Zones & Advertising Settings
+                </h1>
+                <p className="text-xs text-slate-400">
+                  Configure advertiser CPM rates, ad gate counts, direct link offer walls, sponsored popups, and individual placement script/HTML injection codes.
+                </p>
+              </div>
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                Save Ad Settings
+              </button>
+            </div>
+
+            {settingsSuccess && (
+              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs font-semibold flex items-start gap-2">
+                <Check className="w-4 h-4 flex-shrink-0 text-emerald-400 mt-0.5" />
+                <span>{settingsSuccess}</span>
+              </div>
+            )}
+
+            {settingsError && (
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs font-semibold flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-400 mt-0.5" />
+                <span>{settingsError}</span>
+              </div>
+            )}
+
             {/* AD CONFIGURATION OPTIONS */}
             <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4 mt-6">
               <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-2">Advertising Configuration</h3>
@@ -2136,7 +2765,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   Enable a multi-step offer wall on the first redirection gate. This forces visitors to click up to 4 configured direct-link ads and remain on each ad page for 10 seconds before they can advance to subsequent steps or unlock their destination URL.
                 </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Enable Offer Wall Ads</label>
                     <select
@@ -2146,18 +2775,6 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     >
                       <option value="false" className="bg-slate-950 text-white">Disabled</option>
                       <option value="true" className="bg-slate-950 text-white">Enabled (Gate Page 1 only)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Thunder-Appz Redirection</label>
-                    <select
-                      value={sysSettings.enableThunderRedirect ? "true" : "false"}
-                      onChange={(e) => setSysSettings({ ...sysSettings, enableThunderRedirect: e.target.value === "true" })}
-                      className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-indigo-400 font-semibold"
-                    >
-                      <option value="false" className="bg-slate-950 text-white text-slate-300">Disabled (Direct Redirection)</option>
-                      <option value="true" className="bg-slate-950 text-white text-indigo-400 font-bold">Enabled (Route via thunder-appz)</option>
                     </select>
                   </div>
 
@@ -2367,128 +2984,502 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
             </div>
 
             {/* ADVERTISING BANNER HTML INJECTIONS */}
-            <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4 mt-6">
-              <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-2">Injected Advertisement Blocks (HTML / JS Script)</h3>
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-6 mt-6">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
+                <div>
+                  <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                    <Target className="w-5 h-5 text-indigo-400" />
+                    Individual Ad Zone Configurations
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Set unique, individual advertisement HTML, iframe, or JS script code for every single ad zone across the platform.
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-bold text-[11px]">
+                  10+ Ad Zones Mapped
+                </span>
+              </div>
               
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Header Code (Redirection Page Only - popunder ads etc.)</label>
-                <textarea
-                  rows={4}
-                  value={sysSettings.popunderCode || ""}
-                  onChange={(e) => setSysSettings({ ...sysSettings, popunderCode: e.target.value })}
-                  placeholder="<script src='https://ad-network.com/popunder.js'></script>"
-                  className="block w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
-                />
-                <p className="text-[10px] text-slate-500 font-semibold mt-1">💡 Handled strictly on `/go/:code` redirection gateways. Excellent for popunder, direct link, or coin miner script networks.</p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Site-wide Header Code (Entire Platform - for site verification etc.)</label>
-                <textarea
-                  rows={4}
-                  value={sysSettings.globalHeaderCode || ""}
-                  onChange={(e) => setSysSettings({ ...sysSettings, globalHeaderCode: e.target.value })}
-                  placeholder="<!-- Analytics, Google verification, site-wide code -->"
-                  className="block w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Leaderboard Banner (728x90) HTML Block</label>
+              {/* GLOBAL & POPUNDER INJECTIONS */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-300 uppercase">Header Code (Redirection Gate Only)</label>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 font-mono font-bold px-2 py-0.5 rounded border border-emerald-500/20">/go/:code</span>
+                  </div>
                   <textarea
-                    rows={6}
-                    value={sysSettings.bannerAd728x90 || ""}
-                    onChange={(e) => setSysSettings({ ...sysSettings, bannerAd728x90: e.target.value })}
-                    className="block w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    rows={4}
+                    value={sysSettings.popunderCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, popunderCode: e.target.value })}
+                    placeholder="<script src='https://ad-network.com/popunder.js'></script>"
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
                   />
+                  <p className="text-[10px] text-slate-500">Executes on link gateway pages. Ideal for popunders, direct links, or automatic pop scripts.</p>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Rectangle Banner (300x250) HTML Block</label>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-300 uppercase">Site-wide Global Header Code</label>
+                    <span className="text-[10px] bg-indigo-500/10 text-indigo-400 font-mono font-bold px-2 py-0.5 rounded border border-indigo-500/20">Site Head</span>
+                  </div>
                   <textarea
-                    rows={6}
-                    value={sysSettings.bannerAd300x250 || ""}
-                    onChange={(e) => setSysSettings({ ...sysSettings, bannerAd300x250: e.target.value })}
-                    className="block w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    rows={4}
+                    value={sysSettings.globalHeaderCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, globalHeaderCode: e.target.value })}
+                    placeholder="<!-- Analytics, Google verification, platform scripts -->"
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
                   />
+                  <p className="text-[10px] text-slate-500">Injected site-wide into the head element for domain verification and analytics tracking.</p>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Mobile Banner (320x50) HTML Block</label>
-                <textarea
-                  rows={3}
-                  value={sysSettings.bannerAd320x50 || ""}
-                  onChange={(e) => setSysSettings({ ...sysSettings, bannerAd320x50: e.target.value })}
-                  className="block w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
-                />
+              {/* INDIVIDUAL REDIRECTION PORTAL AD ZONES */}
+              <div className="pt-2 space-y-4">
+                <h4 className="font-bold text-white text-xs uppercase tracking-wider flex items-center gap-2 border-t border-slate-800 pt-4">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  Redirection Portal Top & Header Ad Zones
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Top Header Leaderboard Ad</label>
+                      <span className="text-[10px] bg-slate-800 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded">728x90</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.bannerAd728x90 || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, bannerAd728x90: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or banner HTML"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Primary header banner displayed at the top of the redirection portal.</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Top Left Ad Unit</label>
+                      <span className="text-[10px] bg-slate-800 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded">728x90</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.adTopLeftCode || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adTopLeftCode: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Unique ad block positioned at the top-left area of the redirection gateway.</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Top Center Ad Unit</label>
+                      <span className="text-[10px] bg-slate-800 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded">300x250</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.adTopCenterCode || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adTopCenterCode: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Unique ad block positioned directly above the center interaction timer.</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Top Right Ad Unit</label>
+                      <span className="text-[10px] bg-slate-800 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded">468x60</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.adTopRightCode || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adTopRightCode: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Unique ad block positioned at the top-right area of the redirection gateway.</p>
+                  </div>
+                </div>
+
+                <h4 className="font-bold text-white text-xs uppercase tracking-wider flex items-center gap-2 border-t border-slate-800 pt-4">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  Redirection Portal Bottom & Footer Ad Zones
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Bottom Left Ad Unit</label>
+                      <span className="text-[10px] bg-slate-800 text-emerald-300 font-mono font-bold px-2 py-0.5 rounded">300x250</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.adLeftCode || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adLeftCode: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Lower left medium rectangle placement.</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Bottom Center Ad Unit</label>
+                      <span className="text-[10px] bg-slate-800 text-emerald-300 font-mono font-bold px-2 py-0.5 rounded">728x90</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.adBottomCenterCode || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adBottomCenterCode: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Footer leaderboard banner placement.</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Bottom Right Ad Unit</label>
+                      <span className="text-[10px] bg-slate-800 text-emerald-300 font-mono font-bold px-2 py-0.5 rounded">320x50</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.adRightCode || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adRightCode: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Lower right banner placement.</p>
+                  </div>
+                </div>
+
+                <h4 className="font-bold text-white text-xs uppercase tracking-wider flex items-center gap-2 border-t border-slate-800 pt-4">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  Sidebar & Mobile Specialized Ad Zones
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Sidebar Sponsor Banner</label>
+                      <span className="text-[10px] bg-slate-800 text-purple-300 font-mono font-bold px-2 py-0.5 rounded">300x250</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.bannerAd300x250 || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, bannerAd300x250: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or JS script tag"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Top sidebar ad unit on desktop layouts.</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Sidebar Skyscraper Ad</label>
+                      <span className="text-[10px] bg-slate-800 text-purple-300 font-mono font-bold px-2 py-0.5 rounded">300x600</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.ad300x600Code || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, ad300x600Code: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or tall skyscraper HTML"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Tall sidebar skyscraper ad placement.</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">Standout / Mobile Banner</label>
+                      <span className="text-[10px] bg-slate-800 text-purple-300 font-mono font-bold px-2 py-0.5 rounded">320x50</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={sysSettings.bannerAd320x50 || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, bannerAd320x50: e.target.value })}
+                      placeholder="e.g. <iframe ...></iframe> or mobile banner HTML"
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-500">Mobile sticky or standout banner placement.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ADVERTISER CPM RATES & DEPOSIT GATEWAYS */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-amber-500/30 space-y-4 mt-6">
+              <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+                <Target className="w-5 h-5 text-amber-400" />
+                <h3 className="font-extrabold text-white text-base">Advertiser CPM Rates & Deposit Gateways</h3>
+              </div>
+              <p className="text-xs text-slate-400">Configure prices charged to advertisers per 1000 views across all campaign ad formats and manage deposit payment gateway settings (FaucetPay, OxaPay, and UPI ID).</p>
+
+              {/* CPM Rates */}
+              <div className="space-y-2 pt-2">
+                <h4 className="text-xs font-black uppercase text-amber-400 tracking-wider">Ad Format CPM Rates ($ per 1,000 views)</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Offerwall Task CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmOfferWall ?? 3.0}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmOfferWall: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Sponsored Popup CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmSponsoredPopup ?? 4.0}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmSponsoredPopup: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">728x90 Banner CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmBanner728x90 ?? 1.5}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner728x90: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">300x250 Banner CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmBanner300x250 ?? 2.0}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner300x250: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">468x60 Banner CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmBanner468x60 ?? 1.2}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner468x60: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">320x50 Banner CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmBanner320x50 ?? 1.0}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner320x50: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">300x600 Banner CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmBanner300x600 ?? 2.5}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner300x600: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Banner Left CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmBannerLeft ?? 1.5}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBannerLeft: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Banner Right CPM ($)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={sysSettings.advCpmBannerRight ?? 1.5}
+                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBannerRight: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <h4 className="font-bold text-white text-xs uppercase tracking-wider border-t border-slate-850 pt-4 mt-4">Offer Wall / Redirect Page Specific Placements (Different Sizes)</h4>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD TOP LEFT HTML / Banner</label>
-                  <textarea
-                    rows={4}
-                    value={sysSettings.adTopLeftCode || ""}
-                    onChange={(e) => setSysSettings({ ...sysSettings, adTopLeftCode: e.target.value })}
-                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
-                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD TOP CENTER HTML / Banner</label>
-                  <textarea
-                    rows={4}
-                    value={sysSettings.adTopCenterCode || ""}
-                    onChange={(e) => setSysSettings({ ...sysSettings, adTopCenterCode: e.target.value })}
-                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
-                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD TOP RIGHT HTML / Banner</label>
-                  <textarea
-                    rows={4}
-                    value={sysSettings.adTopRightCode || ""}
-                    onChange={(e) => setSysSettings({ ...sysSettings, adTopRightCode: e.target.value })}
-                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
-                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
-                  />
-                </div>
-              </div>
+              {/* Deposit Gateways Configuration */}
+              <div className="space-y-4 pt-4 border-t border-slate-800">
+                <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-emerald-400" />
+                  Deposit Gateways & API Credentials
+                </h4>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD LEFT HTML / Banner</label>
-                  <textarea
-                    rows={4}
-                    value={sysSettings.adLeftCode || ""}
-                    onChange={(e) => setSysSettings({ ...sysSettings, adLeftCode: e.target.value })}
-                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
-                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">FaucetPay Merchant Username</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. MyFaucetPayUsername"
+                      value={sysSettings.faucetPayMerchant || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, faucetPayMerchant: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">OxaPay API Key</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. OXAPAY-API-KEY-XXX"
+                      value={sysSettings.oxaPayApiKey || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, oxaPayApiKey: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">UPI ID for Manual Payments</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. mybusiness@upi or 9876543210@ybl"
+                      value={sysSettings.upiId || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, upiId: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD BOTTOM CENTER HTML / Banner</label>
-                  <textarea
-                    rows={4}
-                    value={sysSettings.adBottomCenterCode || ""}
-                    onChange={(e) => setSysSettings({ ...sysSettings, adBottomCenterCode: e.target.value })}
-                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
-                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
-                  />
+
+                {/* UPLOAD CUSTOM UPI QR CODE */}
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div>
+                      <h5 className="text-xs font-extrabold text-white flex items-center gap-1.5 uppercase tracking-wider">
+                        <QrCode className="w-4 h-4 text-emerald-400" />
+                        Deposit UPI QR Code Image
+                      </h5>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Upload a custom QR Code image or paste an image URL to show users when depositing funds.
+                      </p>
+                    </div>
+                    {sysSettings.upiQrUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setSysSettings({ ...sysSettings, upiQrUrl: "" })}
+                        className="text-xs text-rose-400 hover:text-rose-300 font-bold transition flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Reset to Generated QR
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                    <div className="md:col-span-8 space-y-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
+                          Upload QR Code Image File
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <label className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer transition flex items-center gap-2 shadow-md shadow-emerald-600/20">
+                            <Upload className="w-4 h-4" />
+                            <span>Select QR Code Image...</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                if (file.size > 5 * 1024 * 1024) {
+                                  alert("Please select an image file smaller than 5MB.");
+                                  return;
+                                }
+                                const reader = new FileReader();
+                                reader.onload = (event) => {
+                                  const base64 = event.target?.result as string;
+                                  if (base64) {
+                                    setSysSettings((prev) => prev ? { ...prev, upiQrUrl: base64 } : prev);
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+                          <span className="text-[11px] text-slate-500">PNG, JPG, WEBP, SVG (Max 5MB)</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
+                          Or Direct Deposit QR Image URL
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. https://example.com/qr.png or data:image/png;base64,..."
+                          value={sysSettings.upiQrUrl || ""}
+                          onChange={(e) => setSysSettings({ ...sysSettings, upiQrUrl: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Live Deposit QR Code Preview */}
+                    <div className="md:col-span-4 p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col items-center justify-center text-center">
+                      <span className="text-[10px] font-bold uppercase text-emerald-400 tracking-wider mb-2">Deposit QR Preview</span>
+                      <div className="p-2.5 bg-white rounded-xl shadow-md mb-1">
+                        <img
+                          src={
+                            sysSettings.upiQrUrl
+                              ? sysSettings.upiQrUrl
+                              : `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
+                                  `upi://pay?pa=${sysSettings.upiId || "yourname@upi"}&pn=TGLINKS`
+                                )}`
+                          }
+                          alt="Deposit QR Code Preview"
+                          className="w-24 h-24 object-contain mx-auto"
+                        />
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-400 font-mono mt-1">
+                        {sysSettings.upiQrUrl ? "Custom Uploaded QR Image" : "Dynamic Auto-Generated QR"}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">AD RIGHT HTML / Banner</label>
-                  <textarea
-                    rows={4}
-                    value={sysSettings.adRightCode || ""}
-                    onChange={(e) => setSysSettings({ ...sysSettings, adRightCode: e.target.value })}
-                    placeholder="e.g. <iframe ...></iframe> or JS script tag"
-                    className="block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-800"
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="enableUpiDeposit"
+                    checked={sysSettings.enableUpiDeposit !== false}
+                    onChange={(e) => setSysSettings({ ...sysSettings, enableUpiDeposit: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 cursor-pointer"
                   />
+                  <label htmlFor="enableUpiDeposit" className="text-xs font-bold text-slate-300 cursor-pointer">
+                    Enable Manual UPI QR Code Deposits
+                  </label>
                 </div>
               </div>
             </div>

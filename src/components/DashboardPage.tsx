@@ -32,7 +32,15 @@ import {
   Mail,
   Menu,
   X,
-  QrCode
+  QrCode,
+  Target,
+  Megaphone,
+  ArrowLeftRight,
+  Play,
+  Pause,
+  RefreshCw,
+  Info,
+  CheckCircle2
 } from "lucide-react";
 import QRCode from "qrcode";
 import { motion } from "motion/react";
@@ -57,14 +65,14 @@ const getBaseShortUrl = () => {
 
 interface DashboardPageProps {
   user: User;
-  initialTab?: "overview" | "links" | "withdraw" | "settings" | "tools" | "contact";
+  initialTab?: "overview" | "links" | "withdraw" | "settings" | "tools" | "contact" | "advertiser";
   onLogout: () => void;
   onNavigate: (page: string) => void;
 }
 
 export default function DashboardPage({ user, initialTab, onLogout, onNavigate }: DashboardPageProps) {
   const [currentUser, setCurrentUser] = useState<User>(user);
-  const [activeTab, setActiveTab] = useState<"overview" | "links" | "withdraw" | "settings" | "tools" | "contact">(initialTab || "overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "links" | "withdraw" | "settings" | "tools" | "contact" | "advertiser">(initialTab || "overview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [links, setLinks] = useState<Link[]>([]);
@@ -78,7 +86,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
     }
   }, [initialTab]);
 
-  const changeTab = (tab: "overview" | "links" | "withdraw" | "settings" | "tools" | "contact", path: string) => {
+  const changeTab = (tab: "overview" | "links" | "withdraw" | "settings" | "tools" | "contact" | "advertiser", path: string) => {
     setActiveTab(tab);
     setMobileMenuOpen(false);
     if (window.location.pathname !== path) {
@@ -86,6 +94,271 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
     }
   };
   const [reportTab, setReportTab] = useState<"daily" | "monthly">("daily");
+
+  // Advertiser Panel state
+  const [advertiserSection, setAdvertiserSection] = useState<"deposit" | "campaigns" | "support">("campaigns");
+  const [advertiserCampaigns, setAdvertiserCampaigns] = useState<any[]>([]);
+  const [convertAmount, setConvertAmount] = useState("");
+  const [convertLoading, setConvertLoading] = useState(false);
+  const [convertError, setConvertError] = useState("");
+  const [convertSuccess, setConvertSuccess] = useState("");
+
+  // Deposit state
+  const [depositTab, setDepositTab] = useState<"faucetpay" | "oxapay" | "upi">("faucetpay");
+  const [depositAmount, setDepositAmount] = useState("5.00");
+  const [upiScreenshotUrl, setUpiScreenshotUrl] = useState("");
+  const [upiTxnId, setUpiTxnId] = useState("");
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [depositError, setDepositError] = useState("");
+  const [depositSuccess, setDepositSuccess] = useState("");
+  const [depositHistory, setDepositHistory] = useState<any[]>([]);
+
+  const loadUserDeposits = async () => {
+    try {
+      const res = await fetchApi("/deposits/my");
+      if (res?.deposits) {
+        setDepositHistory(res.deposits);
+      }
+    } catch (err) {
+      console.error("Failed to load user deposits:", err);
+    }
+  };
+
+  const handleDepositSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDepositError("");
+    setDepositSuccess("");
+
+    const amt = Number(depositAmount);
+    if (isNaN(amt) || amt < 0.1) {
+      setDepositError("Minimum deposit amount is $0.10");
+      return;
+    }
+
+    setDepositLoading(true);
+    try {
+      if (depositTab === "faucetpay") {
+        const res = await fetchApi("/deposits/faucetpay", {
+          method: "POST",
+          body: JSON.stringify({ amount: amt })
+        });
+        if (res.error) {
+          setDepositError(res.error);
+        } else if (res.checkoutUrl) {
+          window.location.href = res.checkoutUrl;
+        }
+      } else if (depositTab === "oxapay") {
+        const res = await fetchApi("/deposits/oxapay", {
+          method: "POST",
+          body: JSON.stringify({ amount: amt })
+        });
+        if (res.error) {
+          setDepositError(res.error);
+        } else if (res.payLink) {
+          window.location.href = res.payLink;
+        }
+      } else if (depositTab === "upi") {
+        if (!upiScreenshotUrl.trim()) {
+          setDepositError("Payment screenshot URL / image proof is mandatory for UPI deposits.");
+          setDepositLoading(false);
+          return;
+        }
+        const res = await fetchApi("/deposits/upi", {
+          method: "POST",
+          body: JSON.stringify({
+            amount: amt,
+            screenshotUrl: upiScreenshotUrl,
+            txnId: upiTxnId
+          })
+        });
+        if (res.error) {
+          setDepositError(res.error);
+        } else {
+          setDepositSuccess("UPI deposit request submitted successfully! Admin will verify and credit your advertiser balance.");
+          setUpiScreenshotUrl("");
+          setUpiTxnId("");
+          loadUserDeposits();
+        }
+      }
+    } catch (err: any) {
+      setDepositError(err.message || "Failed to submit deposit request.");
+    } finally {
+      setDepositLoading(false);
+    }
+  };
+
+  // Campaign Creation state
+  const [showCreateCampaignModal, setShowCreateCampaignModal] = useState(false);
+  const [campaignTitle, setCampaignTitle] = useState("");
+  const [campaignType, setCampaignType] = useState<
+    | "offerwall"
+    | "sponsored_popup"
+    | "banner_728x90"
+    | "banner_468x60"
+    | "banner_300x250"
+    | "banner_320x50"
+    | "banner_300x600"
+    | "banner_left"
+    | "banner_right"
+  >("banner_300x250");
+  const [campaignTargetUrl, setCampaignTargetUrl] = useState("");
+  const [campaignBannerImageUrl, setCampaignBannerImageUrl] = useState("");
+  const [campaignAdCode, setCampaignAdCode] = useState("");
+  const [campaignTargetViews, setCampaignTargetViews] = useState("1000");
+  const [createCampaignLoading, setCreateCampaignLoading] = useState(false);
+  const [createCampaignError, setCreateCampaignError] = useState("");
+  const [createCampaignSuccess, setCreateCampaignSuccess] = useState("");
+
+  const loadAdvertiserCampaigns = async () => {
+    try {
+      const res = await fetchApi("/advertiser/campaigns");
+      if (res?.campaigns) {
+        setAdvertiserCampaigns(res.campaigns);
+      }
+    } catch (err) {
+      console.error("Failed to load advertiser campaigns:", err);
+    }
+  };
+
+  const getCpmForType = (type: string) => {
+    if (!settings) return 2.0;
+    if (type === "offerwall") return settings.advCpmOfferWall ?? 3.0;
+    if (type === "sponsored_popup") return settings.advCpmSponsoredPopup ?? 4.0;
+    if (type === "banner_728x90") return settings.advCpmBanner728x90 ?? 1.5;
+    if (type === "banner_468x60") return settings.advCpmBanner468x60 ?? 1.2;
+    if (type === "banner_300x250") return settings.advCpmBanner300x250 ?? 2.0;
+    if (type === "banner_320x50") return settings.advCpmBanner320x50 ?? 1.0;
+    if (type === "banner_300x600") return settings.advCpmBanner300x600 ?? 2.5;
+    if (type === "banner_left") return settings.advCpmBannerLeft ?? 1.5;
+    if (type === "banner_right") return settings.advCpmBannerRight ?? 1.5;
+    return 2.0;
+  };
+
+  const calculatedCost = () => {
+    const views = Number(campaignTargetViews) || 0;
+    const cpm = getCpmForType(campaignType);
+    return Number(((views / 1000) * cpm).toFixed(4));
+  };
+
+  const handleConvertBalance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setConvertError("");
+    setConvertSuccess("");
+    const amount = Number(convertAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setConvertError("Please enter a valid positive conversion amount.");
+      return;
+    }
+    const currentBal = Number(currentUser.balance || 0);
+    if (amount > currentBal + 0.00001) {
+      setConvertError(`Insufficient publisher balance. Available: $${currentBal.toFixed(4)}`);
+      return;
+    }
+
+    setConvertLoading(true);
+    try {
+      const res = await fetchApi("/advertiser/convert-balance", {
+        method: "POST",
+        body: JSON.stringify({ amount })
+      });
+      
+      setConvertSuccess(res.message || `Successfully converted $${amount.toFixed(2)} to Advertiser Balance!`);
+      if (res.user) {
+        setCurrentUser(res.user);
+        try {
+          localStorage.setItem("tglinks_user", JSON.stringify(res.user));
+        } catch (e) {}
+      }
+      setConvertAmount("");
+      loadDashboardData();
+    } catch (err: any) {
+      setConvertError(err.message || "Failed to convert balance.");
+    } finally {
+      setConvertLoading(false);
+    }
+  };
+
+  const handleCreateCampaign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateCampaignError("");
+    setCreateCampaignSuccess("");
+
+    if (!campaignTitle.trim()) {
+      setCreateCampaignError("Campaign title is required.");
+      return;
+    }
+    const views = Number(campaignTargetViews);
+    if (isNaN(views) || views < 100) {
+      setCreateCampaignError("Minimum target views is 100.");
+      return;
+    }
+
+    const cost = calculatedCost();
+    if ((currentUser.advertiserBalance || 0) < cost) {
+      setCreateCampaignError(`Insufficient Advertiser Balance. Campaign cost is $${cost.toFixed(2)}. Please convert publisher balance first.`);
+      return;
+    }
+
+    setCreateCampaignLoading(true);
+    try {
+      const res = await fetchApi("/advertiser/campaigns", {
+        method: "POST",
+        body: JSON.stringify({
+          title: campaignTitle,
+          type: campaignType,
+          targetUrl: campaignTargetUrl,
+          bannerImageUrl: campaignBannerImageUrl,
+          adCode: campaignAdCode,
+          targetViews: views
+        })
+      });
+
+      if (res.error) {
+        setCreateCampaignError(res.error);
+      } else {
+        setCreateCampaignSuccess("Campaign created successfully!");
+        if (res.user) setCurrentUser(res.user);
+        loadAdvertiserCampaigns();
+        setShowCreateCampaignModal(false);
+        setCampaignTitle("");
+        setCampaignTargetUrl("");
+        setCampaignBannerImageUrl("");
+        setCampaignAdCode("");
+        setCampaignTargetViews("1000");
+      }
+    } catch (err: any) {
+      setCreateCampaignError(err.message || "Failed to create campaign.");
+    } finally {
+      setCreateCampaignLoading(false);
+    }
+  };
+
+  const handleToggleCampaignStatus = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === "active" ? "paused" : "active";
+    try {
+      await fetchApi(`/advertiser/campaigns/${id}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status: newStatus })
+      });
+      loadAdvertiserCampaigns();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteCampaign = async (id: string) => {
+    try {
+      const res = await fetchApi(`/advertiser/campaigns/${id}`, {
+        method: "DELETE"
+      });
+      if (res?.advertiserBalance !== undefined) {
+        setCurrentUser(prev => ({ ...prev, advertiserBalance: res.advertiserBalance }));
+      }
+      loadAdvertiserCampaigns();
+    } catch (err) {
+      console.error(err);
+    }
+  };
   
   // Create link state
   const [newUrl, setNewUrl] = useState("");
@@ -223,6 +496,8 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
   useEffect(() => {
     loadDashboardData();
     loadUserTickets();
+    loadAdvertiserCampaigns();
+    loadUserDeposits();
 
     const handleSettingsUpdated = () => {
       const cached = getCachedSettings();
@@ -487,8 +762,15 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                 <span className="text-xl font-black text-white tracking-tight">TG</span>
                 <span className="text-xl font-black text-indigo-500 tracking-tight">LINKS</span>
               </div>
-              <span className="text-[8px] uppercase tracking-widest font-bold text-slate-500 mt-1 leading-none">
-                Publisher Dashboard
+              <span className={`text-[8px] uppercase tracking-widest font-extrabold mt-1 leading-none flex items-center gap-1 ${activeTab === "advertiser" ? "text-amber-400" : "text-slate-500"}`}>
+                {activeTab === "advertiser" ? (
+                  <>
+                    <Target className="w-2.5 h-2.5 text-amber-400 inline" />
+                    Advertiser Panel
+                  </>
+                ) : (
+                  "Publisher Dashboard"
+                )}
               </span>
             </div>
           </div>
@@ -503,80 +785,173 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
 
         {/* User Quick Mini Profile */}
         <div className="p-4 bg-slate-950/60 border-b border-slate-800/80 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center font-extrabold text-white shrink-0">
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-extrabold text-white shrink-0 ${activeTab === "advertiser" ? "bg-amber-600" : "bg-indigo-600"}`}>
             {user.email.charAt(0).toUpperCase()}
           </div>
           <div className="flex-grow overflow-hidden">
             <p className="text-xs text-white font-bold truncate">{user.email}</p>
             <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider flex items-center gap-1">
-              <UserCheck className="w-3 h-3 text-emerald-400" />
-              {user.role === "admin" ? "Platform Admin" : "Publisher"}
+              <UserCheck className={`w-3 h-3 ${activeTab === "advertiser" ? "text-amber-400" : "text-emerald-400"}`} />
+              {user.role === "admin" ? "Platform Admin" : activeTab === "advertiser" ? "Advertiser" : "Publisher"}
             </p>
           </div>
         </div>
 
         {/* Navigation Tabs */}
         <nav className="flex-grow p-4 space-y-1.5 text-sm font-semibold overflow-y-auto" id="sidebar_nav">
-          <button
-            onClick={() => changeTab("overview", "/dashboard")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "overview" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            Overview Analytics
-          </button>
-          
-          <button
-            onClick={() => changeTab("links", "/dashboard/links")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "links" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
-          >
-            <Link2 className="w-4 h-4" />
-            Manage Links ({links.length})
-          </button>
-
-          <button
-            onClick={() => changeTab("withdraw", "/dashboard/withdrawals")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "withdraw" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
-          >
-            <DollarSign className="w-4 h-4" />
-            Withdraw Earnings
-          </button>
-
-          <button
-            onClick={() => changeTab("settings", "/dashboard/settings")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "settings" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-            Payout Settings
-          </button>
-
-          <button
-            onClick={() => changeTab("tools", "/api")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "tools" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
-          >
-            <Sliders className="w-4 h-4" />
-            Developer Tools / API
-          </button>
-
-          <button
-            onClick={() => changeTab("contact", "/dashboard/tickets")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "contact" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
-          >
-            <Mail className="w-4 h-4" />
-            Contact Support
-          </button>
-
-          {user.role === "admin" && (
-            <div className="pt-4 mt-4 border-t border-slate-800/80 space-y-1.5">
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-4 mb-2">Admin Section</p>
+          {activeTab === "advertiser" ? (
+            /* ADVERTISER PANEL NAVIGATION ONLY */
+            <>
+              {/* Switch to Publisher Button */}
               <button
-                onClick={() => { onNavigate("admin"); setMobileMenuOpen(false); }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 bg-gradient-to-r from-rose-950 to-rose-900/80 border border-rose-900/40 hover:from-rose-900 hover:to-rose-800 rounded-xl text-rose-200 transition"
-                id="btn_admin_portal"
+                onClick={() => { changeTab("overview", "/dashboard"); setMobileMenuOpen(false); }}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-indigo-300 border border-indigo-500/30 transition cursor-pointer font-bold mb-3 shadow-md group"
               >
-                <FolderOpen className="w-4 h-4 text-rose-400" />
-                Go to Admin Panel
+                <div className="flex items-center gap-2.5">
+                  <ArrowLeftRight className="w-4 h-4 text-indigo-400 group-hover:rotate-180 transition-transform duration-300" />
+                  <span>Switch to Publisher</span>
+                </div>
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded">
+                  Earn
+                </span>
               </button>
-            </div>
+
+              <div className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest px-3 pt-1 pb-1">
+                Advertiser Menu
+              </div>
+
+              {/* Deposit Funds */}
+              <button
+                onClick={() => { setAdvertiserSection("deposit"); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition cursor-pointer ${
+                  advertiserSection === "deposit"
+                    ? "bg-amber-600 text-white font-black shadow-lg shadow-amber-900/30"
+                    : "hover:bg-slate-800/60 text-slate-300 hover:text-white"
+                }`}
+              >
+                <CreditCard className="w-4 h-4 text-emerald-400" />
+                <span>Deposit Funds</span>
+              </button>
+
+              {/* Ad Campaigns */}
+              <button
+                onClick={() => { setAdvertiserSection("campaigns"); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition cursor-pointer ${
+                  advertiserSection === "campaigns"
+                    ? "bg-amber-600 text-white font-black shadow-lg shadow-amber-900/30"
+                    : "hover:bg-slate-800/60 text-slate-300 hover:text-white"
+                }`}
+              >
+                <Megaphone className="w-4 h-4 text-amber-400" />
+                <span>Campaigns ({advertiserCampaigns.length})</span>
+              </button>
+
+              {/* Contact Support */}
+              <button
+                onClick={() => { setAdvertiserSection("support"); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition cursor-pointer ${
+                  advertiserSection === "support"
+                    ? "bg-amber-600 text-white font-black shadow-lg shadow-amber-900/30"
+                    : "hover:bg-slate-800/60 text-slate-300 hover:text-white"
+                }`}
+              >
+                <Mail className="w-4 h-4 text-indigo-400" />
+                <span>Contact Support</span>
+              </button>
+
+              {user.role === "admin" && (
+                <div className="pt-4 mt-4 border-t border-slate-800/80 space-y-1.5">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-4 mb-2">Admin Section</p>
+                  <button
+                    onClick={() => { onNavigate("admin"); setMobileMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 bg-gradient-to-r from-rose-950 to-rose-900/80 border border-rose-900/40 hover:from-rose-900 hover:to-rose-800 rounded-xl text-rose-200 transition"
+                    id="btn_admin_portal"
+                  >
+                    <FolderOpen className="w-4 h-4 text-rose-400" />
+                    Go to Admin Panel
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            /* PUBLISHER DASHBOARD NAVIGATION */
+            <>
+              <button
+                onClick={() => changeTab("overview", "/dashboard")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "overview" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
+              >
+                <LayoutDashboard className="w-4 h-4" />
+                Overview Analytics
+              </button>
+              
+              <button
+                onClick={() => changeTab("links", "/dashboard/links")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "links" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
+              >
+                <Link2 className="w-4 h-4" />
+                Manage Links ({links.length})
+              </button>
+
+              <button
+                onClick={() => changeTab("withdraw", "/dashboard/withdrawals")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "withdraw" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
+              >
+                <DollarSign className="w-4 h-4" />
+                Withdraw Earnings
+              </button>
+
+              {/* Prominent Advertiser Switch Button */}
+              <button
+                onClick={() => changeTab("advertiser", "/dashboard/advertiser")}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-transparent hover:from-amber-500/25 hover:to-amber-500/15 text-amber-300 border border-amber-500/30 transition cursor-pointer font-bold my-1 shadow-sm group"
+              >
+                <div className="flex items-center gap-3">
+                  <Target className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                  <span>Advertiser Panel</span>
+                </div>
+                <span className="px-1.5 py-0.5 bg-amber-500 text-slate-950 text-[9px] font-black uppercase rounded shadow-sm">
+                  Ads
+                </span>
+              </button>
+
+              <button
+                onClick={() => changeTab("settings", "/dashboard/settings")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "settings" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                Payout Settings
+              </button>
+
+              <button
+                onClick={() => changeTab("tools", "/api")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "tools" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
+              >
+                <Sliders className="w-4 h-4" />
+                Developer Tools / API
+              </button>
+
+              <button
+                onClick={() => changeTab("contact", "/dashboard/tickets")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeTab === "contact" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-800/50 hover:text-white"}`}
+              >
+                <Mail className="w-4 h-4" />
+                Contact Support
+              </button>
+
+              {user.role === "admin" && (
+                <div className="pt-4 mt-4 border-t border-slate-800/80 space-y-1.5">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-4 mb-2">Admin Section</p>
+                  <button
+                    onClick={() => { onNavigate("admin"); setMobileMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 bg-gradient-to-r from-rose-950 to-rose-900/80 border border-rose-900/40 hover:from-rose-900 hover:to-rose-800 rounded-xl text-rose-200 transition"
+                    id="btn_admin_portal"
+                  >
+                    <FolderOpen className="w-4 h-4 text-rose-400" />
+                    Go to Admin Panel
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </nav>
 
@@ -602,6 +977,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
               {activeTab === "overview" && "Dashboard Analytics"}
               {activeTab === "links" && "URL Link Manager"}
               {activeTab === "withdraw" && "Earnings Payouts"}
+              {activeTab === "advertiser" && "Advertiser Self-Service Portal"}
               {activeTab === "settings" && "Withdrawal Settings"}
               {activeTab === "tools" && "Quick Developer Tools"}
               {activeTab === "contact" && "Help & Support Center"}
@@ -610,6 +986,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
               {activeTab === "overview" && "Track real-time visitors, view rates, and aggregate daily earnings."}
               {activeTab === "links" && "List and review previous shortcodes, CPM yields, and target routes."}
               {activeTab === "withdraw" && "Withdraw funds safely directly into your configured payout channel."}
+              {activeTab === "advertiser" && "Convert publisher earnings to advertiser balance and create targeted ad campaigns."}
               {activeTab === "settings" && "Set and customize payment gateway details and credentials."}
               {activeTab === "tools" && "Utilize rapid shortener links and HTTP API endpoints."}
               {activeTab === "contact" && "Submit a ticket to our 24/7 client happiness help desk for prompt resolution."}
@@ -885,6 +1262,27 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                     <h3 className="text-xl font-black text-white mt-1 truncate">${stats?.averageCpm ? stats.averageCpm.toFixed(2) : "5.00"}</h3>
                   )}
                 </div>
+              </div>
+
+              {/* Card 7: Advertiser Balance */}
+              <div className="bg-amber-950/20 border border-amber-500/30 p-5 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
+                    <Target className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold text-amber-400 uppercase tracking-widest truncate">Advertiser Balance</p>
+                    <h3 className="text-xl font-black text-amber-300 mt-1 truncate">
+                      ${(currentUser.advertiserBalance || 0).toFixed(4)}
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveTab("advertiser")}
+                  className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold text-xs rounded-xl transition shrink-0 cursor-pointer"
+                >
+                  Manage Ads
+                </button>
               </div>
             </div>
 
@@ -1733,6 +2131,889 @@ if( $result ) {
             </div>
           </div>
         )}
+
+        {/* TAB WORKSPACE: ADVERTISER PANEL */}
+        {activeTab === "advertiser" && (
+          <div className="space-y-8" id="advertiser_workspace">
+            {/* Advertiser Header Banner */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 p-6 rounded-2xl border border-amber-500/20 shadow-lg">
+              <div>
+                <div className="flex items-center gap-2 text-amber-400 font-extrabold text-xs uppercase tracking-wider mb-1">
+                  <Target className="w-4 h-4" />
+                  <span>Advertiser Control Center</span>
+                </div>
+                <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">
+                  {advertiserSection === "campaigns" && "Ad Campaigns & Impressions"}
+                  {advertiserSection === "deposit" && "Deposit & Convert Advertiser Funds"}
+                  {advertiserSection === "support" && "Advertiser Helpdesk & Support"}
+                </h1>
+                <p className="text-xs text-slate-400 mt-1">
+                  {advertiserSection === "campaigns" && "Launch, track, and optimize your high-converting offer wall, banner, and popup ad campaigns."}
+                  {advertiserSection === "deposit" && "Add funds directly via FaucetPay, OxaPay crypto, or UPI QR code, or convert publisher earnings 1:1."}
+                  {advertiserSection === "support" && "Submit inquiry tickets or check response status with our dedicated advertising team."}
+                </p>
+              </div>
+
+              {advertiserSection === "campaigns" && (
+                <button
+                  onClick={() => setShowCreateCampaignModal(true)}
+                  className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  Create New Campaign
+                </button>
+              )}
+            </div>
+
+            {/* Quick Balance & Campaign Overview Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {/* Advertiser Balance Card */}
+              <div className="bg-amber-950/20 border border-amber-500/30 p-5 rounded-2xl space-y-1.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Advertiser Wallet</span>
+                  <Target className="w-4 h-4 text-amber-400" />
+                </div>
+                <h3 className="text-2xl font-black text-amber-300">${(currentUser.advertiserBalance || 0).toFixed(4)}</h3>
+                <p className="text-[10px] text-amber-200/70">For purchasing ad impressions.</p>
+              </div>
+
+              {/* Publisher Balance Card */}
+              <div className="bg-slate-900/40 border border-slate-800 p-5 rounded-2xl space-y-1.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Publisher Earnings</span>
+                  <DollarSign className="w-4 h-4 text-emerald-400" />
+                </div>
+                <h3 className="text-2xl font-black text-emerald-400">${currentUser.balance.toFixed(4)}</h3>
+                <p className="text-[10px] text-slate-400">Convertible 1:1 to advertiser balance.</p>
+              </div>
+
+              {/* Active Campaigns Card */}
+              <div className="bg-slate-900/40 border border-slate-800 p-5 rounded-2xl space-y-1.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Campaigns</span>
+                  <Megaphone className="w-4 h-4 text-indigo-400" />
+                </div>
+                <h3 className="text-2xl font-black text-white">
+                  {advertiserCampaigns.filter(c => c.status === "active").length} / {advertiserCampaigns.length}
+                </h3>
+                <p className="text-[10px] text-slate-400">Live ad placements in network.</p>
+              </div>
+
+              {/* Delivered Views Card */}
+              <div className="bg-slate-900/40 border border-slate-800 p-5 rounded-2xl space-y-1.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Delivered Views</span>
+                  <Eye className="w-4 h-4 text-amber-400" />
+                </div>
+                <h3 className="text-2xl font-black text-white font-mono">
+                  {advertiserCampaigns.reduce((sum, c) => sum + (c.viewsDelivered || 0), 0).toLocaleString()}
+                </h3>
+                <p className="text-[10px] text-slate-400">Total impressions delivered.</p>
+              </div>
+            </div>
+
+            {/* SECTION 1: DEPOSIT & CONVERT FUNDS */}
+            {advertiserSection === "deposit" && (
+              <div className="space-y-8">
+                {/* CONVERT PUBLISHER BALANCE FORM */}
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 md:p-8 space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                    <div>
+                      <h3 className="text-lg font-black text-white flex items-center gap-2">
+                        <ArrowLeftRight className="w-5 h-5 text-amber-400" />
+                        Convert Publisher Balance to Advertiser Balance
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Instantly transfer your publisher link earnings into your advertiser balance to purchase network ad views.
+                      </p>
+                    </div>
+                    <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold uppercase tracking-wider rounded-lg shrink-0">
+                      ⚡ 1:1 Instant Conversion
+                    </span>
+                  </div>
+
+                  {/* Conversion Rules Warning */}
+                  <div className="p-4 bg-amber-950/30 border border-amber-900/40 rounded-xl flex items-start gap-3">
+                    <Info className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-200/90 leading-relaxed">
+                      <strong>Important Notice:</strong> Once publisher funds are converted to your Advertiser Balance, they <strong>cannot</strong> be converted back to publisher balance or withdrawn. They remain permanently in your advertiser balance for launching banner, popup, or offer wall ads.
+                    </p>
+                  </div>
+
+                  {convertError && (
+                    <div className="p-3 bg-rose-950/40 border border-rose-900/50 rounded-xl text-rose-400 text-xs font-semibold">
+                      ⚠️ {convertError}
+                    </div>
+                  )}
+
+                  {convertSuccess && (
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-900/50 rounded-xl text-emerald-400 text-xs font-semibold">
+                      🎉 {convertSuccess}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleConvertBalance} className="flex flex-col sm:flex-row items-stretch sm:items-end gap-4 max-w-xl">
+                    <div className="flex-grow space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                        Amount to Convert ($)
+                      </label>
+                      <div className="relative">
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          min="0.0001"
+                          placeholder="e.g. 5.00"
+                          value={convertAmount}
+                          onChange={(e) => setConvertAmount(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-sm font-bold text-white placeholder-slate-600 pr-16"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setConvertAmount(Number(currentUser.balance || 0).toFixed(4))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[10px] font-extrabold uppercase rounded-lg transition cursor-pointer"
+                        >
+                          MAX
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={convertLoading || Number(currentUser.balance || 0) <= 0}
+                      className="px-6 py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-600/15 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                    >
+                      {convertLoading ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <ArrowLeftRight className="w-4 h-4" />
+                          Convert Funds
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+
+                {/* DEPOSIT FUNDS VIA GATEWAYS SECTION */}
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 md:p-8 space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                    <div>
+                      <h3 className="text-lg font-black text-white flex items-center gap-2">
+                        <CreditCard className="w-5 h-5 text-emerald-400" />
+                        Deposit Funds via Payment Gateway
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Add funds directly via automatic payment gateways (FaucetPay, OxaPay) or manual UPI QR Code payment.
+                      </p>
+                    </div>
+                  </div>
+
+                  {depositError && (
+                    <div className="p-3 bg-rose-950/40 border border-rose-900/50 rounded-xl text-rose-400 text-xs font-semibold">
+                      ⚠️ {depositError}
+                    </div>
+                  )}
+
+                  {depositSuccess && (
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-900/50 rounded-xl text-emerald-400 text-xs font-semibold">
+                      🎉 {depositSuccess}
+                    </div>
+                  )}
+
+                  {/* PAYMENT METHOD SELECTOR TABS */}
+                  <div className="grid grid-cols-3 gap-3 max-w-xl">
+                    <button
+                      type="button"
+                      onClick={() => setDepositTab("faucetpay")}
+                      className={`p-3 rounded-xl border text-xs font-bold transition flex flex-col items-center gap-1.5 cursor-pointer ${
+                        depositTab === "faucetpay"
+                          ? "bg-amber-500/10 border-amber-500 text-amber-300 shadow-lg shadow-amber-500/10"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <CreditCard className="w-4 h-4 text-amber-400" />
+                      <span>FaucetPay</span>
+                      <span className="text-[9px] font-mono text-emerald-400 uppercase">Auto Instant</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDepositTab("oxapay")}
+                      className={`p-3 rounded-xl border text-xs font-bold transition flex flex-col items-center gap-1.5 cursor-pointer ${
+                        depositTab === "oxapay"
+                          ? "bg-indigo-500/10 border-indigo-500 text-indigo-300 shadow-lg shadow-indigo-500/10"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <DollarSign className="w-4 h-4 text-indigo-400" />
+                      <span>OxaPay Crypto</span>
+                      <span className="text-[9px] font-mono text-emerald-400 uppercase">Auto Instant</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDepositTab("upi")}
+                      className={`p-3 rounded-xl border text-xs font-bold transition flex flex-col items-center gap-1.5 cursor-pointer ${
+                        depositTab === "upi"
+                          ? "bg-emerald-500/10 border-emerald-500 text-emerald-300 shadow-lg shadow-emerald-500/10"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <QrCode className="w-4 h-4 text-emerald-400" />
+                      <span>UPI / QR</span>
+                      <span className="text-[9px] font-mono text-amber-400 uppercase">Manual Verify</span>
+                    </button>
+                  </div>
+
+                  {/* DEPOSIT FORM */}
+                  <form onSubmit={handleDepositSubmit} className="space-y-4 max-w-xl">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                        Deposit Amount ($ USD)
+                      </label>
+                      <input
+                        required
+                        type="number"
+                        step="0.01"
+                        min="0.10"
+                        placeholder="5.00"
+                        value={depositAmount}
+                        onChange={(e) => setDepositAmount(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm font-bold text-white focus:border-amber-500 outline-none"
+                      />
+                    </div>
+
+                    {depositTab === "upi" && (
+                      <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-4">
+                        <div className="flex flex-col sm:flex-row items-center gap-4 border-b border-slate-800 pb-4">
+                          <div className="p-3 bg-white rounded-xl shrink-0 shadow">
+                            <img
+                              src={
+                                settings?.upiQrUrl
+                                  ? settings.upiQrUrl
+                                  : `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
+                                      `upi://pay?pa=${settings?.upiId || "9988776655@upi"}&pn=TGLINKS&am=${depositAmount || "5"}`
+                                    )}`
+                              }
+                              alt="Deposit QR Code"
+                              className="w-28 h-28 mx-auto object-contain"
+                            />
+                          </div>
+
+                          <div className="space-y-1 text-center sm:text-left">
+                            <span className="text-[10px] font-bold uppercase text-amber-400 tracking-wider">UPI Payment Details</span>
+                            <p className="text-sm font-bold text-white font-mono select-all p-2 bg-slate-900 border border-slate-800 rounded-lg">
+                              UPI ID: <span className="text-emerald-400">{settings?.upiId || "Configurable in Admin Settings"}</span>
+                            </p>
+                            <p className="text-[11px] text-slate-400">
+                              Scan QR Code or copy UPI ID to pay <strong>${depositAmount || "5.00"} USD</strong> via PhonePe, Google Pay, Paytm, or BHIM UPI.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
+                            Payment Screenshot URL / Image Proof <span className="text-rose-400">* (Mandatory)</span>
+                          </label>
+                          <input
+                            required
+                            type="text"
+                            placeholder="Paste image link or screenshot URL (e.g. https://i.imgur.com/screenshot.png)"
+                            value={upiScreenshotUrl}
+                            onChange={(e) => setUpiScreenshotUrl(e.target.value)}
+                            className="w-full px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
+                            Transaction ID / UTR Number <span className="text-slate-500 font-normal">(Optional)</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 312456789012"
+                            value={upiTxnId}
+                            onChange={(e) => setUpiTxnId(e.target.value)}
+                            className="w-full px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={depositLoading}
+                      className="w-full py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 disabled:bg-slate-800 text-white font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {depositLoading ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <CreditCard className="w-4 h-4" />
+                          {depositTab === "faucetpay" && "Proceed to FaucetPay"}
+                          {depositTab === "oxapay" && "Pay with OxaPay Crypto"}
+                          {depositTab === "upi" && "Submit UPI Deposit Proof"}
+                        </>
+                      )}
+                    </button>
+                  </form>
+
+                  {/* DEPOSIT HISTORY TABLE */}
+                  {depositHistory.length > 0 && (
+                    <div className="pt-4 border-t border-slate-800 space-y-3">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <RefreshCw className="w-4 h-4 text-amber-400" />
+                        My Deposit History
+                      </h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs text-slate-300">
+                          <thead className="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
+                            <tr>
+                              <th className="p-3">ID / Method</th>
+                              <th className="p-3">Amount</th>
+                              <th className="p-3">Date</th>
+                              <th className="p-3">Proof / Txn</th>
+                              <th className="p-3">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800">
+                            {depositHistory.map((dep) => (
+                              <tr key={dep.id} className="hover:bg-slate-900/60">
+                                <td className="p-3 font-mono font-bold text-white">
+                                  <div>{dep.id}</div>
+                                  <span className="text-[10px] text-amber-400 uppercase font-sans">{dep.method}</span>
+                                </td>
+                                <td className="p-3 font-mono font-bold text-emerald-400">
+                                  ${dep.amount.toFixed(2)}
+                                </td>
+                                <td className="p-3 text-[11px] text-slate-400">
+                                  {new Date(dep.createdAt).toLocaleDateString()}
+                                </td>
+                                <td className="p-3">
+                                  {dep.screenshotUrl ? (
+                                    <a
+                                      href={dep.screenshotUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-indigo-400 hover:underline flex items-center gap-1"
+                                    >
+                                      <ExternalLink className="w-3 h-3" /> Proof
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-500">{dep.gatewayTxnId || dep.txnId || "-"}</span>
+                                  )}
+                                </td>
+                                <td className="p-3">
+                                  {dep.status === "approved" && (
+                                    <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase rounded-md">
+                                      Approved
+                                    </span>
+                                  )}
+                                  {dep.status === "pending" && (
+                                    <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase rounded-md animate-pulse">
+                                      Pending Review
+                                    </span>
+                                  )}
+                                  {dep.status === "rejected" && (
+                                    <span className="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold uppercase rounded-md">
+                                      Rejected
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 2: CAMPAIGNS */}
+            {advertiserSection === "campaigns" && (
+              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 md:p-8 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                  <div>
+                    <h3 className="text-xl font-black text-white flex items-center gap-2">
+                      <Megaphone className="w-5 h-5 text-indigo-400" />
+                      My Ad Campaigns
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Manage active ad campaigns and track impressions delivered to network visitors.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setShowCreateCampaignModal(true)}
+                    className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-500/15 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Create New Ad Campaign
+                  </button>
+                </div>
+
+                {/* CAMPAIGN LIST */}
+                {advertiserCampaigns.length === 0 ? (
+                  <div className="text-center py-12 border-2 border-dashed border-slate-800 rounded-2xl space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+                      <Target className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-base font-bold text-white">No Ad Campaigns Yet</h4>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                      Convert your publisher balance into advertiser balance and launch your first offer wall or banner ad campaign!
+                    </p>
+                    <button
+                      onClick={() => setShowCreateCampaignModal(true)}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl transition inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Create First Campaign
+                    </button>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs text-slate-300">
+                      <thead className="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
+                        <tr>
+                          <th className="p-3.5">Campaign Title</th>
+                          <th className="p-3.5">Ad Format</th>
+                          <th className="p-3.5">CPM Rate</th>
+                          <th className="p-3.5">Progress / Views</th>
+                          <th className="p-3.5">Budget Spent</th>
+                          <th className="p-3.5">Status</th>
+                          <th className="p-3.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {advertiserCampaigns.map((c) => {
+                          const progress = Math.min(100, Math.round(((c.viewsDelivered || 0) / c.targetViews) * 100));
+                          return (
+                            <tr key={c.id} className="hover:bg-slate-900/60 transition">
+                              <td className="p-3.5 font-bold text-white">
+                                <div>
+                                  {c.title}
+                                  {c.targetUrl && (
+                                    <a href={c.targetUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-indigo-400 flex items-center gap-1 hover:underline font-mono mt-0.5">
+                                      <ExternalLink className="w-3 h-3" />
+                                      {c.targetUrl.substring(0, 30)}...
+                                    </a>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-3.5">
+                                <span className="px-2.5 py-1 bg-slate-800 border border-slate-700 text-slate-200 text-[10px] font-extrabold uppercase rounded-lg">
+                                  {c.type === "offerwall" ? "Offer Wall Task" : c.type === "sponsored_popup" ? "Sponsored Popup" : c.type}
+                                </span>
+                              </td>
+                              <td className="p-3.5 font-mono text-emerald-400 font-bold">
+                                ${c.cpm.toFixed(2)} CPM
+                              </td>
+                              <td className="p-3.5">
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] font-semibold text-slate-400">
+                                    <span>{c.viewsDelivered || 0} / {c.targetViews} views</span>
+                                    <span>{progress}%</span>
+                                  </div>
+                                  <div className="w-32 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                                    <div className="h-full bg-amber-500 rounded-full" style={{ width: `${progress}%` }} />
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-3.5 font-mono text-amber-300 font-bold">
+                                ${(c.spentBudget || 0).toFixed(2)} / ${c.totalBudget.toFixed(2)}
+                              </td>
+                              <td className="p-3.5">
+                                {c.status === "active" && (
+                                  <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase rounded-md animate-pulse">
+                                    Active
+                                  </span>
+                                )}
+                                {c.status === "paused" && (
+                                  <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase rounded-md">
+                                    Paused
+                                  </span>
+                                )}
+                                {c.status === "completed" && (
+                                  <span className="px-2 py-0.5 bg-slate-800 text-slate-400 text-[10px] font-bold uppercase rounded-md">
+                                    Completed
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3.5 text-right space-x-1">
+                                {c.status !== "completed" && (
+                                  <button
+                                    onClick={() => handleToggleCampaignStatus(c.id, c.status)}
+                                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition cursor-pointer"
+                                    title={c.status === "active" ? "Pause Campaign" : "Resume Campaign"}
+                                  >
+                                    {c.status === "active" ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDeleteCampaign(c.id)}
+                                  className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 rounded-lg transition cursor-pointer"
+                                  title="Delete Campaign"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SECTION 3: ADVERTISER SUPPORT */}
+            {advertiserSection === "support" && (
+              <div className="max-w-2xl bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 md:p-8 space-y-6">
+                <div>
+                  <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                    <Mail className="w-5 h-5 text-indigo-400" />
+                    Advertiser Support & Custom Rates
+                  </h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Have questions about campaign placement, bulk advertising deals, or custom targeting? Submit your ticket directly below.
+                  </p>
+                </div>
+
+                {supportSuccess && (
+                  <div className="p-4 bg-emerald-950/40 border border-emerald-900/55 rounded-xl text-emerald-400 text-xs font-semibold leading-relaxed">
+                    🎉 {supportSuccess}
+                  </div>
+                )}
+
+                <form onSubmit={handleSupportSubmit} className="space-y-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Your Email</label>
+                      <input
+                        disabled
+                        type="text"
+                        value={user.email}
+                        className="w-full px-4 py-3 bg-slate-950/70 border border-slate-850 rounded-xl text-slate-500 font-semibold text-sm cursor-not-allowed outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Inquiry Topic</label>
+                      <select
+                        required
+                        value={supportSubject}
+                        onChange={(e) => setSupportSubject(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-sm text-white"
+                      >
+                        <option value="">-- Select advertiser topic --</option>
+                        <option value="Deposit & Payment Issue">Deposit & Payment Issue</option>
+                        <option value="Campaign Placement & Targeting">Campaign Placement & Targeting</option>
+                        <option value="Bulk Advertising & VIP Rates">Bulk Advertising & VIP Rates</option>
+                        <option value="Other Inquiries">Other Inquiries</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Inquiry Message</label>
+                    <textarea
+                      required
+                      rows={5}
+                      placeholder="Describe your request or campaign details in detail..."
+                      value={supportMessage}
+                      onChange={(e) => setSupportMessage(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-sm text-white placeholder-slate-600"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={supportLoading}
+                    className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {supportLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Submit Support Ticket"}
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CREATE CAMPAIGN MODAL */}
+            {showCreateCampaignModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 md:p-8 relative my-8"
+                >
+                  <button
+                    onClick={() => setShowCreateCampaignModal(false)}
+                    className="absolute top-4 right-4 p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+
+                  <div className="mb-6">
+                    <h3 className="text-xl font-black text-white flex items-center gap-2">
+                      <Target className="w-5 h-5 text-amber-400" />
+                      Create New Advertiser Campaign
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Target visitors on TG LINKS redirection pages with custom offer wall tasks, popup windows, or banner placements.
+                    </p>
+                  </div>
+
+                  {createCampaignError && (
+                    <div className="mb-4 p-3 bg-rose-950/40 border border-rose-900/50 rounded-xl text-rose-400 text-xs font-semibold">
+                      ⚠️ {createCampaignError}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleCreateCampaign} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Campaign Title</label>
+                        <input
+                          required
+                          type="text"
+                          placeholder="e.g. My Crypto App Launch"
+                          value={campaignTitle}
+                          onChange={(e) => setCampaignTitle(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Ad Format Type</label>
+                        <select
+                          value={campaignType}
+                          onChange={(e: any) => setCampaignType(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                        >
+                          <option value="offerwall">Direct Link Offer Wall Task (CPM: ${getCpmForType("offerwall").toFixed(2)})</option>
+                          <option value="sponsored_popup">Sponsored Premium Popup Network (CPM: ${getCpmForType("sponsored_popup").toFixed(2)})</option>
+                          <option value="banner_728x90">Banner 728x90 Leaderboard (CPM: ${getCpmForType("banner_728x90").toFixed(2)})</option>
+                          <option value="banner_300x250">Banner 300x250 Medium Rectangle (CPM: ${getCpmForType("banner_300x250").toFixed(2)})</option>
+                          <option value="banner_468x60">Banner 468x60 Banner (CPM: ${getCpmForType("banner_468x60").toFixed(2)})</option>
+                          <option value="banner_320x50">Banner 320x50 Mobile Banner (CPM: ${getCpmForType("banner_320x50").toFixed(2)})</option>
+                          <option value="banner_300x600">Banner 300x600 Skyscraper (CPM: ${getCpmForType("banner_300x600").toFixed(2)})</option>
+                          <option value="banner_left">Banner Left Slot (CPM: ${getCpmForType("banner_left").toFixed(2)})</option>
+                          <option value="banner_right">Banner Right Slot (CPM: ${getCpmForType("banner_right").toFixed(2)})</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Destination Link / Target URL</label>
+                      <input
+                        required
+                        type="url"
+                        placeholder="https://yourwebsite.com/landing-page"
+                        value={campaignTargetUrl}
+                        onChange={(e) => setCampaignTargetUrl(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                      />
+                    </div>
+
+                    {campaignType.startsWith("banner_") && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Banner Image URL (Optional)</label>
+                          <input
+                            type="url"
+                            placeholder="https://yourwebsite.com/banner.png"
+                            value={campaignBannerImageUrl}
+                            onChange={(e) => setCampaignBannerImageUrl(e.target.value)}
+                            className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Custom Ad HTML / Script Code (Optional)</label>
+                          <input
+                            type="text"
+                            placeholder="<a href='...'><img src='...'/></a>"
+                            value={campaignAdCode}
+                            onChange={(e) => setCampaignAdCode(e.target.value)}
+                            className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm font-mono text-white focus:border-amber-500 outline-none"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Target View Count (Minimum 100 views)</label>
+                      <input
+                        required
+                        type="number"
+                        min="100"
+                        step="100"
+                        placeholder="1000"
+                        value={campaignTargetViews}
+                        onChange={(e) => setCampaignTargetViews(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                      />
+                    </div>
+
+                    {/* LIVE AD PREVIEW BOX */}
+                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Eye className="w-3.5 h-3.5" /> Live Ad Unit Preview ({campaignType})
+                        </span>
+                        <span className="text-[10px] text-slate-500">How it appears to website visitors</span>
+                      </div>
+
+                      <div className="pt-2 flex justify-center items-center overflow-x-auto min-h-[100px] bg-slate-900/60 rounded-lg p-3 border border-slate-800/60">
+                        {campaignType === "offerwall" && (
+                          <div className="w-full max-w-md p-4 bg-gradient-to-r from-amber-500/10 to-indigo-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 shadow-lg">
+                            <div>
+                              <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider">Sponsored Task</span>
+                              <h5 className="font-bold text-white text-sm mt-0.5">{campaignTitle || "Your Campaign Title"}</h5>
+                              <p className="text-[11px] text-slate-400 mt-0.5">Complete task to get redirect link</p>
+                            </div>
+                            <button type="button" className="px-4 py-2 bg-amber-500 text-slate-950 font-black text-xs rounded-lg shrink-0 shadow">
+                              Complete Task
+                            </button>
+                          </div>
+                        )}
+
+                        {campaignType === "sponsored_popup" && (
+                          <div className="w-full max-w-sm p-4 bg-slate-900 border border-indigo-500/40 rounded-xl shadow-2xl space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <span className="text-xs font-bold text-indigo-400 uppercase">Sponsored Popup Ad</span>
+                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 text-[10px] font-bold rounded">Wait 12s</span>
+                            </div>
+                            <h5 className="font-bold text-white text-sm">{campaignTitle || "Sponsored Partner Advert"}</h5>
+                            <div className="h-28 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center text-xs text-slate-500 font-mono overflow-hidden">
+                              {campaignBannerImageUrl ? (
+                                <img src={campaignBannerImageUrl} alt="Preview" className="max-h-full object-contain" />
+                              ) : (
+                                <span>Target: {campaignTargetUrl || "https://yourwebsite.com"}</span>
+                              )}
+                            </div>
+                            <button type="button" className="w-full py-2 bg-indigo-600 text-white font-bold text-xs rounded-lg">
+                              Visit Sponsored Advert
+                            </button>
+                          </div>
+                        )}
+
+                        {campaignType === "banner_728x90" && (
+                          <div className="w-[728px] max-w-full h-[90px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden relative">
+                            {campaignBannerImageUrl ? (
+                              <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-cover" />
+                            ) : campaignAdCode ? (
+                              <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                            ) : (
+                              <div className="text-center px-4">
+                                <span className="text-[10px] uppercase font-bold text-slate-500 block">728x90 Leaderboard Ad</span>
+                                <span className="text-xs font-bold text-amber-300">{campaignTitle || "Your Ad Banner Title"}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {campaignType === "banner_300x250" && (
+                          <div className="w-[300px] h-[250px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden relative p-2">
+                            {campaignBannerImageUrl ? (
+                              <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-contain" />
+                            ) : campaignAdCode ? (
+                              <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                            ) : (
+                              <div className="text-center">
+                                <span className="text-[10px] uppercase font-bold text-slate-500 block">300x250 Medium Rectangle</span>
+                                <span className="text-sm font-bold text-amber-300 block mt-1">{campaignTitle || "Your Ad Banner"}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {campaignType === "banner_320x50" && (
+                          <div className="w-[320px] h-[50px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden px-2">
+                            {campaignBannerImageUrl ? (
+                              <img src={campaignBannerImageUrl} alt="Mobile Banner" className="w-full h-full object-cover" />
+                            ) : campaignAdCode ? (
+                              <div className="p-1 text-[10px] font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                            ) : (
+                              <div className="text-center">
+                                <span className="text-[10px] uppercase font-bold text-slate-500 block">320x50 Mobile Banner</span>
+                                <span className="text-xs font-bold text-amber-300">{campaignTitle || "Mobile Ad Banner"}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {campaignType === "banner_468x60" && (
+                          <div className="w-[468px] max-w-full h-[60px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden px-2">
+                            {campaignBannerImageUrl ? (
+                              <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-cover" />
+                            ) : campaignAdCode ? (
+                              <div className="p-1 text-[10px] font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                            ) : (
+                              <div className="text-center">
+                                <span className="text-[10px] uppercase font-bold text-slate-500 block">468x60 Standard Banner</span>
+                                <span className="text-xs font-bold text-amber-300">{campaignTitle || "Standard Banner Ad"}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {(campaignType === "banner_300x600" || campaignType === "banner_left" || campaignType === "banner_right") && (
+                          <div className="w-[300px] h-[250px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden p-2">
+                            {campaignBannerImageUrl ? (
+                              <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-contain" />
+                            ) : campaignAdCode ? (
+                              <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                            ) : (
+                              <div className="text-center">
+                                <span className="text-[10px] uppercase font-bold text-slate-500 block">{campaignType.replace('_', ' ').toUpperCase()}</span>
+                                <span className="text-sm font-bold text-amber-300 block mt-1">{campaignTitle || "Sidebar / Skyscraper Ad"}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* PRICE SUMMARY CARD */}
+                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">CPM Rate & Cost Calculation</span>
+                        <p className="text-xs text-slate-300">
+                          <span className="font-bold text-amber-400">${getCpmForType(campaignType).toFixed(2)} CPM</span> × {Number(campaignTargetViews) || 0} Views
+                        </p>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Total Campaign Budget</span>
+                        <span className="text-xl font-black text-amber-300">${calculatedCost().toFixed(2)} USD</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateCampaignModal(false)}
+                        className="px-5 py-3 bg-slate-950 hover:bg-slate-800 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={createCampaignLoading || (currentUser.advertiserBalance || 0) < calculatedCost()}
+                        className="px-6 py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-600/20 flex items-center gap-2 cursor-pointer"
+                      >
+                        {createCampaignLoading ? "Launching..." : "Launch Ad Campaign"}
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              </div>
+            )}
       </main>
 
       {/* QR CODE GENERATOR MODAL */}

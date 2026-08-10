@@ -12,6 +12,7 @@ export interface User {
   withdrawalAccount: string;
   createdAt: string;
   banned: boolean;
+  advertiserBalance?: number; // Separate advertiser balance (non-withdrawable)
   customCpm?: number; // Custom CPM set by admin for this user
   apiToken: string; // Dynamic API Token for programmatic integration
   enableFaucetMode?: boolean; // Faucet Mode setting for faucet traffic users
@@ -118,12 +119,74 @@ export interface SystemSettings {
   adLeftCode?: string;
   adBottomCenterCode?: string;
   adRightCode?: string;
+  ad300x600Code?: string;
   enableSponsoredAd1?: boolean;
   sponsoredAd1Url?: string;
   sponsoredAd1Timer?: number;
   enableSponsoredAd2?: boolean;
   sponsoredAd2Url?: string;
   sponsoredAd2Timer?: number;
+  advCpmOfferWall?: number;
+  advCpmSponsoredPopup?: number;
+  advCpmBanner728x90?: number;
+  advCpmBanner468x60?: number;
+  advCpmBanner300x250?: number;
+  advCpmBanner320x50?: number;
+  advCpmBanner300x600?: number;
+  advCpmBannerLeft?: number;
+  advCpmBannerRight?: number;
+  // Payment & Deposit Gateways
+  enableFaucetPayDeposit?: boolean;
+  faucetPayMerchant?: string;
+  faucetPaySecret?: string;
+  enableOxaPayDeposit?: boolean;
+  oxaPayMerchantKey?: string;
+  oxaPayApiKey?: string;
+  enableUpiDeposit?: boolean;
+  upiId?: string;
+  upiQrUrl?: string;
+  upiAccountHolderName?: string;
+}
+
+export interface DepositRequest {
+  id: string;
+  userId: string;
+  userEmail: string;
+  amount: number;
+  method: 'faucetpay' | 'oxapay' | 'upi';
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  txnId?: string;
+  screenshotUrl?: string;
+  adminNote?: string;
+  gatewayTxnId?: string;
+}
+
+export interface AdvertiserCampaign {
+  id: string;
+  userId: string;
+  userEmail: string;
+  title: string;
+  type: 
+    | 'offerwall'
+    | 'sponsored_popup'
+    | 'banner_728x90'
+    | 'banner_468x60'
+    | 'banner_300x250'
+    | 'banner_320x50'
+    | 'banner_300x600'
+    | 'banner_left'
+    | 'banner_right';
+  targetUrl?: string;
+  bannerImageUrl?: string;
+  adCode?: string;
+  cpm: number;
+  totalBudget: number;
+  spent: number;
+  impressions: number;
+  clicks: number;
+  status: 'active' | 'paused' | 'completed';
+  createdAt: string;
 }
 
 export interface DashboardStats {

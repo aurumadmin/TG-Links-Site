@@ -272,6 +272,49 @@ async function getExternalShortenedUrl(
   return null;
 }
 
+// Verification Token Store for strictly counting views only when shortener chain is fully completed
+interface PendingVerification {
+  code: string;
+  ip: string;
+  createdAt: number;
+  used: boolean;
+}
+
+const pendingVerificationsMap = new Map<string, PendingVerification>();
+
+function createVerificationToken(code: string, ip: string): string {
+  const vtok = "vtok_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
+  pendingVerificationsMap.set(vtok, {
+    code,
+    ip,
+    createdAt: Date.now(),
+    used: false
+  });
+  
+  // Clean up tokens older than 1 hour
+  const now = Date.now();
+  for (const [key, value] of pendingVerificationsMap.entries()) {
+    if (now - value.createdAt > 60 * 60 * 1000) {
+      pendingVerificationsMap.delete(key);
+    }
+  }
+
+  return vtok;
+}
+
+function verifyAndConsumeToken(vtok: string | undefined, code: string): boolean {
+  if (!vtok || typeof vtok !== "string") return false;
+  const entry = pendingVerificationsMap.get(vtok);
+  if (!entry) return false;
+  if (entry.code !== code) return false;
+  if (entry.used) return false;
+  // 30-minute expiry window
+  if (Date.now() - entry.createdAt > 30 * 60 * 1000) return false;
+
+  entry.used = true;
+  return true;
+}
+
 // --- GOOGLE DRIVE DATABASE SYNC INTEGRATION ---
 let gdriveSyncEnabled = false;
 let gdriveFileId = process.env.GOOGLE_DRIVE_FILE_ID || "";
@@ -698,8 +741,63 @@ function loadDb() {
     db.deletedLinksCount = 0;
     changed = true;
   }
-  if (!db.adFlyShorteners) {
-    db.adFlyShorteners = [];
+  if (!db.adFlyShorteners || db.adFlyShorteners.length === 0) {
+    db.adFlyShorteners = [
+      {
+        id: "api-shortxlinks-1",
+        name: "ShortXLinks",
+        apiUrl: "https://shortxlinks.com/",
+        apiToken: "b6ac099187a0572e9d24ce4a679e9eb10115b02d",
+        enabled: true,
+        priority: 6,
+        isFaucetApi: false
+      },
+      {
+        id: "api-easysky-2",
+        name: "EasySky",
+        apiUrl: "https://easysky.in/",
+        apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
+        enabled: true,
+        priority: 5,
+        isFaucetApi: false
+      },
+      {
+        id: "api-shortxlinks-faucet-3",
+        name: "ShortXLinks-Faucet",
+        apiUrl: "https://shortxlinks.com/",
+        apiToken: "b6ac099187a0572e9d24ce4a679e9eb10115b02d",
+        enabled: true,
+        priority: 4,
+        isFaucetApi: true
+      },
+      {
+        id: "api-easysky-faucet-4",
+        name: "EasySky-Faucet",
+        apiUrl: "https://easysky.in/",
+        apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
+        enabled: true,
+        priority: 3,
+        isFaucetApi: true
+      },
+      {
+        id: "api-oii-5",
+        name: "Oii",
+        apiUrl: "https://oii.io/",
+        apiToken: "1edc96d59f77f395d8efd79d5feebbc1f2e82bc2",
+        enabled: false,
+        priority: 2,
+        isFaucetApi: true
+      },
+      {
+        id: "api-linknext-6",
+        name: "LinkNext",
+        apiUrl: "https://linknext.io/",
+        apiToken: "cbc6cb0ca4ebfc65f8bc87556094cf5e2fafeaee",
+        enabled: true,
+        priority: 1,
+        isFaucetApi: true
+      }
+    ];
     changed = true;
   } else {
     const originalLength = db.adFlyShorteners.length;
@@ -768,14 +866,55 @@ function loadDb() {
       db.settings.sponsoredAd2Timer = 12;
       changed = true;
     }
+    if (db.settings.advCpmOfferWall === undefined) { db.settings.advCpmOfferWall = 3.0; changed = true; }
+    if (db.settings.advCpmSponsoredPopup === undefined) { db.settings.advCpmSponsoredPopup = 4.0; changed = true; }
+    if (db.settings.advCpmBanner728x90 === undefined) { db.settings.advCpmBanner728x90 = 1.5; changed = true; }
+    if (db.settings.advCpmBanner468x60 === undefined) { db.settings.advCpmBanner468x60 = 1.2; changed = true; }
+    if (db.settings.advCpmBanner300x250 === undefined) { db.settings.advCpmBanner300x250 = 2.0; changed = true; }
+    if (db.settings.advCpmBanner320x50 === undefined) { db.settings.advCpmBanner320x50 = 1.0; changed = true; }
+    if (db.settings.advCpmBanner300x600 === undefined) { db.settings.advCpmBanner300x600 = 2.5; changed = true; }
+    if (db.settings.advCpmBannerLeft === undefined) { db.settings.advCpmBannerLeft = 1.5; changed = true; }
+    if (db.settings.advCpmBannerRight === undefined) { db.settings.advCpmBannerRight = 1.5; changed = true; }
+    if (db.settings.enableFaucetPayDeposit === undefined) { db.settings.enableFaucetPayDeposit = true; changed = true; }
+    if (db.settings.faucetPayMerchant === undefined) { db.settings.faucetPayMerchant = ""; changed = true; }
+    if (db.settings.faucetPaySecret === undefined) { db.settings.faucetPaySecret = ""; changed = true; }
+    if (db.settings.enableOxaPayDeposit === undefined) { db.settings.enableOxaPayDeposit = true; changed = true; }
+    if (db.settings.oxaPayMerchantKey === undefined) { db.settings.oxaPayMerchantKey = ""; changed = true; }
+    if (db.settings.enableUpiDeposit === undefined) { db.settings.enableUpiDeposit = true; changed = true; }
+    if (db.settings.upiId === undefined) { db.settings.upiId = "pay@upi"; changed = true; }
+    if (db.settings.upiQrUrl === undefined) { db.settings.upiQrUrl = ""; changed = true; }
+    if (db.settings.upiAccountHolderName === undefined) { db.settings.upiAccountHolderName = "TG Links Ads"; changed = true; }
+    if (db.settings.enableEmailBackup === undefined) { db.settings.enableEmailBackup = false; changed = true; }
   } else {
     db.settings = initialDb.settings;
     changed = true;
   }
 
+  if (!db.depositRequests) {
+    db.depositRequests = [];
+    changed = true;
+  } else {
+    const originalLength = db.depositRequests.length;
+    db.depositRequests = db.depositRequests.filter(Boolean);
+    if (db.depositRequests.length !== originalLength) changed = true;
+  }
+
+  if (!db.advertiserCampaigns) {
+    db.advertiserCampaigns = [];
+    changed = true;
+  } else {
+    const originalLength = db.advertiserCampaigns.length;
+    db.advertiserCampaigns = db.advertiserCampaigns.filter(Boolean);
+    if (db.advertiserCampaigns.length !== originalLength) changed = true;
+  }
+
   db.users = (db.users || []).filter(Boolean).map((u: any) => {
     if (!u.apiToken) {
       u.apiToken = generateApiToken();
+      changed = true;
+    }
+    if (u.advertiserBalance === undefined) {
+      u.advertiserBalance = 0;
       changed = true;
     }
     return u;
@@ -1157,6 +1296,19 @@ function setupRoutes() {
       db.users.push(newUser);
       saveDb(db);
 
+      // Send welcome email notification
+      sendSmtpEmail({
+        to: newUser.email,
+        subject: `Welcome to ${db.settings?.siteName || "TG Links"}!`,
+        text: `Hello,\n\nWelcome to ${db.settings?.siteName || "TG Links"}! Your account has been successfully created.\n\nYou can now start shortening links and monetizing your traffic.\n\nThank you for joining us!`,
+        html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: #4f46e5; margin-top: 0;">🎉 Welcome to ${db.settings?.siteName || "TG Links"}!</h2>
+          <p>Your account (<strong>${newUser.email}</strong>) has been successfully created.</p>
+          <p>Start creating shortened links in your dashboard and earn money with high CPM rates.</p>
+          <p style="font-size: 12px; color: #64748b; margin-top: 24px;">If you did not register for this account, please contact support immediately.</p>
+        </div>`
+      }).catch((e: any) => console.error("[SMTP Notification Error] Welcome email:", e));
+
       const { password: _, ...userSafe } = newUser;
       res.json({ user: userSafe });
     } catch (err: any) {
@@ -1314,6 +1466,675 @@ function setupRoutes() {
       status: "success",
       shortenedUrl: shortenedUrl
     });
+  });
+
+  // --- ADVERTISER SYSTEM ENDPOINTS ---
+
+  function getActiveAdvertiserAds(db: any) {
+    const activeCampaigns = (db.advertiserCampaigns || []).filter((c: any) => {
+      return c && c.status === "active" && Number(c.spent || 0) < Number(c.totalBudget || 0);
+    });
+
+    const getActiveForType = (type: string) => {
+      return activeCampaigns.filter((c: any) => c.type === type);
+    };
+
+    const pickRandom = (list: any[]) => {
+      if (!list || list.length === 0) return null;
+      const idx = Math.floor(Math.random() * list.length);
+      return list[idx];
+    };
+
+    // Offer Wall
+    const offerWallList = getActiveForType("offerwall");
+    const extraOfferWallAd = pickRandom(offerWallList);
+
+    // Sponsored Popup
+    const popupList = getActiveForType("sponsored_popup");
+    const extraSponsoredPopupAd = pickRandom(popupList);
+
+    // Banners
+    const bannerSizes = [
+      "banner_728x90",
+      "banner_468x60",
+      "banner_300x250",
+      "banner_320x50",
+      "banner_300x600",
+      "banner_left",
+      "banner_right"
+    ];
+
+    const activeBanners: Record<string, any> = {};
+    for (const size of bannerSizes) {
+      const list = getActiveForType(size);
+      const chosen = pickRandom(list);
+      if (chosen) {
+        activeBanners[size] = {
+          id: chosen.id,
+          title: chosen.title,
+          targetUrl: chosen.targetUrl || "",
+          bannerImageUrl: chosen.bannerImageUrl || "",
+          adCode: chosen.adCode || ""
+        };
+      }
+    }
+
+    return {
+      extraOfferWallAd: extraOfferWallAd ? {
+        id: extraOfferWallAd.id,
+        title: extraOfferWallAd.title,
+        targetUrl: extraOfferWallAd.targetUrl || ""
+      } : null,
+      extraSponsoredPopupAd: extraSponsoredPopupAd ? {
+        id: extraSponsoredPopupAd.id,
+        title: extraSponsoredPopupAd.title,
+        targetUrl: extraSponsoredPopupAd.targetUrl || ""
+      } : null,
+      activeBanners
+    };
+  }
+
+  // Get user campaigns
+  app.get("/api/advertiser/campaigns", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const db = loadDb();
+    const userCampaigns = (db.advertiserCampaigns || []).filter((c: any) => c.userId === user.id);
+    res.json({ campaigns: userCampaigns });
+  });
+
+  // Convert publisher balance to advertiser balance
+  app.post("/api/advertiser/convert-balance", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { amount } = req.body;
+    const convertAmount = Number(amount);
+
+    if (isNaN(convertAmount) || convertAmount <= 0) {
+      return res.status(400).json({ error: "Please enter a valid positive conversion amount" });
+    }
+
+    const db = loadDb();
+    const dbUser = db.users.find((u: any) => u.id === user.id);
+    if (!dbUser) return res.status(404).json({ error: "User not found" });
+
+    const userBal = Number(dbUser.balance || 0);
+    if (convertAmount > userBal + 0.00001) {
+      return res.status(400).json({ error: `Insufficient publisher balance. Available: $${userBal.toFixed(4)}` });
+    }
+
+    // Deduct publisher balance, add to advertiser balance
+    dbUser.balance = Number(Math.max(0, userBal - convertAmount).toFixed(6));
+    dbUser.advertiserBalance = Number(((dbUser.advertiserBalance || 0) + convertAmount).toFixed(6));
+
+    saveDb(db);
+
+    // Send email notification for balance conversion
+    sendSmtpEmail({
+      to: dbUser.email,
+      subject: `[${db.settings?.siteName || "TG Links"}] Publisher Balance Converted ($${convertAmount.toFixed(2)})`,
+      text: `Hello,\n\nYou converted $${convertAmount.toFixed(2)} from your Publisher Balance to your Advertiser Balance.\n\nNew Publisher Balance: $${dbUser.balance.toFixed(2)}\nNew Advertiser Balance: $${dbUser.advertiserBalance.toFixed(2)}`,
+      html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #4f46e5; margin-top: 0;">🔄 Balance Converted to Advertiser Account</h2>
+        <p>You converted funds to run advertising campaigns on <strong>${db.settings?.siteName || "TG Links"}</strong>:</p>
+        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+          <p style="margin: 4px 0;"><strong>Amount Converted:</strong> $${convertAmount.toFixed(2)}</p>
+          <p style="margin: 4px 0;"><strong>Updated Publisher Balance:</strong> $${dbUser.balance.toFixed(2)}</p>
+          <p style="margin: 4px 0;"><strong>Updated Advertiser Balance:</strong> $${dbUser.advertiserBalance.toFixed(2)}</p>
+        </div>
+      </div>`
+    }).catch((e: any) => console.error("[SMTP Error] Balance convert email:", e));
+
+    const { password: _, ...safeUser } = dbUser;
+    res.json({
+      success: true,
+      message: `Successfully converted $${convertAmount.toFixed(2)} to Advertiser Balance!`,
+      user: safeUser,
+      balance: dbUser.balance,
+      advertiserBalance: dbUser.advertiserBalance
+    });
+  });
+
+  // Create new campaign
+  app.post("/api/advertiser/campaigns", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { title, type, targetUrl, bannerImageUrl, adCode, targetViews } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: "Campaign title is required" });
+    }
+
+    const validTypes = [
+      "offerwall",
+      "sponsored_popup",
+      "banner_728x90",
+      "banner_468x60",
+      "banner_300x250",
+      "banner_320x50",
+      "banner_300x600",
+      "banner_left",
+      "banner_right"
+    ];
+
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ error: "Invalid ad campaign type selected" });
+    }
+
+    const viewsNum = Number(targetViews);
+    if (isNaN(viewsNum) || viewsNum < 100) {
+      return res.status(400).json({ error: "Minimum target views for a campaign is 100 views" });
+    }
+
+    const db = loadDb();
+    const s = db.settings || {};
+
+    // Get CPM rate for type
+    let cpm = 2.0;
+    if (type === "offerwall") cpm = s.advCpmOfferWall ?? 3.0;
+    else if (type === "sponsored_popup") cpm = s.advCpmSponsoredPopup ?? 4.0;
+    else if (type === "banner_728x90") cpm = s.advCpmBanner728x90 ?? 1.5;
+    else if (type === "banner_468x60") cpm = s.advCpmBanner468x60 ?? 1.2;
+    else if (type === "banner_300x250") cpm = s.advCpmBanner300x250 ?? 2.0;
+    else if (type === "banner_320x50") cpm = s.advCpmBanner320x50 ?? 1.0;
+    else if (type === "banner_300x600") cpm = s.advCpmBanner300x600 ?? 2.5;
+    else if (type === "banner_left") cpm = s.advCpmBannerLeft ?? 1.5;
+    else if (type === "banner_right") cpm = s.advCpmBannerRight ?? 1.5;
+
+    const totalBudget = Number(((viewsNum / 1000) * cpm).toFixed(4));
+
+    if (totalBudget < 0.20) {
+      return res.status(400).json({
+        error: `Minimum ad campaign budget is $0.20. Your calculated campaign cost is $${totalBudget.toFixed(2)}. Please increase your target views.`
+      });
+    }
+
+    const dbUser = db.users.find((u: any) => u.id === user.id);
+    if (!dbUser) return res.status(404).json({ error: "User not found" });
+
+    if ((dbUser.advertiserBalance || 0) < totalBudget) {
+      return res.status(400).json({
+        error: `Insufficient Advertiser Balance. Total campaign cost is $${totalBudget.toFixed(2)} (${viewsNum} views @ $${cpm.toFixed(2)} CPM). You have $${(dbUser.advertiserBalance || 0).toFixed(2)}.`
+      });
+    }
+
+    // Deduct advertiser balance
+    dbUser.advertiserBalance = Number(((dbUser.advertiserBalance || 0) - totalBudget).toFixed(6));
+
+    const newCampaign = {
+      id: "adv-" + Math.random().toString(36).substring(2, 9),
+      userId: user.id,
+      userEmail: user.email,
+      title: title.trim(),
+      type,
+      targetUrl: targetUrl ? targetUrl.trim() : "",
+      bannerImageUrl: bannerImageUrl ? bannerImageUrl.trim() : "",
+      adCode: adCode ? adCode.trim() : "",
+      cpm,
+      totalBudget,
+      spent: 0.0,
+      impressions: 0,
+      clicks: 0,
+      status: "active",
+      createdAt: new Date().toISOString()
+    };
+
+    if (!db.advertiserCampaigns) db.advertiserCampaigns = [];
+    db.advertiserCampaigns.push(newCampaign);
+
+    saveDb(db);
+
+    // Send email notification for campaign creation
+    sendSmtpEmail({
+      to: dbUser.email,
+      subject: `[${db.settings?.siteName || "TG Links"}] Ad Campaign Created (${title.trim()})`,
+      text: `Hello,\n\nYour ad campaign '${title.trim()}' (${type}) has been created!\n\nTarget Views: ${viewsNum}\nTotal Budget: $${totalBudget.toFixed(2)}\nCPM Rate: $${cpm.toFixed(2)}`,
+      html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #16a34a; margin-top: 0;">📣 Ad Campaign Live!</h2>
+        <p>Your new advertising campaign has been launched on <strong>${db.settings?.siteName || "TG Links"}</strong>:</p>
+        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+          <p style="margin: 4px 0;"><strong>Campaign Title:</strong> ${title.trim()}</p>
+          <p style="margin: 4px 0;"><strong>Ad Type:</strong> ${type}</p>
+          <p style="margin: 4px 0;"><strong>Target Views:</strong> ${viewsNum}</p>
+          <p style="margin: 4px 0;"><strong>Total Budget:</strong> $${totalBudget.toFixed(2)}</p>
+        </div>
+      </div>`
+    }).catch((e: any) => console.error("[SMTP Error] Campaign creation email:", e));
+
+    const { password: _, ...safeUser } = dbUser;
+    res.json({
+      success: true,
+      campaign: newCampaign,
+      advertiserBalance: dbUser.advertiserBalance,
+      user: safeUser
+    });
+  });
+
+  // Toggle status (active / paused)
+  app.post("/api/advertiser/campaigns/:id/status", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const db = loadDb();
+    const campaign = (db.advertiserCampaigns || []).find((c: any) => c.id === id);
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+
+    if (campaign.userId !== user.id && user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (status === "active" || status === "paused") {
+      campaign.status = status;
+      saveDb(db);
+    }
+
+    res.json({ success: true, campaign });
+  });
+
+  // Delete campaign and refund unspent budget to advertiser balance
+  app.delete("/api/advertiser/campaigns/:id", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { id } = req.params;
+    const db = loadDb();
+
+    if (!db.advertiserCampaigns) db.advertiserCampaigns = [];
+    const idx = db.advertiserCampaigns.findIndex((c: any) => c.id === id);
+    if (idx === -1) return res.status(404).json({ error: "Campaign not found" });
+
+    const campaign = db.advertiserCampaigns[idx];
+    if (campaign.userId !== user.id && user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Refund unspent budget if any
+    const unspent = Math.max(0, Number(campaign.totalBudget || 0) - Number(campaign.spent || 0));
+    if (unspent > 0) {
+      const owner = db.users.find((u: any) => u.id === campaign.userId);
+      if (owner) {
+        owner.advertiserBalance = Number(((owner.advertiserBalance || 0) + unspent).toFixed(6));
+      }
+    }
+
+    db.advertiserCampaigns.splice(idx, 1);
+    saveDb(db);
+
+    const updatedUser = db.users.find((u: any) => u.id === user.id);
+    res.json({ success: true, advertiserBalance: updatedUser?.advertiserBalance || 0 });
+  });
+
+  // --- DEPOSIT & PAYMENT GATEWAY ENDPOINTS ---
+  app.get("/api/deposits/settings", (req, res) => {
+    const db = loadDb();
+    const s = db.settings || {};
+    res.json({
+      enableFaucetPayDeposit: s.enableFaucetPayDeposit !== false,
+      faucetPayMerchant: s.faucetPayMerchant || "",
+      enableOxaPayDeposit: s.enableOxaPayDeposit !== false,
+      enableUpiDeposit: s.enableUpiDeposit !== false,
+      upiId: s.upiId || "pay@upi",
+      upiQrUrl: s.upiQrUrl || "",
+      upiAccountHolderName: s.upiAccountHolderName || "TG Links Ads"
+    });
+  });
+
+  app.get("/api/deposits/my", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const db = loadDb();
+    const myDeposits = (db.depositRequests || [])
+      .filter((d: any) => d.userId === user.id)
+      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json({ deposits: myDeposits });
+  });
+
+  // Manual UPI deposit request
+  app.get("/api/deposits/my", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const db = loadDb();
+    const userDeposits = (db.depositRequests || [])
+      .filter((d: any) => d.userId === user.id)
+      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json({ deposits: userDeposits });
+  });
+
+  app.post("/api/deposits/upi", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { amount, screenshotUrl, txnId } = req.body;
+    const depAmount = Number(amount);
+
+    if (isNaN(depAmount) || depAmount < 0.1) {
+      return res.status(400).json({ error: "Minimum deposit amount is $0.10" });
+    }
+
+    if (!screenshotUrl || !String(screenshotUrl).trim()) {
+      return res.status(400).json({ error: "Payment screenshot URL / image proof is mandatory" });
+    }
+
+    const db = loadDb();
+    if (db.settings?.enableUpiDeposit === false) {
+      return res.status(400).json({ error: "Manual UPI deposits are currently disabled" });
+    }
+
+    const newDep = {
+      id: "dep-" + Math.random().toString(36).substring(2, 9),
+      userId: user.id,
+      userEmail: user.email,
+      amount: depAmount,
+      method: "upi",
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      screenshotUrl: String(screenshotUrl).trim(),
+      txnId: txnId ? String(txnId).trim() : ""
+    };
+
+    if (!db.depositRequests) db.depositRequests = [];
+    db.depositRequests.push(newDep);
+    saveDb(db);
+
+    // Notify Admin
+    const adminEmail = db.settings?.backupReceiverEmail || db.settings?.smtpUser || ADMIN_EMAILS[0];
+    sendSmtpEmail({
+      to: adminEmail,
+      subject: `[${db.settings?.siteName || "TG Links"} Admin] New Manual UPI Deposit ($${depAmount.toFixed(2)})`,
+      text: `New manual UPI deposit submitted:\nUser: ${user.email}\nAmount: $${depAmount.toFixed(2)}\nTxn ID: ${newDep.txnId || 'N/A'}\nScreenshot: ${newDep.screenshotUrl}`,
+      html: `<div style="font-family: system-ui, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h3 style="color: #4f46e5; margin-top: 0;">💳 New Manual UPI Deposit Request</h3>
+        <p><strong>User:</strong> ${user.email}</p>
+        <p><strong>Amount:</strong> $${depAmount.toFixed(2)}</p>
+        <p><strong>Transaction / UTR ID:</strong> ${newDep.txnId || 'None provided'}</p>
+        <p><strong>Screenshot:</strong> <a href="${newDep.screenshotUrl}" target="_blank">View Payment Screenshot</a></p>
+      </div>`
+    }).catch(e => console.error("Admin deposit email err:", e));
+
+    res.json({ success: true, message: "UPI deposit submitted successfully for admin verification!", deposit: newDep });
+  });
+
+  // FaucetPay deposit request
+  app.post("/api/deposits/faucetpay", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { amount } = req.body;
+    const depAmount = Number(amount);
+
+    if (isNaN(depAmount) || depAmount < 0.1) {
+      return res.status(400).json({ error: "Minimum deposit amount is $0.10" });
+    }
+
+    const db = loadDb();
+    const merchant = db.settings?.faucetPayMerchant;
+    if (!merchant) {
+      return res.status(400).json({ error: "FaucetPay merchant is not configured by Administrator in Admin Panel" });
+    }
+
+    const protocol = getRequestProtocol(req);
+    const host = getRequestHost(req);
+
+    const newDep = {
+      id: "dep-fp-" + Math.random().toString(36).substring(2, 9),
+      userId: user.id,
+      userEmail: user.email,
+      amount: depAmount,
+      method: "faucetpay",
+      status: "pending",
+      createdAt: new Date().toISOString()
+    };
+
+    if (!db.depositRequests) db.depositRequests = [];
+    db.depositRequests.push(newDep);
+    saveDb(db);
+
+    const callbackUrl = `${protocol}://${host}/api/deposits/faucetpay/callback`;
+    const successUrl = `${protocol}://${host}/dashboard?tab=advertiser&deposit=success`;
+    const cancelUrl = `${protocol}://${host}/dashboard?tab=advertiser&deposit=cancel`;
+
+    res.json({
+      success: true,
+      checkoutUrl: "https://faucetpay.io/merchant/webpay",
+      params: {
+        merchant_username: merchant,
+        item_name: `Deposit to ${db.settings?.siteName || 'TG Links'} Advertiser Balance`,
+        amount1: depAmount,
+        currency1: "USD",
+        custom: newDep.id,
+        callback_url: callbackUrl,
+        success_url: successUrl,
+        cancel_url: cancelUrl
+      }
+    });
+  });
+
+  app.all("/api/deposits/faucetpay/callback", (req, res) => {
+    const custom = req.body?.custom || req.query?.custom;
+    const amount1 = req.body?.amount1 || req.query?.amount1;
+    const token = req.body?.token || req.query?.token;
+
+    const db = loadDb();
+    const dep = (db.depositRequests || []).find((d: any) => d.id === custom);
+    if (dep && dep.status === "pending") {
+      dep.status = "approved";
+      dep.gatewayTxnId = String(token || "");
+
+      const dbUser = db.users.find((u: any) => u.id === dep.userId);
+      if (dbUser) {
+        dbUser.advertiserBalance = Number(((dbUser.advertiserBalance || 0) + dep.amount).toFixed(6));
+      }
+      saveDb(db);
+    }
+    res.send("OK");
+  });
+
+  // OxaPay deposit request
+  app.post("/api/deposits/oxapay", async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { amount } = req.body;
+    const depAmount = Number(amount);
+
+    if (isNaN(depAmount) || depAmount < 0.1) {
+      return res.status(400).json({ error: "Minimum deposit amount is $0.10" });
+    }
+
+    const db = loadDb();
+    const apiKey = db.settings?.oxaPayMerchantKey || db.settings?.oxaPayApiKey;
+    if (!apiKey) {
+      return res.status(400).json({ error: "OxaPay Merchant API Key is not configured by Administrator in Admin Panel" });
+    }
+
+    const protocol = getRequestProtocol(req);
+    const host = getRequestHost(req);
+
+    const newDep = {
+      id: "dep-oxa-" + Math.random().toString(36).substring(2, 9),
+      userId: user.id,
+      userEmail: user.email,
+      amount: depAmount,
+      method: "oxapay",
+      status: "pending",
+      createdAt: new Date().toISOString()
+    };
+
+    if (!db.depositRequests) db.depositRequests = [];
+    db.depositRequests.push(newDep);
+    saveDb(db);
+
+    try {
+      const fetchFn = typeof globalThis.fetch === "function" ? globalThis.fetch : (await import("node-fetch")).default;
+      const response = await fetchFn("https://api.oxapay.com/merchants/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          merchant: apiKey,
+          amount: depAmount,
+          currency: "USD",
+          orderId: newDep.id,
+          callbackUrl: `${protocol}://${host}/api/deposits/oxapay/callback`,
+          returnUrl: `${protocol}://${host}/dashboard?tab=advertiser&deposit=success`,
+          description: `Deposit to ${db.settings?.siteName || 'TG Links'} Advertiser Balance`
+        })
+      });
+
+      const data: any = await response.json();
+      if (data.result === 100 && data.payLink) {
+        return res.json({ success: true, payLink: data.payLink });
+      } else {
+        return res.status(400).json({ error: data.message || "Failed to generate OxaPay invoice" });
+      }
+    } catch (err: any) {
+      return res.status(500).json({ error: "OxaPay API error: " + err.message });
+    }
+  });
+
+  app.all("/api/deposits/oxapay/callback", (req, res) => {
+    const { orderId, status, trackId } = req.body || req.query;
+
+    if (status === "Paid" || status === "100" || status === 100) {
+      const db = loadDb();
+      const dep = (db.depositRequests || []).find((d: any) => d.id === orderId);
+      if (dep && dep.status === "pending") {
+        dep.status = "approved";
+        dep.gatewayTxnId = String(trackId || "");
+
+        const dbUser = db.users.find((u: any) => u.id === dep.userId);
+        if (dbUser) {
+          dbUser.advertiserBalance = Number(((dbUser.advertiserBalance || 0) + dep.amount).toFixed(6));
+        }
+        saveDb(db);
+      }
+    }
+    res.json({ result: 100 });
+  });
+
+  // Admin deposits list and approval endpoint
+  app.get("/api/admin/deposits", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user || user.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+    const db = loadDb();
+    const sortedDeps = (db.depositRequests || []).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json({ deposits: sortedDeps });
+  });
+
+  app.post("/api/admin/deposits/:id/status", (req, res) => {
+    const user = getAuthUser(req);
+    if (!user || user.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+
+    const { id } = req.params;
+    const { status, adminNote } = req.body;
+
+    if (!["approved", "rejected"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status parameter" });
+    }
+
+    const db = loadDb();
+    const dep = (db.depositRequests || []).find((d: any) => d.id === id);
+    if (!dep) return res.status(404).json({ error: "Deposit request not found" });
+
+    if (dep.status === "pending" && status === "approved") {
+      dep.status = "approved";
+      dep.adminNote = adminNote || "";
+
+      const dbUser = db.users.find((u: any) => u.id === dep.userId);
+      if (dbUser) {
+        dbUser.advertiserBalance = Number(((dbUser.advertiserBalance || 0) + dep.amount).toFixed(6));
+      }
+
+      sendSmtpEmail({
+        to: dep.userEmail,
+        subject: `[${db.settings?.siteName || "TG Links"}] Deposit Request Approved! ($${dep.amount.toFixed(2)})`,
+        text: `Your deposit of $${dep.amount.toFixed(2)} (${dep.method.toUpperCase()}) has been approved and credited to your Advertiser Balance!`,
+        html: `<div style="font-family: system-ui, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: #16a34a; margin-top: 0;">✅ Deposit Approved!</h2>
+          <p>Your deposit of <strong>$${dep.amount.toFixed(2)}</strong> via <strong>${dep.method.toUpperCase()}</strong> has been verified and approved.</p>
+          <p>Your advertiser balance is now credited with <strong>+$${dep.amount.toFixed(2)}</strong> and ready to create ad campaigns!</p>
+        </div>`
+      }).catch(e => console.error("Deposit approval email err:", e));
+    } else if (dep.status === "pending" && status === "rejected") {
+      dep.status = "rejected";
+      dep.adminNote = adminNote || "";
+
+      sendSmtpEmail({
+        to: dep.userEmail,
+        subject: `[${db.settings?.siteName || "TG Links"}] Deposit Request Update`,
+        text: `Your deposit request of $${dep.amount.toFixed(2)} (${dep.method.toUpperCase()}) was rejected. Note: ${adminNote || "Verification failed."}`,
+        html: `<div style="font-family: system-ui, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: #dc2626; margin-top: 0;">❌ Deposit Request Rejected</h2>
+          <p>Your deposit request of <strong>$${dep.amount.toFixed(2)}</strong> via <strong>${dep.method.toUpperCase()}</strong> was rejected.</p>
+          <p><strong>Admin Note:</strong> ${adminNote || "Verification failed. Please contact support if you need assistance."}</p>
+        </div>`
+      }).catch(e => console.error("Deposit rejection email err:", e));
+    }
+
+    saveDb(db);
+    res.json({ success: true, deposit: dep });
+  });
+
+  // Track impression for advertiser campaign
+  app.post("/api/advertiser/impression", (req, res) => {
+    const { campaignId } = req.body;
+    if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
+
+    const db = loadDb();
+    const campaign = (db.advertiserCampaigns || []).find((c: any) => c.id === campaignId);
+
+    if (campaign && campaign.status === "active") {
+      const costPerView = Number((campaign.cpm / 1000).toFixed(6));
+      campaign.impressions = (campaign.impressions || 0) + 1;
+      campaign.spent = Number((Math.min(campaign.totalBudget, (campaign.spent || 0) + costPerView)).toFixed(6));
+
+      if (campaign.spent >= campaign.totalBudget) {
+        campaign.status = "completed";
+      }
+
+      saveDb(db);
+      return res.json({ success: true, impressions: campaign.impressions, spent: campaign.spent, status: campaign.status });
+    }
+
+    res.json({ success: false });
+  });
+
+  // Guard middleware for Admin
+  const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const user = getAuthUser(req);
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ error: "Admin privilege required" });
+    }
+    next();
+  };
+
+  // Admin endpoints for Advertiser management
+  app.get("/api/admin/advertiser-campaigns", requireAdmin, (req, res) => {
+    const db = loadDb();
+    res.json({ campaigns: db.advertiserCampaigns || [] });
+  });
+
+  app.post("/api/admin/users/:id/advertiser-balance", requireAdmin, (req, res) => {
+    const { id } = req.params;
+    const { advertiserBalance } = req.body;
+
+    const db = loadDb();
+    const user = db.users.find((u: any) => u.id === id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.advertiserBalance = Number(cleanNumber(advertiserBalance, 0).toFixed(6));
+    saveDb(db);
+
+    const { password: _, ...safeUser } = user;
+    res.json({ success: true, user: safeUser });
   });
 
   // --- SYSTEM SETTINGS ---
@@ -1619,7 +2440,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
         sponsoredAd1Timer: db.settings.sponsoredAd1Timer ?? 12,
         enableSponsoredAd2: db.settings.enableSponsoredAd2 ?? true,
         sponsoredAd2Url: db.settings.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1",
-        sponsoredAd2Timer: db.settings.sponsoredAd2Timer ?? 12
+        sponsoredAd2Timer: db.settings.sponsoredAd2Timer ?? 12,
+        activeAdvertiserAds: getActiveAdvertiserAds(db)
       }
     });
   });
@@ -1670,7 +2492,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const user = link.userId !== "guest" ? db.users.find((u: any) => u.id === link.userId) : null;
     const protocol = getRequestProtocol(req);
     const host = getRequestHost(req);
-    const finalLandingUrl = `${protocol}://${host}/go-final/${link.code}`;
+    const vtok = createVerificationToken(link.code, String(ip));
+    const finalLandingUrl = `${protocol}://${host}/go-final/${link.code}?vtok=${vtok}`;
 
     // Dynamically retrieve or re-evaluate the external shortened URL
     let adFlyShortenedUrl = link.adFlyShortenedUrl;
@@ -1766,6 +2589,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
   // --- EXTERNAL SHORTENER CALLBACK AND LANDING ENDPOINT ---
   app.get("/go-final/:code", async (req, res) => {
     const { code } = req.params;
+    const vtok = req.query.vtok as string;
     let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
     if (typeof ip === "string" && ip.includes(",")) {
       ip = ip.split(",")[0].trim();
@@ -1783,6 +2607,57 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     if (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now()) {
       return res.status(410).send("This shortened link has expired and is no longer active.");
+    }
+
+    let targetUrl = link.originalUrl;
+    if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+      targetUrl = "https://" + targetUrl;
+    }
+
+    // Verify token to strictly ensure view is recorded ONLY if complete shortener sequence was traversed
+    const isTokenValid = verifyAndConsumeToken(vtok, code);
+
+    if (!isTokenValid) {
+      // Unverified or direct access -> Do NOT count view, do NOT add earnings
+      res.setHeader("Referrer-Policy", "no-referrer");
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="referrer" content="no-referrer">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Redirecting to Destination...</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { background-color: #020617; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+            .card { background: #0f172a; border: 1px solid #1e293b; padding: 40px; border-radius: 24px; max-width: 480px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
+            .icon-wrap { width: 72px; height: 72px; margin: 0 auto 20px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: bold; }
+            h2 { color: #f8fafc; font-size: 22px; font-weight: 800; margin: 0 0 10px; }
+            p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin: 0 0 24px; }
+            .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 15px 24px; background: #6366f1; color: white; border-radius: 14px; text-decoration: none; font-weight: bold; font-size: 15px; transition: all 0.2s; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4); }
+            .btn:hover { background-color: #4f46e5; transform: translateY(-1px); }
+            .badge { display: inline-block; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: #fcd34d; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
+          </style>
+          <script>
+            setTimeout(function() {
+              window.location.replace("${targetUrl.replace(/"/g, '&quot;').trim()}");
+            }, 2000);
+          </script>
+        </head>
+        <body>
+          <div class="card">
+            <div class="badge">Direct Access / Unverified</div>
+            <div class="icon-wrap">i</div>
+            <h2>Redirecting to Destination</h2>
+            <p>Views and earnings are only recorded when completing the full shortener link sequence. Redirecting in 2 seconds...</p>
+            <a href="${targetUrl.replace(/"/g, '&quot;')}" rel="noreferrer" class="btn">
+              Continue to Destination →
+            </a>
+          </div>
+        </body>
+        </html>
+      `);
     }
 
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
@@ -1870,8 +2745,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     saveDb(db);
 
-    // Ensure URL has protocol
-    let targetUrl = link.originalUrl;
+    // Re-verify URL has protocol
+    targetUrl = link.originalUrl;
     if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
       targetUrl = "https://" + targetUrl;
     }
@@ -2128,6 +3003,43 @@ Sitemap: ${baseUrl}/sitemap.xml`
     db.withdrawals.push(newWithdrawal);
     saveDb(db);
 
+    // 1. Send confirmation email to user
+    sendSmtpEmail({
+      to: user.email,
+      subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Request Received ($${reqAmount.toFixed(2)})`,
+      text: `Hello,\n\nWe have received your withdrawal request:\n\nAmount: $${reqAmount.toFixed(2)}\nMethod: ${method}\nAccount: ${account}\nStatus: Pending Review\nDate: ${newWithdrawal.createdAt}\n\nOur team will review and process your payment shortly.`,
+      html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #4f46e5; margin-top: 0;">💸 Withdrawal Request Received</h2>
+        <p>Your withdrawal request has been logged and is under review:</p>
+        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+          <p style="margin: 4px 0;"><strong>Amount:</strong> $${reqAmount.toFixed(2)}</p>
+          <p style="margin: 4px 0;"><strong>Method:</strong> ${method}</p>
+          <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${account}</p>
+          <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #d97706; font-weight: bold;">Pending Review</span></p>
+        </div>
+        <p style="font-size: 12px; color: #64748b;">You will receive an email update once your withdrawal is approved and processed.</p>
+      </div>`
+    }).catch((e: any) => console.error("[SMTP Error] User withdrawal email:", e));
+
+    // 2. Send alert email to Admin
+    const adminEmail = db.settings?.backupReceiverEmail || db.settings?.smtpUser || ADMIN_EMAILS[0];
+    sendSmtpEmail({
+      to: adminEmail,
+      subject: `[${db.settings?.siteName || "TG Links"} Admin Alert] New Withdrawal Request ($${reqAmount.toFixed(2)})`,
+      text: `A new withdrawal request was submitted:\n\nUser: ${user.email}\nAmount: $${reqAmount.toFixed(2)}\nMethod: ${method}\nAccount: ${account}`,
+      html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #0284c7; margin-top: 0;">🔔 New Withdrawal Request Alert</h2>
+        <p>A publisher has requested a payout on <strong>${db.settings?.siteName || "TG Links"}</strong>:</p>
+        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+          <p style="margin: 4px 0;"><strong>User Email:</strong> ${user.email}</p>
+          <p style="margin: 4px 0;"><strong>Amount:</strong> $${reqAmount.toFixed(2)}</p>
+          <p style="margin: 4px 0;"><strong>Method:</strong> ${method}</p>
+          <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${account}</p>
+        </div>
+        <p style="font-size: 12px; color: #64748b;">Log in to your Admin Dashboard to approve or reject this request.</p>
+      </div>`
+    }).catch((e: any) => console.error("[SMTP Error] Admin withdrawal alert email:", e));
+
     res.json({ success: true, withdrawal: newWithdrawal, balance: user.balance });
   });
 
@@ -2145,8 +3057,61 @@ Sitemap: ${baseUrl}/sitemap.xml`
     user.withdrawalAccount = account;
     saveDb(db);
 
+    // Send email notification for withdrawal settings update
+    sendSmtpEmail({
+      to: user.email,
+      subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Settings Updated`,
+      text: `Hello,\n\nYour withdrawal settings on ${db.settings?.siteName || "TG Links"} have been updated:\n\nMethod: ${method}\nAccount: ${account}\n\nIf you did not make this change, please update your password and contact support immediately.`,
+      html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #4f46e5; margin-top: 0;">⚙️ Withdrawal Settings Updated</h2>
+        <p>Your default withdrawal method and account details have been updated:</p>
+        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+          <p style="margin: 4px 0;"><strong>New Method:</strong> ${method}</p>
+          <p style="margin: 4px 0;"><strong>New Account:</strong> ${account}</p>
+        </div>
+        <p style="font-size: 12px; color: #dc2626;">If you did not authorize this update, please change your password and contact support immediately.</p>
+      </div>`
+    }).catch((e: any) => console.error("[SMTP Error] Withdrawal settings email:", e));
+
     const { password: _, ...userSafe } = user;
     res.json({ success: true, user: userSafe });
+  });
+
+  app.post("/api/users/change-password", (req, res) => {
+    const { userId, oldPassword, newPassword } = req.body;
+    if (!userId || !oldPassword || !newPassword) {
+      return res.status(400).json({ error: "Current password and new password are required" });
+    }
+
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    }
+
+    const db = loadDb();
+    const user = db.users.find((u: any) => u.id === userId && !u.banned);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (user.password !== oldPassword) {
+      return res.status(400).json({ error: "Current password is incorrect" });
+    }
+
+    user.password = newPassword;
+    saveDb(db);
+
+    // Send security email
+    sendSmtpEmail({
+      to: user.email,
+      subject: `[${db.settings?.siteName || "TG Links"}] Security Notice: Password Changed`,
+      text: `Hello,\n\nYour account password on ${db.settings?.siteName || "TG Links"} was recently changed.\n\nIf you performed this action, no further steps are required.\nIf you did NOT change your password, please contact support immediately.`,
+      html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #4f46e5; margin-top: 0;">🔒 Security Alert: Password Changed</h2>
+        <p>The password for your account (<strong>${user.email}</strong>) was successfully changed.</p>
+        <p style="font-size: 13px; color: #dc2626;">If you did not perform this change, please contact support immediately.</p>
+      </div>`
+    }).catch((e: any) => console.error("[SMTP Error] Password change email:", e));
+
+    const { password: _, ...userSafe } = user;
+    res.json({ success: true, message: "Password updated successfully!", user: userSafe });
   });
 
   app.post("/api/users/faucet-settings", (req, res) => {
@@ -2246,15 +3211,6 @@ ${ticket.message}
   });
 
   // --- ADMIN PANEL SECURE ROUTES ---
-  
-  // Guard middleware for Admin
-  const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const user = getAuthUser(req);
-    if (!user || user.role !== "admin") {
-      return res.status(403).json({ error: "Admin privilege required" });
-    }
-    next();
-  };
 
   app.get("/api/admin/stats", requireAdmin, (req, res) => {
     const db = loadDb();
@@ -2779,6 +3735,28 @@ ${ticket.adminReply}
     }
 
     saveDb(db);
+
+    // Send status update email to user
+    if (withdrawal.userEmail) {
+      const isApproved = status === "approved";
+      sendSmtpEmail({
+        to: withdrawal.userEmail,
+        subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Request ${isApproved ? "Approved" : "Updated"} ($${withdrawal.amount.toFixed(2)})`,
+        text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via ${withdrawal.method} (${withdrawal.account}) has been ${isApproved ? "APPROVED and processed" : "REJECTED"}.\n\n${isApproved ? "Funds have been sent to your account." : "The requested amount has been restored to your publisher balance."}\n\nThank you for using ${db.settings?.siteName || "TG Links"}!`,
+        html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: ${isApproved ? '#16a34a' : '#dc2626'}; margin-top: 0;">${isApproved ? '✅ Withdrawal Approved!' : '❌ Withdrawal Request Updated'}</h2>
+          <p>Your withdrawal request on <strong>${db.settings?.siteName || "TG Links"}</strong> has been ${isApproved ? 'approved and completed' : 'rejected'}:</p>
+          <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+            <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
+            <p style="margin: 4px 0;"><strong>Method:</strong> ${withdrawal.method}</p>
+            <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${withdrawal.account}</p>
+            <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: ${isApproved ? '#16a34a' : '#dc2626'}; font-weight: bold;">${isApproved ? 'APPROVED & PAID' : 'REJECTED & REFUNDED'}</span></p>
+          </div>
+          <p style="font-size: 13px; color: #334155;">${isApproved ? 'Your payment has been successfully processed.' : 'The requested funds have been restored to your publisher balance.'}</p>
+        </div>`
+      }).catch((e: any) => console.error("[SMTP Error] Withdrawal status update email:", e));
+    }
+
     res.json({ success: true, withdrawal });
   });
 
@@ -2798,6 +3776,7 @@ ${ticket.adminReply}
   app.get("/api/settings", (req, res) => {
     const db = loadDb();
     const s = db.settings || {};
+    const activeAds = getActiveAdvertiserAds(db);
     res.json({
       siteName: s.siteName || "TG LINKS",
       siteTitle: s.siteTitle || "Shorten Links and Earn Money",
@@ -2816,7 +3795,17 @@ ${ticket.adminReply}
       enableOwnAds: s.enableOwnAds !== undefined ? s.enableOwnAds : true,
       enableNeonAdGate: s.enableNeonAdGate !== undefined ? s.enableNeonAdGate : false,
       neonTodayAdCode: s.neonTodayAdCode || "",
-      enableFaucetMode: s.enableFaucetMode !== undefined ? s.enableFaucetMode : false
+      enableFaucetMode: s.enableFaucetMode !== undefined ? s.enableFaucetMode : false,
+      advCpmOfferWall: s.advCpmOfferWall ?? 3.0,
+      advCpmSponsoredPopup: s.advCpmSponsoredPopup ?? 4.0,
+      advCpmBanner728x90: s.advCpmBanner728x90 ?? 1.5,
+      advCpmBanner468x60: s.advCpmBanner468x60 ?? 1.2,
+      advCpmBanner300x250: s.advCpmBanner300x250 ?? 2.0,
+      advCpmBanner320x50: s.advCpmBanner320x50 ?? 1.0,
+      advCpmBanner300x600: s.advCpmBanner300x600 ?? 2.5,
+      advCpmBannerLeft: s.advCpmBannerLeft ?? 1.5,
+      advCpmBannerRight: s.advCpmBannerRight ?? 1.5,
+      activeAdvertiserAds: activeAds
     });
   });
 
