@@ -2750,22 +2750,23 @@ if( $result ) {
 
         {/* CREATE CAMPAIGN MODAL */}
             {showCreateCampaignModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto">
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-sm">
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 md:p-8 relative my-8"
+                  className="w-full max-w-2xl max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl relative flex flex-col my-auto"
                 >
-                  <button
-                    onClick={() => setShowCreateCampaignModal(false)}
-                    className="absolute top-4 right-4 p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  {/* Modal Header (Pinned) */}
+                  <div className="p-5 md:p-6 pb-4 border-b border-slate-800/80 shrink-0 relative">
+                    <button
+                      onClick={() => setShowCreateCampaignModal(false)}
+                      className="absolute top-4 right-4 p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition cursor-pointer z-10"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
 
-                  <div className="mb-6">
-                    <h3 className="text-xl font-black text-white flex items-center gap-2">
-                      <Target className="w-5 h-5 text-amber-400" />
+                    <h3 className="text-lg md:text-xl font-black text-white flex items-center gap-2 pr-8">
+                      <Target className="w-5 h-5 text-amber-400 shrink-0" />
                       Create New Advertiser Campaign
                     </h3>
                     <p className="text-xs text-slate-400 mt-1">
@@ -2773,250 +2774,255 @@ if( $result ) {
                     </p>
                   </div>
 
-                  {createCampaignError && (
-                    <div className="mb-4 p-3 bg-rose-950/40 border border-rose-900/50 rounded-xl text-rose-400 text-xs font-semibold">
-                      ⚠️ {createCampaignError}
-                    </div>
-                  )}
-
-                  <form onSubmit={handleCreateCampaign} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Campaign Title</label>
-                        <input
-                          required
-                          type="text"
-                          placeholder="e.g. My Crypto App Launch"
-                          value={campaignTitle}
-                          onChange={(e) => setCampaignTitle(e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
-                        />
+                  {/* Scrollable Modal Body */}
+                  <div className="p-5 md:p-6 overflow-y-auto flex-1 space-y-4">
+                    {createCampaignError && (
+                      <div className="p-3 bg-rose-950/40 border border-rose-900/50 rounded-xl text-rose-400 text-xs font-semibold">
+                        ⚠️ {createCampaignError}
                       </div>
+                    )}
 
-                      <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Ad Format Type</label>
-                        <select
-                          value={campaignType}
-                          onChange={(e: any) => setCampaignType(e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
-                        >
-                          <option value="offerwall">Direct Link Offer Wall Task (CPM: ${getCpmForType("offerwall").toFixed(2)})</option>
-                          <option value="sponsored_popup">Sponsored Premium Popup Network (CPM: ${getCpmForType("sponsored_popup").toFixed(2)})</option>
-                          <option value="banner_728x90">Banner 728x90 Leaderboard (CPM: ${getCpmForType("banner_728x90").toFixed(2)})</option>
-                          <option value="banner_300x250">Banner 300x250 Medium Rectangle (CPM: ${getCpmForType("banner_300x250").toFixed(2)})</option>
-                          <option value="banner_468x60">Banner 468x60 Banner (CPM: ${getCpmForType("banner_468x60").toFixed(2)})</option>
-                          <option value="banner_320x50">Banner 320x50 Mobile Banner (CPM: ${getCpmForType("banner_320x50").toFixed(2)})</option>
-                          <option value="banner_300x600">Banner 300x600 Skyscraper (CPM: ${getCpmForType("banner_300x600").toFixed(2)})</option>
-                          <option value="banner_left">Banner Left Slot (CPM: ${getCpmForType("banner_left").toFixed(2)})</option>
-                          <option value="banner_right">Banner Right Slot (CPM: ${getCpmForType("banner_right").toFixed(2)})</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Destination Link / Target URL</label>
-                      <input
-                        required
-                        type="url"
-                        placeholder="https://yourwebsite.com/landing-page"
-                        value={campaignTargetUrl}
-                        onChange={(e) => setCampaignTargetUrl(e.target.value)}
-                        className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
-                      />
-                    </div>
-
-                    {campaignType.startsWith("banner_") && (
+                    <form id="createCampaignForm" onSubmit={handleCreateCampaign} className="space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Banner Image URL (Optional)</label>
+                          <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Campaign Title</label>
                           <input
-                            type="url"
-                            placeholder="https://yourwebsite.com/banner.png"
-                            value={campaignBannerImageUrl}
-                            onChange={(e) => setCampaignBannerImageUrl(e.target.value)}
+                            required
+                            type="text"
+                            placeholder="e.g. My Crypto App Launch"
+                            value={campaignTitle}
+                            onChange={(e) => setCampaignTitle(e.target.value)}
                             className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Custom Ad HTML / Script Code (Optional)</label>
-                          <input
-                            type="text"
-                            placeholder="<a href='...'><img src='...'/></a>"
-                            value={campaignAdCode}
-                            onChange={(e) => setCampaignAdCode(e.target.value)}
-                            className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm font-mono text-white focus:border-amber-500 outline-none"
-                          />
+                          <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Ad Format Type</label>
+                          <select
+                            value={campaignType}
+                            onChange={(e: any) => setCampaignType(e.target.value)}
+                            className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                          >
+                            <option value="offerwall">Direct Link Offer Wall Task (CPM: ${getCpmForType("offerwall").toFixed(2)})</option>
+                            <option value="sponsored_popup">Sponsored Premium Popup Network (CPM: ${getCpmForType("sponsored_popup").toFixed(2)})</option>
+                            <option value="banner_728x90">Banner 728x90 Leaderboard (CPM: ${getCpmForType("banner_728x90").toFixed(2)})</option>
+                            <option value="banner_300x250">Banner 300x250 Medium Rectangle (CPM: ${getCpmForType("banner_300x250").toFixed(2)})</option>
+                            <option value="banner_468x60">Banner 468x60 Banner (CPM: ${getCpmForType("banner_468x60").toFixed(2)})</option>
+                            <option value="banner_320x50">Banner 320x50 Mobile Banner (CPM: ${getCpmForType("banner_320x50").toFixed(2)})</option>
+                            <option value="banner_300x600">Banner 300x600 Skyscraper (CPM: ${getCpmForType("banner_300x600").toFixed(2)})</option>
+                            <option value="banner_left">Banner Left Slot (CPM: ${getCpmForType("banner_left").toFixed(2)})</option>
+                            <option value="banner_right">Banner Right Slot (CPM: ${getCpmForType("banner_right").toFixed(2)})</option>
+                          </select>
                         </div>
                       </div>
-                    )}
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Target View Count (Minimum 100 views)</label>
-                      <input
-                        required
-                        type="number"
-                        min="100"
-                        step="100"
-                        placeholder="1000"
-                        value={campaignTargetViews}
-                        onChange={(e) => setCampaignTargetViews(e.target.value)}
-                        className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
-                      />
-                    </div>
-
-                    {/* LIVE AD PREVIEW BOX */}
-                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                        <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <Eye className="w-3.5 h-3.5" /> Live Ad Unit Preview ({campaignType})
-                        </span>
-                        <span className="text-[10px] text-slate-500">How it appears to website visitors</span>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Destination Link / Target URL</label>
+                        <input
+                          required
+                          type="url"
+                          placeholder="https://yourwebsite.com/landing-page"
+                          value={campaignTargetUrl}
+                          onChange={(e) => setCampaignTargetUrl(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                        />
                       </div>
 
-                      <div className="pt-2 flex justify-center items-center overflow-x-auto min-h-[100px] bg-slate-900/60 rounded-lg p-3 border border-slate-800/60">
-                        {campaignType === "offerwall" && (
-                          <div className="w-full max-w-md p-4 bg-gradient-to-r from-amber-500/10 to-indigo-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 shadow-lg">
-                            <div>
-                              <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider">Sponsored Task</span>
-                              <h5 className="font-bold text-white text-sm mt-0.5">{campaignTitle || "Your Campaign Title"}</h5>
-                              <p className="text-[11px] text-slate-400 mt-0.5">Complete task to get redirect link</p>
-                            </div>
-                            <button type="button" className="px-4 py-2 bg-amber-500 text-slate-950 font-black text-xs rounded-lg shrink-0 shadow">
-                              Complete Task
-                            </button>
+                      {campaignType.startsWith("banner_") && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Banner Image URL (Optional)</label>
+                            <input
+                              type="url"
+                              placeholder="https://yourwebsite.com/banner.png"
+                              value={campaignBannerImageUrl}
+                              onChange={(e) => setCampaignBannerImageUrl(e.target.value)}
+                              className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                            />
                           </div>
-                        )}
 
-                        {campaignType === "sponsored_popup" && (
-                          <div className="w-full max-w-sm p-4 bg-slate-900 border border-indigo-500/40 rounded-xl shadow-2xl space-y-3">
-                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                              <span className="text-xs font-bold text-indigo-400 uppercase">Sponsored Popup Ad</span>
-                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 text-[10px] font-bold rounded">Wait 12s</span>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Custom Ad HTML / Script Code (Optional)</label>
+                            <input
+                              type="text"
+                              placeholder="<a href='...'><img src='...'/></a>"
+                              value={campaignAdCode}
+                              onChange={(e) => setCampaignAdCode(e.target.value)}
+                              className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm font-mono text-white focus:border-amber-500 outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Target View Count (Minimum 100 views)</label>
+                        <input
+                          required
+                          type="number"
+                          min="100"
+                          step="100"
+                          placeholder="1000"
+                          value={campaignTargetViews}
+                          onChange={(e) => setCampaignTargetViews(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:border-amber-500 outline-none"
+                        />
+                      </div>
+
+                      {/* LIVE AD PREVIEW BOX */}
+                      <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                          <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <Eye className="w-3.5 h-3.5" /> Live Ad Unit Preview ({campaignType})
+                          </span>
+                          <span className="text-[10px] text-slate-500">How it appears to website visitors</span>
+                        </div>
+
+                        <div className="pt-2 flex justify-center items-center overflow-x-auto min-h-[100px] bg-slate-900/60 rounded-lg p-3 border border-slate-800/60">
+                          {campaignType === "offerwall" && (
+                            <div className="w-full max-w-md p-4 bg-gradient-to-r from-amber-500/10 to-indigo-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 shadow-lg">
+                              <div>
+                                <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider">Sponsored Task</span>
+                                <h5 className="font-bold text-white text-sm mt-0.5">{campaignTitle || "Your Campaign Title"}</h5>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Complete task to get redirect link</p>
+                              </div>
+                              <button type="button" className="px-4 py-2 bg-amber-500 text-slate-950 font-black text-xs rounded-lg shrink-0 shadow">
+                                Complete Task
+                              </button>
                             </div>
-                            <h5 className="font-bold text-white text-sm">{campaignTitle || "Sponsored Partner Advert"}</h5>
-                            <div className="h-28 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center text-xs text-slate-500 font-mono overflow-hidden">
+                          )}
+
+                          {campaignType === "sponsored_popup" && (
+                            <div className="w-full max-w-sm p-4 bg-slate-900 border border-indigo-500/40 rounded-xl shadow-2xl space-y-3">
+                              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                                <span className="text-xs font-bold text-indigo-400 uppercase">Sponsored Popup Ad</span>
+                                <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 text-[10px] font-bold rounded">Wait 12s</span>
+                              </div>
+                              <h5 className="font-bold text-white text-sm">{campaignTitle || "Sponsored Partner Advert"}</h5>
+                              <div className="h-28 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center text-xs text-slate-500 font-mono overflow-hidden">
+                                {campaignBannerImageUrl ? (
+                                  <img src={campaignBannerImageUrl} alt="Preview" className="max-h-full object-contain" />
+                                ) : (
+                                  <span>Target: {campaignTargetUrl || "https://yourwebsite.com"}</span>
+                                )}
+                              </div>
+                              <button type="button" className="w-full py-2 bg-indigo-600 text-white font-bold text-xs rounded-lg">
+                                Visit Sponsored Advert
+                              </button>
+                            </div>
+                          )}
+
+                          {campaignType === "banner_728x90" && (
+                            <div className="w-[728px] max-w-full h-[90px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden relative">
                               {campaignBannerImageUrl ? (
-                                <img src={campaignBannerImageUrl} alt="Preview" className="max-h-full object-contain" />
+                                <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-cover" />
+                              ) : campaignAdCode ? (
+                                <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
                               ) : (
-                                <span>Target: {campaignTargetUrl || "https://yourwebsite.com"}</span>
+                                <div className="text-center px-4">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500 block">728x90 Leaderboard Ad</span>
+                                  <span className="text-xs font-bold text-amber-300">{campaignTitle || "Your Ad Banner Title"}</span>
+                                </div>
                               )}
                             </div>
-                            <button type="button" className="w-full py-2 bg-indigo-600 text-white font-bold text-xs rounded-lg">
-                              Visit Sponsored Advert
-                            </button>
-                          </div>
-                        )}
+                          )}
 
-                        {campaignType === "banner_728x90" && (
-                          <div className="w-[728px] max-w-full h-[90px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden relative">
-                            {campaignBannerImageUrl ? (
-                              <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-cover" />
-                            ) : campaignAdCode ? (
-                              <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
-                            ) : (
-                              <div className="text-center px-4">
-                                <span className="text-[10px] uppercase font-bold text-slate-500 block">728x90 Leaderboard Ad</span>
-                                <span className="text-xs font-bold text-amber-300">{campaignTitle || "Your Ad Banner Title"}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                          {campaignType === "banner_300x250" && (
+                            <div className="w-[300px] h-[250px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden relative p-2">
+                              {campaignBannerImageUrl ? (
+                                <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-contain" />
+                              ) : campaignAdCode ? (
+                                <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                              ) : (
+                                <div className="text-center">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500 block">300x250 Medium Rectangle</span>
+                                  <span className="text-sm font-bold text-amber-300 block mt-1">{campaignTitle || "Your Ad Banner"}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
-                        {campaignType === "banner_300x250" && (
-                          <div className="w-[300px] h-[250px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden relative p-2">
-                            {campaignBannerImageUrl ? (
-                              <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-contain" />
-                            ) : campaignAdCode ? (
-                              <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
-                            ) : (
-                              <div className="text-center">
-                                <span className="text-[10px] uppercase font-bold text-slate-500 block">300x250 Medium Rectangle</span>
-                                <span className="text-sm font-bold text-amber-300 block mt-1">{campaignTitle || "Your Ad Banner"}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                          {campaignType === "banner_320x50" && (
+                            <div className="w-[320px] h-[50px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden px-2">
+                              {campaignBannerImageUrl ? (
+                                <img src={campaignBannerImageUrl} alt="Mobile Banner" className="w-full h-full object-cover" />
+                              ) : campaignAdCode ? (
+                                <div className="p-1 text-[10px] font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                              ) : (
+                                <div className="text-center">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500 block">320x50 Mobile Banner</span>
+                                  <span className="text-xs font-bold text-amber-300">{campaignTitle || "Mobile Ad Banner"}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
-                        {campaignType === "banner_320x50" && (
-                          <div className="w-[320px] h-[50px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden px-2">
-                            {campaignBannerImageUrl ? (
-                              <img src={campaignBannerImageUrl} alt="Mobile Banner" className="w-full h-full object-cover" />
-                            ) : campaignAdCode ? (
-                              <div className="p-1 text-[10px] font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
-                            ) : (
-                              <div className="text-center">
-                                <span className="text-[10px] uppercase font-bold text-slate-500 block">320x50 Mobile Banner</span>
-                                <span className="text-xs font-bold text-amber-300">{campaignTitle || "Mobile Ad Banner"}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                          {campaignType === "banner_468x60" && (
+                            <div className="w-[468px] max-w-full h-[60px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden px-2">
+                              {campaignBannerImageUrl ? (
+                                <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-cover" />
+                              ) : campaignAdCode ? (
+                                <div className="p-1 text-[10px] font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                              ) : (
+                                <div className="text-center">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500 block">468x60 Standard Banner</span>
+                                  <span className="text-xs font-bold text-amber-300">{campaignTitle || "Standard Banner Ad"}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
-                        {campaignType === "banner_468x60" && (
-                          <div className="w-[468px] max-w-full h-[60px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden px-2">
-                            {campaignBannerImageUrl ? (
-                              <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-cover" />
-                            ) : campaignAdCode ? (
-                              <div className="p-1 text-[10px] font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
-                            ) : (
-                              <div className="text-center">
-                                <span className="text-[10px] uppercase font-bold text-slate-500 block">468x60 Standard Banner</span>
-                                <span className="text-xs font-bold text-amber-300">{campaignTitle || "Standard Banner Ad"}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {(campaignType === "banner_300x600" || campaignType === "banner_left" || campaignType === "banner_right") && (
-                          <div className="w-[300px] h-[250px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden p-2">
-                            {campaignBannerImageUrl ? (
-                              <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-contain" />
-                            ) : campaignAdCode ? (
-                              <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
-                            ) : (
-                              <div className="text-center">
-                                <span className="text-[10px] uppercase font-bold text-slate-500 block">{campaignType.replace('_', ' ').toUpperCase()}</span>
-                                <span className="text-sm font-bold text-amber-300 block mt-1">{campaignTitle || "Sidebar / Skyscraper Ad"}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* PRICE SUMMARY CARD */}
-                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
-                      <div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">CPM Rate & Cost Calculation</span>
-                        <p className="text-xs text-slate-300">
-                          <span className="font-bold text-amber-400">${getCpmForType(campaignType).toFixed(2)} CPM</span> × {Number(campaignTargetViews) || 0} Views
-                        </p>
+                          {(campaignType === "banner_300x600" || campaignType === "banner_left" || campaignType === "banner_right") && (
+                            <div className="w-[300px] h-[250px] bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-center overflow-hidden p-2">
+                              {campaignBannerImageUrl ? (
+                                <img src={campaignBannerImageUrl} alt="Banner" className="w-full h-full object-contain" />
+                              ) : campaignAdCode ? (
+                                <div className="p-2 text-xs font-mono text-emerald-400" dangerouslySetInnerHTML={{ __html: campaignAdCode }} />
+                              ) : (
+                                <div className="text-center">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{campaignType.replace('_', ' ').toUpperCase()}</span>
+                                  <span className="text-sm font-bold text-amber-300 block mt-1">{campaignTitle || "Sidebar / Skyscraper Ad"}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="text-right">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Total Campaign Budget</span>
-                        <span className="text-xl font-black text-amber-300">${calculatedCost().toFixed(2)} USD</span>
-                      </div>
-                    </div>
+                      {/* PRICE SUMMARY CARD */}
+                      <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">CPM Rate & Cost Calculation</span>
+                          <p className="text-xs text-slate-300">
+                            <span className="font-bold text-amber-400">${getCpmForType(campaignType).toFixed(2)} CPM</span> × {Number(campaignTargetViews) || 0} Views
+                          </p>
+                        </div>
 
-                    <div className="flex justify-end gap-3 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowCreateCampaignModal(false)}
-                        className="px-5 py-3 bg-slate-950 hover:bg-slate-800 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={createCampaignLoading || (currentUser.advertiserBalance || 0) < calculatedCost()}
-                        className="px-6 py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-600/20 flex items-center gap-2 cursor-pointer"
-                      >
-                        {createCampaignLoading ? "Launching..." : "Launch Ad Campaign"}
-                      </button>
-                    </div>
-                  </form>
+                        <div className="text-right">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Total Campaign Budget</span>
+                          <span className="text-xl font-black text-amber-300">${calculatedCost().toFixed(2)} USD</span>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Modal Footer (Pinned) */}
+                  <div className="p-4 md:px-6 bg-slate-950/60 border-t border-slate-800 rounded-b-2xl flex items-center justify-end gap-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateCampaignModal(false)}
+                      className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      form="createCampaignForm"
+                      disabled={createCampaignLoading || (currentUser.advertiserBalance || 0) < calculatedCost()}
+                      className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-amber-600/20 flex items-center gap-2 cursor-pointer"
+                    >
+                      {createCampaignLoading ? "Launching..." : "Launch Ad Campaign"}
+                    </button>
+                  </div>
                 </motion.div>
               </div>
             )}
@@ -3028,7 +3034,7 @@ if( $result ) {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-sm bg-slate-900 border border-slate-800/80 rounded-2xl shadow-2xl p-6 relative"
+            className="w-full max-w-sm max-h-[90vh] overflow-y-auto bg-slate-900 border border-slate-800/80 rounded-2xl shadow-2xl p-6 relative"
           >
             <button
               onClick={() => setQrModalOpen(false)}
