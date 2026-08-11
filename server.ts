@@ -236,7 +236,7 @@ async function getExternalShortenedUrl(
 
       try {
         const json = JSON.parse(text);
-        if (json) {
+        if (json && json.status !== "error") {
           if (json.status === "success" || json.shortenedUrl || json.url) {
             shortenedUrl = json.shortenedUrl || json.url || "";
           }
@@ -748,7 +748,7 @@ function loadDb() {
         name: "ShortXLinks",
         apiUrl: "https://shortxlinks.com/",
         apiToken: "b6ac099187a0572e9d24ce4a679e9eb10115b02d",
-        enabled: true,
+        enabled: false,
         priority: 6,
         isFaucetApi: false
       },
@@ -757,7 +757,7 @@ function loadDb() {
         name: "EasySky",
         apiUrl: "https://easysky.in/",
         apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
-        enabled: true,
+        enabled: false,
         priority: 5,
         isFaucetApi: false
       },
@@ -766,7 +766,7 @@ function loadDb() {
         name: "ShortXLinks-Faucet",
         apiUrl: "https://shortxlinks.com/",
         apiToken: "b6ac099187a0572e9d24ce4a679e9eb10115b02d",
-        enabled: true,
+        enabled: false,
         priority: 4,
         isFaucetApi: true
       },
@@ -775,7 +775,7 @@ function loadDb() {
         name: "EasySky-Faucet",
         apiUrl: "https://easysky.in/",
         apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
-        enabled: true,
+        enabled: false,
         priority: 3,
         isFaucetApi: true
       },
@@ -793,7 +793,7 @@ function loadDb() {
         name: "LinkNext",
         apiUrl: "https://linknext.io/",
         apiToken: "cbc6cb0ca4ebfc65f8bc87556094cf5e2fafeaee",
-        enabled: true,
+        enabled: false,
         priority: 1,
         isFaucetApi: true
       }
@@ -4291,7 +4291,9 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     apiUrl: a.apiUrl || a.api_url || a.url || "",
     apiToken: a.apiToken || a.api_token || a.token || "",
     alias: a.alias || a.code || "",
-    active: a.active !== undefined ? Boolean(a.active) : true
+    enabled: a.enabled !== undefined ? Boolean(a.enabled) : (a.active !== undefined ? Boolean(a.active) : false),
+    priority: Number(a.priority || 0),
+    isFaucetApi: Boolean(a.isFaucetApi ?? a.is_faucet_api ?? false)
   })).filter(Boolean);
 
   // 10. Normalize SETTINGS
