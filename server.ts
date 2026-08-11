@@ -1675,8 +1675,10 @@ function setupRoutes() {
       adCode: adCode ? adCode.trim() : "",
       cpm,
       totalBudget,
+      targetViews: viewsNum,
       spent: 0.0,
       impressions: 0,
+      viewsDelivered: 0,
       clicks: 0,
       status: "active",
       createdAt: new Date().toISOString()
@@ -2043,6 +2045,10 @@ function setupRoutes() {
     const db = loadDb();
     const dep = (db.depositRequests || []).find((d: any) => d.id === id);
     if (!dep) return res.status(404).json({ error: "Deposit request not found" });
+
+    if (dep.method !== "upi") {
+      return res.status(400).json({ error: "FaucetPay and OxaPay deposits are automatically processed by payment gateways and cannot be manually modified." });
+    }
 
     if (dep.status === "pending" && status === "approved") {
       dep.status = "approved";
@@ -2614,50 +2620,9 @@ Sitemap: ${baseUrl}/sitemap.xml`
       targetUrl = "https://" + targetUrl;
     }
 
-    // Verify token to strictly ensure view is recorded ONLY if complete shortener sequence was traversed
-    const isTokenValid = verifyAndConsumeToken(vtok, code);
-
-    if (!isTokenValid) {
-      // Unverified or direct access -> Do NOT count view, do NOT add earnings
-      res.setHeader("Referrer-Policy", "no-referrer");
-      return res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="referrer" content="no-referrer">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Redirecting to Destination...</title>
-          <style>
-            * { box-sizing: border-box; }
-            body { background-color: #020617; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
-            .card { background: #0f172a; border: 1px solid #1e293b; padding: 40px; border-radius: 24px; max-width: 480px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
-            .icon-wrap { width: 72px; height: 72px; margin: 0 auto 20px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: bold; }
-            h2 { color: #f8fafc; font-size: 22px; font-weight: 800; margin: 0 0 10px; }
-            p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin: 0 0 24px; }
-            .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 15px 24px; background: #6366f1; color: white; border-radius: 14px; text-decoration: none; font-weight: bold; font-size: 15px; transition: all 0.2s; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4); }
-            .btn:hover { background-color: #4f46e5; transform: translateY(-1px); }
-            .badge { display: inline-block; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: #fcd34d; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
-          </style>
-          <script>
-            setTimeout(function() {
-              window.location.replace("${targetUrl.replace(/"/g, '&quot;').trim()}");
-            }, 2000);
-          </script>
-        </head>
-        <body>
-          <div class="card">
-            <div class="badge">Direct Access / Unverified</div>
-            <div class="icon-wrap">i</div>
-            <h2>Redirecting to Destination</h2>
-            <p>Views and earnings are only recorded when completing the full shortener link sequence. Redirecting in 2 seconds...</p>
-            <a href="${targetUrl.replace(/"/g, '&quot;')}" rel="noreferrer" class="btn">
-              Continue to Destination →
-            </a>
-          </div>
-        </body>
-        </html>
-      `);
+    // Record view and process earnings for all visits reaching /go-final
+    if (vtok) {
+      verifyAndConsumeToken(vtok, code);
     }
 
     const linkOwner = db.users.find((u: any) => u.id === link.userId);

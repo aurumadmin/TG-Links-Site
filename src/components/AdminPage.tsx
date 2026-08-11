@@ -1827,23 +1827,29 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                             )}
                           </td>
                           <td className="p-3.5 text-right">
-                            {dep.status === "pending" ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => handleUpdateDepositStatus(dep.id, "approved")}
-                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Check className="w-3 h-3" /> Approve
-                                </button>
-                                <button
-                                  onClick={() => handleUpdateDepositStatus(dep.id, "rejected")}
-                                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
-                                >
-                                  <X className="w-3 h-3" /> Reject
-                                </button>
-                              </div>
+                            {dep.method === "upi" ? (
+                              dep.status === "pending" ? (
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => handleUpdateDepositStatus(dep.id, "approved")}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Check className="w-3 h-3" /> Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateDepositStatus(dep.id, "rejected")}
+                                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <X className="w-3 h-3" /> Reject
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 text-xs font-medium">Processed</span>
+                              )
                             ) : (
-                              <span className="text-slate-500 text-xs font-medium">Completed</span>
+                              <span className="inline-flex px-2.5 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-[10px] font-bold uppercase rounded-lg">
+                                ⚡ Automatic Gateway
+                              </span>
                             )}
                           </td>
                         </tr>

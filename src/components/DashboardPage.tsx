@@ -38,6 +38,7 @@ import {
   ArrowLeftRight,
   Play,
   Pause,
+  LifeBuoy,
   RefreshCw,
   Info,
   CheckCircle2
@@ -144,6 +145,19 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
         });
         if (res.error) {
           setDepositError(res.error);
+        } else if (res.checkoutUrl && res.params) {
+          const form = document.createElement("form");
+          form.method = "POST";
+          form.action = res.checkoutUrl;
+          Object.keys(res.params).forEach((key) => {
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = key;
+            input.value = String(res.params[key]);
+            form.appendChild(input);
+          });
+          document.body.appendChild(form);
+          form.submit();
         } else if (res.checkoutUrl) {
           window.location.href = res.checkoutUrl;
         }
@@ -2135,6 +2149,48 @@ if( $result ) {
         {/* TAB WORKSPACE: ADVERTISER PANEL */}
         {activeTab === "advertiser" && (
           <div className="space-y-8" id="advertiser_workspace">
+            {/* Advertiser Sub-Navigation Tabs */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-800">
+              <button
+                type="button"
+                onClick={() => setAdvertiserSection("campaigns")}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  advertiserSection === "campaigns"
+                    ? "bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-black"
+                    : "bg-slate-900 border border-slate-800 text-slate-400 hover:text-white"
+                }`}
+              >
+                <Megaphone className="w-4 h-4" />
+                <span>Ad Campaigns ({advertiserCampaigns.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdvertiserSection("deposit")}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  advertiserSection === "deposit"
+                    ? "bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-black"
+                    : "bg-slate-900 border border-slate-800 text-slate-400 hover:text-white"
+                }`}
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Deposit & Convert Balance</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdvertiserSection("support")}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  advertiserSection === "support"
+                    ? "bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-black"
+                    : "bg-slate-900 border border-slate-800 text-slate-400 hover:text-white"
+                }`}
+              >
+                <LifeBuoy className="w-4 h-4" />
+                <span>Advertiser Helpdesk</span>
+              </button>
+            </div>
+
             {/* Advertiser Header Banner */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 p-6 rounded-2xl border border-amber-500/20 shadow-lg">
               <div>
@@ -2595,7 +2651,9 @@ if( $result ) {
                       </thead>
                       <tbody className="divide-y divide-slate-800/60">
                         {advertiserCampaigns.map((c) => {
-                          const progress = Math.min(100, Math.round(((c.viewsDelivered || 0) / c.targetViews) * 100));
+                          const targetViewsNum = c.targetViews || (c.cpm > 0 ? Math.round((c.totalBudget / c.cpm) * 1000) : 1000);
+                          const viewsDeliveredNum = c.viewsDelivered ?? c.impressions ?? 0;
+                          const progress = Math.min(100, Math.round((viewsDeliveredNum / targetViewsNum) * 100));
                           return (
                             <tr key={c.id} className="hover:bg-slate-900/60 transition">
                               <td className="p-3.5 font-bold text-white">
@@ -2620,7 +2678,7 @@ if( $result ) {
                               <td className="p-3.5">
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-[10px] font-semibold text-slate-400">
-                                    <span>{c.viewsDelivered || 0} / {c.targetViews} views</span>
+                                    <span>{viewsDeliveredNum.toLocaleString()} / {targetViewsNum.toLocaleString()} views</span>
                                     <span>{progress}%</span>
                                   </div>
                                   <div className="w-32 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
@@ -2629,7 +2687,7 @@ if( $result ) {
                                 </div>
                               </td>
                               <td className="p-3.5 font-mono text-amber-300 font-bold">
-                                ${(c.spentBudget || 0).toFixed(2)} / ${c.totalBudget.toFixed(2)}
+                                ${(c.spent || 0).toFixed(2)} / ${c.totalBudget.toFixed(2)}
                               </td>
                               <td className="p-3.5">
                                 {c.status === "active" && (
