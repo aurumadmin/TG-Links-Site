@@ -133,6 +133,27 @@ const AdBlock = ({
           className={`overflow-hidden flex justify-center items-center rounded-2xl bg-slate-950/80 border border-amber-500/40 p-2 shadow-2xl ${sizeContainerStyle} ${className}`}
         />
       );
+    } else if (advertiserAd.targetUrl) {
+      return (
+        <div className={`overflow-hidden flex flex-col justify-center items-center rounded-2xl bg-gradient-to-br from-slate-950 via-amber-950/20 to-slate-950 border border-amber-500/40 p-4 shadow-2xl relative ${sizeContainerStyle} ${className}`}>
+          <a 
+            href={ensureAbsoluteUrl(advertiserAd.targetUrl)} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="group flex flex-col items-center justify-center space-y-2 text-center w-full"
+          >
+            <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black uppercase rounded-full">
+              SPONSORED AD
+            </span>
+            <span className="text-white font-bold text-sm group-hover:text-amber-300 transition-colors">
+              {advertiserAd.title}
+            </span>
+            <span className="text-xs text-amber-400 underline font-mono">
+              Visit Sponsor Link ➔
+            </span>
+          </a>
+        </div>
+      );
     }
   }
 
@@ -717,12 +738,26 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
   const handleViewOffer = (index: number) => {
     let rawUrl = "";
-    const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd;
-    const baseCount = settings?.offerWallCount || 4;
+    let campaignIdToTrack = "";
 
-    if (extraOffer && index === baseCount) {
-      rawUrl = extraOffer.targetUrl || "https://www.google.com";
-    } else {
+    const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
+    if (offerWallAds.length > 0) {
+      const advOffer = offerWallAds[index % offerWallAds.length];
+      if (advOffer && advOffer.targetUrl) {
+        rawUrl = advOffer.targetUrl;
+        campaignIdToTrack = advOffer.id;
+      }
+    }
+
+    if (!rawUrl) {
+      const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd;
+      if (extraOffer && extraOffer.targetUrl) {
+        rawUrl = extraOffer.targetUrl;
+        campaignIdToTrack = extraOffer.id;
+      }
+    }
+
+    if (!rawUrl) {
       const urls = [
         settings?.offerWallUrl1,
         settings?.offerWallUrl2,
@@ -736,6 +771,13 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     
     // Open ad URL in a new tab
     window.open(adUrl, "_blank");
+
+    if (campaignIdToTrack) {
+      fetchApi("/api/advertiser/impression", {
+        method: "POST",
+        body: JSON.stringify({ campaignId: campaignIdToTrack })
+      }).catch((err) => console.error("Failed to track advertiser impression", err));
+    }
 
     // Temporarily disable the immediate auto-pause on click focus event
     setJustClicked(true);
@@ -1107,6 +1149,9 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                       const isTicking = offerTimerActive && activeOfferIndex === idx;
                       const isPaused = offerClicked[idx] && !isCompleted && !isTicking && activeOfferIndex === idx && offerTimer > 0;
                       
+                      const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
+                      const advOffer = offerWallAds.length > 0 ? offerWallAds[idx % offerWallAds.length] : null;
+
                       return (
                         <div 
                            key={idx}
@@ -1125,6 +1170,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                               <span className={`text-sm font-black uppercase tracking-wider ${isCompleted ? "text-emerald-400" : isPaused ? "text-amber-400" : isCurrentActive ? "text-indigo-400" : "text-slate-500"}`}>
                                 Step {idx + 1}
                               </span>
+                              {advOffer && (
+                                <span className="bg-amber-500/15 text-amber-300 text-[9px] font-bold px-2 py-0.5 rounded border border-amber-500/30">
+                                  SPONSORED: {advOffer.title}
+                                </span>
+                              )}
                               {isCompleted && (
                                 <span className="bg-emerald-500/10 text-emerald-400 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
                                   COMPLETED
@@ -1148,7 +1198,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                                 </span>
                               ) : (
                                 <>
-                                  Please open the offer and wait <span className="font-bold text-white">{settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds} seconds</span> to unlock the next step.
+                                  Please open the offer {advOffer ? <strong className="text-amber-300">({advOffer.title})</strong> : ""} and wait <span className="font-bold text-white">{settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds} seconds</span> to unlock the next step.
                                 </>
                               )}
                             </p>

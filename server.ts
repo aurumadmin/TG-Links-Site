@@ -1520,6 +1520,11 @@ function setupRoutes() {
     }
 
     return {
+      offerWallAds: offerWallList.map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        targetUrl: c.targetUrl || ""
+      })),
       extraOfferWallAd: extraOfferWallAd ? {
         id: extraOfferWallAd.id,
         title: extraOfferWallAd.title,
@@ -1770,6 +1775,55 @@ function setupRoutes() {
 
     const updatedUser = db.users.find((u: any) => u.id === user.id);
     res.json({ success: true, advertiserBalance: updatedUser?.advertiserBalance || 0 });
+  });
+
+  // Record impression / view for advertiser campaign
+  app.post("/api/advertiser/impression", (req, res) => {
+    const { campaignId } = req.body;
+    if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
+
+    const db = loadDb();
+    if (!db.advertiserCampaigns) db.advertiserCampaigns = [];
+
+    const campaign = db.advertiserCampaigns.find((c: any) => c.id === campaignId);
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+
+    if (campaign.status !== "active") {
+      return res.json({ success: false, reason: "Campaign is not active" });
+    }
+
+    const currentSpent = Number(campaign.spent || 0);
+    const totalBudget = Number(campaign.totalBudget || 0);
+    if (currentSpent >= totalBudget) {
+      campaign.status = "completed";
+      saveDb(db);
+      return res.json({ success: false, reason: "Campaign budget exhausted" });
+    }
+
+    // Increment impressions & viewsDelivered
+    campaign.impressions = (campaign.impressions || 0) + 1;
+    campaign.viewsDelivered = (campaign.viewsDelivered || 0) + 1;
+
+    // Calculate cost per view
+    const targetViews = Number(campaign.targetViews || 1000);
+    const cpm = Number(campaign.cpm || 2.0);
+    const costPerView = totalBudget > 0 && targetViews > 0 ? (totalBudget / targetViews) : (cpm / 1000);
+
+    const newSpent = Number((currentSpent + costPerView).toFixed(6));
+    campaign.spent = newSpent;
+
+    if (newSpent >= totalBudget || campaign.viewsDelivered >= targetViews) {
+      campaign.status = "completed";
+    }
+
+    saveDb(db);
+    res.json({
+      success: true,
+      impressions: campaign.impressions,
+      viewsDelivered: campaign.viewsDelivered,
+      spent: campaign.spent,
+      status: campaign.status
+    });
   });
 
   // --- DEPOSIT & PAYMENT GATEWAY ENDPOINTS ---
