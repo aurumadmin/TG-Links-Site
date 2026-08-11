@@ -64,7 +64,7 @@ const AdBlock = ({
   useEffect(() => {
     if (advertiserAd?.id && !impressionTracked.current) {
       impressionTracked.current = true;
-      fetchApi("/api/advertiser/impression", {
+      fetchApi("/advertiser/impression", {
         method: "POST",
         body: JSON.stringify({ campaignId: advertiserAd.id })
       }).catch(err => console.error("Failed to track advertiser impression", err));
@@ -546,10 +546,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             });
 
             // Track advertiser impression if extra offer wall task completed
-            const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd;
-            const baseCount = settings?.offerWallCount || 4;
-            if (extraOffer && activeOfferIndex === baseCount) {
-              fetchApi("/api/advertiser/impression", {
+            const adminCount = settings?.offerWallCount || 4;
+            const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
+            const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd || offerWallAds[0];
+            if (extraOffer && extraOffer.id && activeOfferIndex >= adminCount) {
+              fetchApi("/advertiser/impression", {
                 method: "POST",
                 body: JSON.stringify({ campaignId: extraOffer.id })
               }).catch(err => console.error("Failed to track advertiser impression", err));
@@ -653,7 +654,10 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
     // 3. All offers or timers ready / default state
     if (settings?.enableOfferWall && currentStep === 1) {
-      const totalOffers = settings?.offerWallCount || 4;
+      const adminCount = settings?.offerWallCount || 4;
+      const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
+      const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd || offerWallAds[0];
+      const totalOffers = (extraOffer && extraOffer.targetUrl) ? adminCount + 1 : adminCount;
       const allDone = Array.from({ length: totalOffers }).every((_, idx) => offerCompleted[idx]);
       if (allDone) {
         document.title = `✅ All Steps Completed! Get Link - ${siteName}`;
@@ -740,31 +744,26 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     let rawUrl = "";
     let campaignIdToTrack = "";
 
+    const adminCount = settings?.offerWallCount || 4;
+    const adminUrls = [
+      settings?.offerWallUrl1,
+      settings?.offerWallUrl2,
+      settings?.offerWallUrl3,
+      settings?.offerWallUrl4
+    ];
+
     const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
-    if (offerWallAds.length > 0) {
-      const advOffer = offerWallAds[index % offerWallAds.length];
-      if (advOffer && advOffer.targetUrl) {
-        rawUrl = advOffer.targetUrl;
-        campaignIdToTrack = advOffer.id;
-      }
+    const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd || offerWallAds[0];
+
+    if (index < adminCount) {
+      rawUrl = adminUrls[index] || "https://www.google.com";
+    } else if (extraOffer && extraOffer.targetUrl) {
+      rawUrl = extraOffer.targetUrl;
+      campaignIdToTrack = extraOffer.id;
     }
 
     if (!rawUrl) {
-      const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd;
-      if (extraOffer && extraOffer.targetUrl) {
-        rawUrl = extraOffer.targetUrl;
-        campaignIdToTrack = extraOffer.id;
-      }
-    }
-
-    if (!rawUrl) {
-      const urls = [
-        settings?.offerWallUrl1,
-        settings?.offerWallUrl2,
-        settings?.offerWallUrl3,
-        settings?.offerWallUrl4
-      ];
-      rawUrl = urls[index] || "https://www.google.com";
+      rawUrl = adminUrls[index % adminUrls.length] || "https://www.google.com";
     }
 
     let adUrl = ensureAbsoluteUrl(rawUrl);
@@ -773,7 +772,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     window.open(adUrl, "_blank");
 
     if (campaignIdToTrack) {
-      fetchApi("/api/advertiser/impression", {
+      fetchApi("/advertiser/impression", {
         method: "POST",
         body: JSON.stringify({ campaignId: campaignIdToTrack })
       }).catch((err) => console.error("Failed to track advertiser impression", err));
@@ -807,7 +806,12 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     }
 
     const isOfferWallEnabled = settings?.enableOfferWall && currentStep === 1;
-    const totalOffersCount = settings?.offerWallCount === undefined ? 4 : settings.offerWallCount;
+    const adminCount = settings?.offerWallCount || 4;
+    const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
+    const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd || offerWallAds[0];
+    const hasExtraOffer = !!(extraOffer && extraOffer.targetUrl);
+    const totalOffersCount = hasExtraOffer ? adminCount + 1 : adminCount;
+
     const allOffersCompleted = Array.from({ length: totalOffersCount }).every((_, idx) => offerCompleted[idx]);
 
     if (isOfferWallEnabled) {
@@ -1143,108 +1147,120 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* OFFERS LIST */}
                   <div className="space-y-4">
-                    {Array.from({ length: settings?.offerWallCount || 4 }).map((_, idx) => {
-                      const isCompleted = offerCompleted[idx];
-                      const isCurrentActive = idx === 0 || offerCompleted[idx - 1]; // unlocked if first or previous is completed
-                      const isTicking = offerTimerActive && activeOfferIndex === idx;
-                      const isPaused = offerClicked[idx] && !isCompleted && !isTicking && activeOfferIndex === idx && offerTimer > 0;
-                      
+                    {(() => {
+                      const adminCount = settings?.offerWallCount || 4;
                       const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
-                      const advOffer = offerWallAds.length > 0 ? offerWallAds[idx % offerWallAds.length] : null;
+                      const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd || offerWallAds[0];
+                      const hasExtraOffer = !!(extraOffer && extraOffer.targetUrl);
+                      const totalOfferStepsCount = hasExtraOffer ? adminCount + 1 : adminCount;
 
-                      return (
-                        <div 
-                           key={idx}
-                           className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border transition-all ${
-                            isCompleted 
-                              ? "bg-emerald-950/20 border-emerald-500/20" 
-                              : isCurrentActive 
-                                ? isPaused
-                                  ? "bg-slate-900 border-amber-500/30 shadow-md shadow-amber-500/5"
-                                  : "bg-slate-900 border-indigo-500/30 shadow-md shadow-indigo-500/5" 
-                                : "bg-slate-900/40 border-slate-850 opacity-45 pointer-events-none"
-                          }`}
-                        >
-                          <div className="space-y-1 mb-3 sm:mb-0">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-sm font-black uppercase tracking-wider ${isCompleted ? "text-emerald-400" : isPaused ? "text-amber-400" : isCurrentActive ? "text-indigo-400" : "text-slate-500"}`}>
-                                Step {idx + 1}
-                              </span>
-                              {advOffer && (
-                                <span className="bg-amber-500/15 text-amber-300 text-[9px] font-bold px-2 py-0.5 rounded border border-amber-500/30">
-                                  SPONSORED: {advOffer.title}
+                      return Array.from({ length: totalOfferStepsCount }).map((_, idx) => {
+                        const isCompleted = offerCompleted[idx];
+                        const isCurrentActive = idx === 0 || offerCompleted[idx - 1]; // unlocked if first or previous is completed
+                        const isTicking = offerTimerActive && activeOfferIndex === idx;
+                        const isPaused = offerClicked[idx] && !isCompleted && !isTicking && activeOfferIndex === idx && offerTimer > 0;
+                        
+                        const isAdvertiserStep = idx >= adminCount && hasExtraOffer;
+                        const advOffer = isAdvertiserStep ? extraOffer : null;
+
+                        return (
+                          <div 
+                             key={idx}
+                             className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border transition-all ${
+                              isCompleted 
+                                ? "bg-emerald-950/20 border-emerald-500/20" 
+                                : isCurrentActive 
+                                  ? isPaused
+                                    ? "bg-slate-900 border-amber-500/30 shadow-md shadow-amber-500/5"
+                                    : "bg-slate-900 border-indigo-500/30 shadow-md shadow-indigo-500/5" 
+                                  : "bg-slate-900/40 border-slate-850 opacity-45 pointer-events-none"
+                            }`}
+                          >
+                            <div className="space-y-1 mb-3 sm:mb-0">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-sm font-black uppercase tracking-wider ${isCompleted ? "text-emerald-400" : isPaused ? "text-amber-400" : isCurrentActive ? "text-indigo-400" : "text-slate-500"}`}>
+                                  Step {idx + 1}
                                 </span>
-                              )}
-                              {isCompleted && (
-                                <span className="bg-emerald-500/10 text-emerald-400 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
-                                  COMPLETED
-                                </span>
-                              )}
-                              {isTicking && (
-                                <span className="bg-indigo-500/15 text-indigo-400 text-[9px] font-bold px-2 py-0.5 rounded border border-indigo-500/20 animate-pulse">
-                                  TIMER TICKING
-                                </span>
-                              )}
-                              {isPaused && (
-                                <span className="bg-amber-500/15 text-amber-400 text-[9px] font-bold px-2 py-0.5 rounded border border-amber-500/20 animate-pulse">
-                                  TIMER PAUSED
-                                </span>
-                              )}
+                                {advOffer && (
+                                  <span className="bg-amber-500/15 text-amber-300 text-[9px] font-bold px-2 py-0.5 rounded border border-amber-500/30">
+                                    SPONSORED: {advOffer.title}
+                                  </span>
+                                )}
+                                {isCompleted && (
+                                  <span className="bg-emerald-500/10 text-emerald-400 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
+                                    COMPLETED
+                                  </span>
+                                )}
+                                {isTicking && (
+                                  <span className="bg-indigo-500/15 text-indigo-400 text-[9px] font-bold px-2 py-0.5 rounded border border-indigo-500/20 animate-pulse">
+                                    TIMER TICKING
+                                  </span>
+                                )}
+                                {isPaused && (
+                                  <span className="bg-amber-500/15 text-amber-400 text-[9px] font-bold px-2 py-0.5 rounded border border-amber-500/20 animate-pulse">
+                                    TIMER PAUSED
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-300 leading-relaxed max-w-md">
+                                {isPaused ? (
+                                  <span className="text-amber-400 font-medium">
+                                    ⚠️ Timer paused! Please click "Resume Offer" and remain on the ad page to continue the countdown.
+                                  </span>
+                                ) : advOffer ? (
+                                  <>
+                                    Please open the sponsored offer <strong className="text-amber-300">({advOffer.title})</strong> and wait <span className="font-bold text-white">{settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds} seconds</span> to unlock the next step.
+                                  </>
+                                ) : (
+                                  <>
+                                    Please open the offer step {idx + 1} and wait <span className="font-bold text-white">{settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds} seconds</span> to unlock the next step.
+                                  </>
+                                )}
+                              </p>
                             </div>
-                            <p className="text-xs text-slate-300 leading-relaxed max-w-md">
-                              {isPaused ? (
-                                <span className="text-amber-400 font-medium">
-                                  ⚠️ Timer paused! Please click "Resume Offer" and remain on the ad page to continue the countdown.
-                                </span>
-                              ) : (
-                                <>
-                                  Please open the offer {advOffer ? <strong className="text-amber-300">({advOffer.title})</strong> : ""} and wait <span className="font-bold text-white">{settings?.offerWallSeconds === undefined ? 10 : settings.offerWallSeconds} seconds</span> to unlock the next step.
-                                </>
-                              )}
-                            </p>
-                          </div>
 
-                          <div>
-                            <button
-                              disabled={!isCurrentActive || isCompleted}
-                              onClick={() => handleViewOffer(idx)}
-                              className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wide transition flex items-center justify-center gap-1.5 min-w-[140px] ${
-                                isCompleted
-                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                                  : isTicking
-                                    ? "bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-400 border border-indigo-500/30 animate-pulse active:scale-95 cursor-pointer"
-                                    : isPaused
-                                      ? "bg-amber-600 hover:bg-amber-700 text-white shadow-lg shadow-amber-600/15 active:scale-95 animate-pulse"
-                                      : isCurrentActive
-                                        ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/15 active:scale-95"
-                                        : "bg-slate-900 text-slate-500 border border-slate-800"
-                              }`}
-                            >
-                              {isCompleted ? (
-                                <>
-                                  <CheckCircle className="w-3.5 h-3.5" />
-                                  Unlocked
-                                </>
-                              ) : isTicking ? (
-                                <>
-                                  <Hourglass className="w-3.5 h-3.5 animate-spin" />
-                                  Re-open ({offerTimer}s)
-                                </>
-                              ) : isPaused ? (
-                                <>
-                                  <Play className="w-3.5 h-3.5 animate-pulse" />
-                                  Resume ({offerTimer}s)
-                                </>
-                              ) : (
-                                <>
-                                  View Offer {idx + 1}
-                                </>
-                              )}
-                            </button>
+                            <div>
+                              <button
+                                disabled={!isCurrentActive || isCompleted}
+                                onClick={() => handleViewOffer(idx)}
+                                className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wide transition flex items-center justify-center gap-1.5 min-w-[140px] ${
+                                  isCompleted
+                                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                                    : isTicking
+                                      ? "bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-400 border border-indigo-500/30 animate-pulse active:scale-95 cursor-pointer"
+                                      : isPaused
+                                        ? "bg-amber-600 hover:bg-amber-700 text-white shadow-lg shadow-amber-600/15 active:scale-95 animate-pulse"
+                                        : isCurrentActive
+                                          ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/15 active:scale-95"
+                                          : "bg-slate-900 text-slate-500 border border-slate-800"
+                                }`}
+                              >
+                                {isCompleted ? (
+                                  <>
+                                    <CheckCircle className="w-3.5 h-3.5" />
+                                    Unlocked
+                                  </>
+                                ) : isTicking ? (
+                                  <>
+                                    <Hourglass className="w-3.5 h-3.5 animate-spin" />
+                                    Re-open ({offerTimer}s)
+                                  </>
+                                ) : isPaused ? (
+                                  <>
+                                    <Play className="w-3.5 h-3.5 animate-pulse" />
+                                    Resume ({offerTimer}s)
+                                  </>
+                                ) : (
+                                  <>
+                                    View Offer {idx + 1}
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                   </div>
 
                   {/* BOTTOM SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 320x50) */}
@@ -1274,11 +1290,25 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   {/* CONTINUE / PROCEED BUTTON */}
                   <div className="pt-4 border-t border-slate-800">
                     <button
-                      disabled={!Array.from({ length: settings?.offerWallCount || 4 }).every((_, idx) => offerCompleted[idx])}
+                      disabled={!(() => {
+                        const adminCount = settings?.offerWallCount || 4;
+                        const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
+                        const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd || offerWallAds[0];
+                        const hasExtraOffer = !!(extraOffer && extraOffer.targetUrl);
+                        const totalOffersCount = hasExtraOffer ? adminCount + 1 : adminCount;
+                        return Array.from({ length: totalOffersCount }).every((_, idx) => offerCompleted[idx]);
+                      })()}
                       onClick={handleNextStep}
                       className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-wider shadow-lg transition-all duration-150 flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white disabled:cursor-not-allowed"
                     >
-                      {!Array.from({ length: settings?.offerWallCount || 4 }).every((_, idx) => offerCompleted[idx]) ? (
+                      {!(() => {
+                        const adminCount = settings?.offerWallCount || 4;
+                        const offerWallAds = settings?.activeAdvertiserAds?.offerWallAds || [];
+                        const extraOffer = settings?.activeAdvertiserAds?.extraOfferWallAd || offerWallAds[0];
+                        const hasExtraOffer = !!(extraOffer && extraOffer.targetUrl);
+                        const totalOffersCount = hasExtraOffer ? adminCount + 1 : adminCount;
+                        return Array.from({ length: totalOffersCount }).every((_, idx) => offerCompleted[idx]);
+                      })() ? (
                         "Complete All Ad Sponsor Steps First"
                       ) : hasMoreSteps ? (
                         <>
@@ -1564,7 +1594,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     setPopupTimer(12);
                     setPopupTimerFinished(false);
                     // Track advertiser impression
-                    fetchApi("/api/advertiser/impression", {
+                    fetchApi("/advertiser/impression", {
                       method: "POST",
                       body: JSON.stringify({ campaignId: extraAdvPopup.id })
                     }).catch(err => console.error("Failed to track advertiser impression", err));

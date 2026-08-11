@@ -56,7 +56,8 @@ function getHeaders() {
 }
 
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
-  const url = `${getApiBase()}${endpoint}`;
+  const cleanEndpoint = endpoint.startsWith("/api/") ? endpoint.substring(4) : endpoint;
+  const url = `${getApiBase()}${cleanEndpoint}`;
   const response = await fetch(url, {
     ...options,
     headers: {
