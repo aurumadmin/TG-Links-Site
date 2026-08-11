@@ -1557,11 +1557,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
       {/* SPONSORED PREMIUM TRAFFIC NETWORK POPUP MODAL */}
       {showPopupAd && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-6 overflow-y-auto animate-in fade-in duration-300">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl max-w-6xl w-full p-3.5 sm:p-6 relative text-white my-auto flex flex-col space-y-3 sm:space-y-4 max-h-[98vh] sm:max-h-none overflow-y-auto">
+        <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-1 sm:p-4 md:p-6 animate-in fade-in duration-300">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-xl sm:rounded-2xl shadow-2xl max-w-7xl w-full h-[96vh] sm:h-[92vh] sm:max-h-[850px] p-2.5 sm:p-5 relative text-white flex flex-col space-y-2 sm:space-y-3.5 my-auto overflow-hidden">
             
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 sm:pb-3 gap-2">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2 sm:pb-3 gap-2 shrink-0">
               <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                 <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1603,7 +1603,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     setPopupClosed(true);
                   }
                 }}
-                className={`px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shrink-0 ${
+                className={`px-3 sm:px-5 py-1.5 sm:py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shrink-0 ${
                   popupTimerFinished
                     ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 active:scale-95 cursor-pointer animate-pulse ring-2 ring-emerald-400/50"
                     : "bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed opacity-80"
@@ -1633,7 +1633,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             </div>
 
             {/* Timer Notification Banner */}
-            <div className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-xs font-medium flex items-center justify-between transition-colors gap-2 ${
+            <div className={`px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-xl text-[11px] sm:text-xs font-medium flex items-center justify-between transition-colors gap-2 shrink-0 ${
               popupTimerFinished
                 ? "bg-emerald-950/50 border border-emerald-800/60 text-emerald-300"
                 : "bg-amber-950/50 border border-amber-800/60 text-amber-300"
@@ -1657,11 +1657,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               </span>
             </div>
 
-            {/* Iframe Banner Container (Single Full-Size Iframe Per Ad) */}
-            <div className="w-full flex flex-col">
+            {/* Iframe Banner Container (Single Responsive Full-Size Iframe Per Ad) */}
+            <div className="w-full flex-1 min-h-0 flex flex-col overflow-hidden">
               {activePopupIndex === 1 && (settings?.enableSponsoredAd1 !== false) && (
-                <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col">
-                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between gap-2">
+                <div className="w-full h-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col flex-1 min-h-0">
+                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between gap-2 shrink-0">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                       <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-emerald-400">
@@ -1675,7 +1675,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   <iframe
                     src={settings?.sponsoredAd1Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
                     title="Sponsored Traffic Partner Modal 1"
-                    className="w-full border-0 h-[520px] sm:h-[650px]"
+                    className="w-full flex-1 h-full min-h-[350px] sm:min-h-[500px] border-0"
                     referrerPolicy="unsafe-url"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   />
@@ -1683,8 +1683,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               )}
 
               {activePopupIndex === 2 && !!settings?.enableSponsoredAd2 && (
-                <div className="w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col">
-                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between gap-2">
+                <div className="w-full h-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-inner flex flex-col flex-1 min-h-0">
+                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between gap-2 shrink-0">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
                       <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-indigo-400">
@@ -1698,7 +1698,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   <iframe
                     src={settings?.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1"}
                     title="Sponsored Traffic Partner Modal 2"
-                    className="w-full border-0 h-[520px] sm:h-[650px]"
+                    className="w-full flex-1 h-full min-h-[350px] sm:min-h-[500px] border-0"
                     referrerPolicy="unsafe-url"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   />
@@ -1706,8 +1706,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               )}
 
               {activePopupIndex === 3 && !!settings?.activeAdvertiserAds?.extraSponsoredPopupAd && (
-                <div className="w-full bg-slate-950 rounded-xl border border-amber-500/40 overflow-hidden shadow-inner flex flex-col">
-                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-amber-800/40 flex items-center justify-between gap-2">
+                <div className="w-full h-full bg-slate-950 rounded-xl border border-amber-500/40 overflow-hidden shadow-inner flex flex-col flex-1 min-h-0">
+                  <div className="bg-slate-900/90 px-3 py-1.5 border-b border-amber-800/40 flex items-center justify-between gap-2 shrink-0">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
                       <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-amber-400">
@@ -1721,7 +1721,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   <iframe
                     src={ensureAbsoluteUrl(settings.activeAdvertiserAds.extraSponsoredPopupAd.targetUrl || "https://www.google.com")}
                     title="Sponsored Advertiser Promotion Modal"
-                    className="w-full border-0 h-[520px] sm:h-[650px]"
+                    className="w-full flex-1 h-full min-h-[350px] sm:min-h-[500px] border-0"
                     referrerPolicy="unsafe-url"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   />
@@ -1730,7 +1730,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             </div>
 
             {/* Modal Footer Note */}
-            <div className="flex flex-col sm:flex-row items-center justify-between text-[10px] sm:text-[11px] text-slate-400 gap-1.5 sm:gap-2 pt-0.5">
+            <div className="flex flex-col sm:flex-row items-center justify-between text-[10px] sm:text-[11px] text-slate-400 gap-1 sm:gap-2 pt-0.5 shrink-0">
               <span>Verified Traffic Network Partners</span>
               {popupTimerFinished ? (
                 <span className="text-emerald-400 font-bold text-center sm:text-right">

@@ -1481,9 +1481,29 @@ function setupRoutes() {
 
   // --- ADVERTISER SYSTEM ENDPOINTS ---
 
-  function getActiveAdvertiserAds(db: any) {
+  function getActiveAdvertiserAds(db: any, userIp?: string) {
+    if (!db.advertiserImpressionsLog) db.advertiserImpressionsLog = [];
+    const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+
     const activeCampaigns = (db.advertiserCampaigns || []).filter((c: any) => {
-      return c && c.status === "active" && Number(c.spent || 0) < Number(c.totalBudget || 0);
+      if (!c || c.status !== "active") return false;
+      if (Number(c.spent || 0) >= Number(c.totalBudget || 0)) return false;
+      if (c.targetViews && Number(c.viewsDelivered || 0) >= Number(c.targetViews)) return false;
+
+      // Filter out campaigns that the user with userIp has already viewed in the last 24 hours
+      if (userIp) {
+        const viewedIn24h = db.advertiserImpressionsLog.some((log: any) => {
+          let logIp = log.ip;
+          if (typeof logIp === "string" && logIp.includes(",")) {
+            logIp = logIp.split(",")[0].trim();
+          }
+          const logTime = new Date(log.timestamp).getTime();
+          return log.campaignId === c.id && logIp === userIp && logTime > twentyFourHoursAgo;
+        });
+        if (viewedIn24h) return false;
+      }
+
+      return true;
     });
 
     const getActiveForType = (type: string) => {
@@ -1793,14 +1813,41 @@ function setupRoutes() {
     const { campaignId } = req.body;
     if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
 
+    let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+    if (typeof ip === "string" && ip.includes(",")) {
+      ip = ip.split(",")[0].trim();
+    }
+
     const db = loadDb();
     if (!db.advertiserCampaigns) db.advertiserCampaigns = [];
+    if (!db.advertiserImpressionsLog) db.advertiserImpressionsLog = [];
 
     const campaign = db.advertiserCampaigns.find((c: any) => c.id === campaignId);
     if (!campaign) return res.status(404).json({ error: "Campaign not found" });
 
     if (campaign.status !== "active") {
       return res.json({ success: false, reason: "Campaign is not active" });
+    }
+
+    const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const alreadyViewedIn24h = db.advertiserImpressionsLog.some((log: any) => {
+      let logIp = log.ip;
+      if (typeof logIp === "string" && logIp.includes(",")) {
+        logIp = logIp.split(",")[0].trim();
+      }
+      const logTime = new Date(log.timestamp).getTime();
+      return log.campaignId === campaignId && logIp === ip && logTime > twentyFourHoursAgo;
+    });
+
+    if (alreadyViewedIn24h) {
+      return res.json({
+        success: false,
+        reason: "Ad view already recorded for this IP within 24 hours",
+        impressions: campaign.impressions || 0,
+        viewsDelivered: campaign.viewsDelivered || 0,
+        spent: campaign.spent || 0,
+        status: campaign.status
+      });
     }
 
     const currentSpent = Number(campaign.spent || 0);
@@ -1810,6 +1857,13 @@ function setupRoutes() {
       saveDb(db);
       return res.json({ success: false, reason: "Campaign budget exhausted" });
     }
+
+    // Log the impression with IP and timestamp
+    db.advertiserImpressionsLog.push({
+      campaignId,
+      ip,
+      timestamp: new Date().toISOString()
+    });
 
     // Increment impressions & viewsDelivered
     campaign.impressions = (campaign.impressions || 0) + 1;
@@ -2154,30 +2208,6 @@ function setupRoutes() {
     res.json({ success: true, deposit: dep });
   });
 
-  // Track impression for advertiser campaign
-  app.post("/api/advertiser/impression", (req, res) => {
-    const { campaignId } = req.body;
-    if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
-
-    const db = loadDb();
-    const campaign = (db.advertiserCampaigns || []).find((c: any) => c.id === campaignId);
-
-    if (campaign && campaign.status === "active") {
-      const costPerView = Number((campaign.cpm / 1000).toFixed(6));
-      campaign.impressions = (campaign.impressions || 0) + 1;
-      campaign.spent = Number((Math.min(campaign.totalBudget, (campaign.spent || 0) + costPerView)).toFixed(6));
-
-      if (campaign.spent >= campaign.totalBudget) {
-        campaign.status = "completed";
-      }
-
-      saveDb(db);
-      return res.json({ success: true, impressions: campaign.impressions, spent: campaign.spent, status: campaign.status });
-    }
-
-    res.json({ success: false });
-  });
-
   // Guard middleware for Admin
   const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const user = getAuthUser(req);
@@ -2512,7 +2542,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
         enableSponsoredAd2: db.settings.enableSponsoredAd2 ?? true,
         sponsoredAd2Url: db.settings.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1",
         sponsoredAd2Timer: db.settings.sponsoredAd2Timer ?? 12,
-        activeAdvertiserAds: getActiveAdvertiserAds(db)
+        activeAdvertiserAds: getActiveAdvertiserAds(db, typeof ip === "string" ? ip : Array.isArray(ip) ? ip[0] : String(ip))
       }
     });
   });
@@ -3804,9 +3834,14 @@ ${ticket.adminReply}
 
   // Public site settings endpoint
   app.get("/api/settings", (req, res) => {
+    let rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+    let ipStr = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+    if (ipStr.includes(",")) {
+      ipStr = ipStr.split(",")[0].trim();
+    }
     const db = loadDb();
     const s = db.settings || {};
-    const activeAds = getActiveAdvertiserAds(db);
+    const activeAds = getActiveAdvertiserAds(db, ipStr);
     res.json({
       siteName: s.siteName || "TG LINKS",
       siteTitle: s.siteTitle || "Shorten Links and Earn Money",
