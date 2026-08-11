@@ -1202,6 +1202,17 @@ function setupRoutes() {
 
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+  app.use(express.static(path.join(process.cwd(), "public")));
+
+  // Explicit route handler for /ads.txt
+  app.get("/ads.txt", (req, res) => {
+    const adsTxtPath = path.join(process.cwd(), "public", "ads.txt");
+    if (fs.existsSync(adsTxtPath)) {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.sendFile(adsTxtPath);
+    }
+    return res.status(404).type("text/plain").send("ads.txt not found");
+  });
 
   // API Middleware to retrieve and log requests
   app.use((req, res, next) => {
