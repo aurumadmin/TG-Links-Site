@@ -179,6 +179,100 @@ const AdBlock = ({
   );
 };
 
+const SponsoredAdGateBlock = React.memo(({ 
+  adCode, 
+  adClicked, 
+  onAdClicked 
+}: { 
+  adCode?: string; 
+  adClicked: boolean; 
+  onAdClicked: () => void; 
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isHovering, setIsHovering] = useState(false);
+  const isHoveringRef = useRef(false);
+  isHoveringRef.current = isHovering;
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const htmlToInject = adCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`;
+    
+    containerRef.current.innerHTML = "";
+    try {
+      const range = document.createRange();
+      range.selectNode(containerRef.current);
+      const documentFragment = range.createContextualFragment(htmlToInject);
+      containerRef.current.appendChild(documentFragment);
+    } catch (e) {
+      containerRef.current.innerHTML = htmlToInject;
+    }
+  }, [adCode]);
+
+  useEffect(() => {
+    if (adClicked) return;
+
+    const isFocusOnAdIframe = () => {
+      if (!containerRef.current) return false;
+      const activeEl = document.activeElement;
+      if (!activeEl) return false;
+      if (activeEl.tagName === "IFRAME") {
+        return containerRef.current.contains(activeEl);
+      }
+      return false;
+    };
+
+    const handleBlur = () => {
+      if (isHoveringRef.current || isFocusOnAdIframe()) {
+        onAdClicked();
+      }
+    };
+
+    const focusCheckInterval = setInterval(() => {
+      if (isFocusOnAdIframe()) {
+        onAdClicked();
+      }
+    }, 250);
+
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+      clearInterval(focusCheckInterval);
+    };
+  }, [adClicked, onAdClicked]);
+
+  return (
+    <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-3 text-left">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+          🎯 Sponsored Ad Verification
+        </span>
+        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${adClicked ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"}`}>
+          {adClicked ? "VERIFIED" : "CLICK AD TO UNLOCK"}
+        </span>
+      </div>
+      
+      <p className="text-[11px] text-slate-400 leading-normal">
+        Please click on the advertisement banner below to unlock your destination link.
+      </p>
+
+      <div 
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+        className={`relative bg-slate-950 rounded-lg overflow-hidden border transition-all p-1 flex justify-center items-center ${isHovering ? "border-indigo-500/80 shadow-md shadow-indigo-500/10" : "border-slate-800/80"}`}
+      >
+        <div ref={containerRef} className="w-full flex justify-center items-center min-h-[200px]" />
+      </div>
+      
+      {adClicked && (
+        <p className="text-[11px] text-emerald-400 font-bold text-center mt-1 flex items-center justify-center gap-1">
+          <CheckCircle className="w-3.5 h-3.5" />
+          Sponsored click verified! You can now continue.
+        </p>
+      )}
+    </div>
+  );
+});
+
 interface RedirectPageProps {
   code: string;
 }
@@ -199,10 +293,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [captchaError, setCaptchaError] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
   
-  // Neon.today click detection state
-  const [isHoveringNeonAd, setIsHoveringNeonAd] = useState(false);
+  // Sponsored ad click verification state
   const [adClicked, setAdClicked] = useState(false);
-  const adContainerRef = useRef<HTMLDivElement>(null);
 
   const countdownInterval = useRef<any>(null);
 
@@ -496,40 +588,6 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       active = false;
     };
   }, [code]);
-
-  // Iframe click detection through window blur and element focus analysis
-  useEffect(() => {
-    const isFocusOnAdIframe = () => {
-      if (!adContainerRef.current) return false;
-      const activeEl = document.activeElement;
-      if (!activeEl) return false;
-      
-      // Check if the focused element is an iframe inside our container
-      if (activeEl.tagName === "IFRAME") {
-        return adContainerRef.current.contains(activeEl);
-      }
-      return false;
-    };
-
-    const handleBlur = () => {
-      // If the user clicked our ad, it would trigger a blur or have the iframe focused
-      if (isHoveringNeonAd || isFocusOnAdIframe()) {
-        setAdClicked(true);
-      }
-    };
-
-    const focusCheckInterval = setInterval(() => {
-      if (isFocusOnAdIframe()) {
-        setAdClicked(true);
-      }
-    }, 200);
-
-    window.addEventListener("blur", handleBlur);
-    return () => {
-      window.removeEventListener("blur", handleBlur);
-      clearInterval(focusCheckInterval);
-    };
-  }, [isHoveringNeonAd]);
 
   // Offer Wall Timer tick
   useEffect(() => {
@@ -1073,7 +1131,12 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       {/* 728x90 TOP SPONSOR BANNER */}
       {settings?.bannerAd728x90 && (
         <div className="w-full bg-slate-900 border-b border-slate-850 py-4 flex justify-center px-4" id="banner_728x90">
-          <div className="w-full max-w-4xl" dangerouslySetInnerHTML={{ __html: settings.bannerAd728x90 }} />
+          <AdBlock 
+            htmlCode={settings.bannerAd728x90} 
+            placeholder="Top Leaderboard Banner" 
+            size="728x90" 
+            advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_728x90"]}
+          />
         </div>
       )}
 
@@ -1437,37 +1500,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* NEON.TODAY SPONSOR AD GATE */}
                   {settings?.enableNeonAdGate && (
-                    <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-3 text-left">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                          🎯 Sponsored Ad Verification
-                        </span>
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${adClicked ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"}`}>
-                          {adClicked ? "VERIFIED" : "CLICK AD TO UNLOCK"}
-                        </span>
-                      </div>
-                      
-                      <p className="text-[11px] text-slate-400 leading-normal">
-                        Please click on the advertisement banner below to unlock your destination link.
-                      </p>
-
-                      <div 
-                        ref={adContainerRef}
-                        onMouseEnter={() => setIsHoveringNeonAd(true)}
-                        onMouseLeave={() => setIsHoveringNeonAd(false)}
-                        className={`relative bg-slate-950 rounded-lg overflow-hidden border transition-all p-1 flex justify-center items-center ${isHoveringNeonAd ? "border-indigo-500/80 shadow-md shadow-indigo-500/10" : "border-slate-800/80"}`}
-                        dangerouslySetInnerHTML={{
-                          __html: settings.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`
-                        }}
-                      />
-                      
-                      {adClicked && (
-                        <p className="text-[11px] text-emerald-400 font-bold text-center mt-1 flex items-center justify-center gap-1">
-                          <CheckCircle className="w-3.5 h-3.5" />
-                          Sponsored click verified! You can now continue.
-                        </p>
-                      )}
-                    </div>
+                    <SponsoredAdGateBlock 
+                      adCode={settings?.neonTodayAdCode}
+                      adClicked={adClicked}
+                      onAdClicked={() => setAdClicked(true)}
+                    />
                   )}
 
                   {/* BOTTOM SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 320x50) */}
@@ -1526,7 +1563,12 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           {/* 320x50 MOBILE/BOTTOM BANNER */}
           {settings?.bannerAd320x50 && (
             <div className="w-full flex justify-center py-2" id="banner_320x50">
-              <div dangerouslySetInnerHTML={{ __html: settings.bannerAd320x50 }} />
+              <AdBlock 
+                htmlCode={settings.bannerAd320x50} 
+                placeholder="Mobile Bottom Banner" 
+                size="320x50" 
+                advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_320x50"]}
+              />
             </div>
           )}
         </div>
