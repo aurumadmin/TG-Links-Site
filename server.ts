@@ -875,7 +875,8 @@ function loadDb() {
     if (db.settings.advCpmBanner300x600 === undefined) { db.settings.advCpmBanner300x600 = 2.5; changed = true; }
     if (db.settings.advCpmBannerLeft === undefined) { db.settings.advCpmBannerLeft = 1.5; changed = true; }
     if (db.settings.advCpmBannerRight === undefined) { db.settings.advCpmBannerRight = 1.5; changed = true; }
-    if (db.settings.enableFaucetPayDeposit === undefined) { db.settings.enableFaucetPayDeposit = true; changed = true; }
+    if (db.settings.enableFaucetPayDeposit === undefined) { db.settings.enableFaucetPayDeposit = false; changed = true; }
+    if (db.settings.enableFaucetPayDeposit === true) { db.settings.enableFaucetPayDeposit = false; changed = true; }
     if (db.settings.faucetPayMerchant === undefined) { db.settings.faucetPayMerchant = ""; changed = true; }
     if (db.settings.faucetPaySecret === undefined) { db.settings.faucetPaySecret = ""; changed = true; }
     if (db.settings.enableOxaPayDeposit === undefined) { db.settings.enableOxaPayDeposit = true; changed = true; }
@@ -895,7 +896,19 @@ function loadDb() {
     changed = true;
   } else {
     const originalLength = db.depositRequests.length;
-    db.depositRequests = db.depositRequests.filter(Boolean);
+    const now = Date.now();
+    const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+    // Remove pending deposit requests that have not been paid after 3 hours
+    db.depositRequests = db.depositRequests.filter((d: any) => {
+      if (!d) return false;
+      if (d.status === "pending" && d.createdAt) {
+        const createdTime = new Date(d.createdAt).getTime();
+        if (!isNaN(createdTime) && now - createdTime > THREE_HOURS_MS) {
+          return false; // Remove expired unpaid deposit
+        }
+      }
+      return true;
+    });
     if (db.depositRequests.length !== originalLength) changed = true;
   }
 
@@ -1896,33 +1909,46 @@ function setupRoutes() {
     const db = loadDb();
     const s = db.settings || {};
     res.json({
-      enableFaucetPayDeposit: s.enableFaucetPayDeposit !== false,
+      enableFaucetPayDeposit: s.enableFaucetPayDeposit === true,
       faucetPayMerchant: s.faucetPayMerchant || "",
+      faucetPaySecret: s.faucetPaySecret || "",
       enableOxaPayDeposit: s.enableOxaPayDeposit !== false,
+      oxaPayMerchantKey: s.oxaPayMerchantKey || "",
+      oxaPayApiKey: s.oxaPayApiKey || "",
       enableUpiDeposit: s.enableUpiDeposit !== false,
-      upiId: s.upiId || "pay@upi",
+      upiId: s.upiId !== undefined ? s.upiId : "pay@upi",
       upiQrUrl: s.upiQrUrl || "",
       upiAccountHolderName: s.upiAccountHolderName || "TG Links Ads"
     });
   });
 
+  // Helper to remove unpaid pending deposits older than 3 hours
+  function purgeExpiredPendingDeposits(db: any): boolean {
+    if (!db.depositRequests || !Array.isArray(db.depositRequests)) return false;
+    const now = Date.now();
+    const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+    const originalLen = db.depositRequests.length;
+    db.depositRequests = db.depositRequests.filter((d: any) => {
+      if (!d) return false;
+      if (d.status === "pending" && d.createdAt) {
+        const createdTime = new Date(d.createdAt).getTime();
+        if (!isNaN(createdTime) && now - createdTime > THREE_HOURS_MS) {
+          return false; // Automatically delete unpaid deposit request after 3 hours
+        }
+      }
+      return true;
+    });
+    return db.depositRequests.length !== originalLen;
+  }
+
   app.get("/api/deposits/my", (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
     const db = loadDb();
-    const myDeposits = (db.depositRequests || [])
-      .filter((d: any) => d.userId === user.id)
-      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    res.json({ deposits: myDeposits });
-  });
-
-  // Manual UPI deposit request
-  app.get("/api/deposits/my", (req, res) => {
-    const user = getAuthUser(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const db = loadDb();
+    if (purgeExpiredPendingDeposits(db)) {
+      saveDb(db);
+    }
     const userDeposits = (db.depositRequests || [])
       .filter((d: any) => d.userId === user.id)
       .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -2013,6 +2039,11 @@ function setupRoutes() {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
+    const db = loadDb();
+    if (!db.settings?.enableFaucetPayDeposit) {
+      return res.status(400).json({ error: "FaucetPay deposits are currently paused. Please use OxaPay Crypto or UPI QR payment." });
+    }
+
     const { amount } = req.body;
     const depAmount = Number(amount);
 
@@ -2020,7 +2051,6 @@ function setupRoutes() {
       return res.status(400).json({ error: "Minimum deposit amount is $0.10" });
     }
 
-    const db = loadDb();
     const merchant = db.settings?.faucetPayMerchant;
     if (!merchant) {
       return res.status(400).json({ error: "FaucetPay merchant username is not configured in Admin Panel Settings" });
@@ -2285,6 +2315,9 @@ function setupRoutes() {
     if (!user || user.role !== "admin") return res.status(403).json({ error: "Forbidden" });
 
     const db = loadDb();
+    if (purgeExpiredPendingDeposits(db)) {
+      saveDb(db);
+    }
     const sortedDeps = (db.depositRequests || []).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     res.json({ deposits: sortedDeps });
   });
@@ -4006,6 +4039,13 @@ ${ticket.adminReply}
       enableNeonAdGate: s.enableNeonAdGate !== undefined ? s.enableNeonAdGate : false,
       neonTodayAdCode: s.neonTodayAdCode || "",
       enableFaucetMode: s.enableFaucetMode !== undefined ? s.enableFaucetMode : false,
+      enableFaucetPayDeposit: s.enableFaucetPayDeposit === true,
+      faucetPayMerchant: s.faucetPayMerchant || "",
+      enableOxaPayDeposit: s.enableOxaPayDeposit !== false,
+      enableUpiDeposit: s.enableUpiDeposit !== false,
+      upiId: s.upiId !== undefined ? s.upiId : "pay@upi",
+      upiQrUrl: s.upiQrUrl || "",
+      upiAccountHolderName: s.upiAccountHolderName || "TG Links Ads",
       advCpmOfferWall: s.advCpmOfferWall ?? 3.0,
       advCpmSponsoredPopup: s.advCpmSponsoredPopup ?? 4.0,
       advCpmBanner728x90: s.advCpmBanner728x90 ?? 1.5,

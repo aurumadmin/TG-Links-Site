@@ -1754,6 +1754,14 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("settings")}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer border border-slate-700"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Configure UPI QR</span>
+                </button>
                 <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold rounded-lg">
                   Pending: {depositsList.filter(d => d.status === "pending").length}
                 </span>
@@ -2427,9 +2435,205 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </div>
             </div>
 
+            {/* DEPOSIT GATEWAYS & MANUAL UPI QR CONFIGURATION */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-emerald-500/30 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-emerald-400" />
+                  <div>
+                    <h3 className="font-extrabold text-white text-base">Deposit Gateways & UPI QR Settings</h3>
+                    <p className="text-xs text-slate-400">Configure your manual UPI ID, custom QR Code, and automatic crypto deposit credentials for advertiser payments.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={sysSettings.enableFaucetPayDeposit === true}
+                      onChange={(e) => setSysSettings({ ...sysSettings, enableFaucetPayDeposit: e.target.checked })}
+                      className="w-4 h-4 text-amber-500 rounded border-slate-700 bg-slate-900 focus:ring-amber-500"
+                    />
+                    <span className="text-xs font-bold text-slate-300">
+                      {sysSettings.enableFaucetPayDeposit ? "🟢 FaucetPay Active" : "⏸️ FaucetPay Paused"}
+                    </span>
+                  </label>
+                </div>
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">UPI ID for Manual Payments</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. yourname@okaxis, 9876543210@paytm"
+                    value={sysSettings.upiId || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, upiId: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono font-bold"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">UPI VPA address for user scan & pay.</p>
+                </div>
 
-            {/* SMTP DATABASE AUTO-BACKUP (EMAIL) */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">UPI Payee / Account Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. TG Links, My Business"
+                    value={sysSettings.upiAccountHolderName || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, upiAccountHolderName: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Payee title shown in UPI payment apps.</p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">OxaPay API Key (Auto Crypto)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. OXAPAY-API-KEY-XXX"
+                    value={sysSettings.oxaPayApiKey || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, oxaPayApiKey: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Merchant key from OxaPay dashboard.</p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">FaucetPay Merchant Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. MyFaucetPayUsername"
+                    value={sysSettings.faucetPayMerchant || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, faucetPayMerchant: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Registered FaucetPay merchant username.</p>
+                </div>
+              </div>
+
+              {/* UPLOAD CUSTOM UPI QR CODE */}
+              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-4 mt-2">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div>
+                    <h5 className="text-xs font-extrabold text-white flex items-center gap-1.5 uppercase tracking-wider">
+                      <QrCode className="w-4 h-4 text-emerald-400" />
+                      Deposit UPI QR Code Image
+                    </h5>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Upload your custom PhonePe / GPay / Paytm QR Code image or paste a URL to show users on the deposit page.
+                    </p>
+                  </div>
+                  {sysSettings.upiQrUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setSysSettings({ ...sysSettings, upiQrUrl: "" })}
+                      className="text-xs text-rose-400 hover:text-rose-300 font-bold transition flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Reset to Dynamic QR
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                  <div className="md:col-span-8 space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
+                        Upload QR Code Image File
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <label className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer transition flex items-center gap-2 shadow-md shadow-emerald-600/20">
+                          <Upload className="w-4 h-4" />
+                          <span>Select QR Code Image...</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              if (file.size > 5 * 1024 * 1024) {
+                                alert("Please select an image file smaller than 5MB.");
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = (event) => {
+                                const base64 = event.target?.result as string;
+                                if (base64) {
+                                  setSysSettings((prev) => prev ? { ...prev, upiQrUrl: base64 } : prev);
+                                }
+                              };
+                              reader.readAsDataURL(file);
+                            }}
+                          />
+                        </label>
+                        <span className="text-[11px] text-slate-500">PNG, JPG, WEBP, SVG (Max 5MB)</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
+                        Or Direct Deposit QR Image URL
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. https://example.com/qr.png or data:image/png;base64,..."
+                        value={sysSettings.upiQrUrl || ""}
+                        onChange={(e) => setSysSettings({ ...sysSettings, upiQrUrl: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Live Deposit QR Code Preview */}
+                  <div className="md:col-span-4 p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col items-center justify-center text-center">
+                    <span className="text-[10px] font-bold uppercase text-emerald-400 tracking-wider mb-2">Deposit QR Preview</span>
+                    <div className="p-2 bg-white rounded-xl shadow-md mb-1 flex items-center justify-center">
+                      <img
+                        src={
+                          sysSettings.upiQrUrl
+                            ? sysSettings.upiQrUrl
+                            : `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                                `upi://pay?pa=${sysSettings.upiId || "pay@upi"}&pn=${encodeURIComponent(sysSettings.upiAccountHolderName || "TG Links Ads")}`
+                              )}`
+                        }
+                        alt="Deposit QR Code Preview"
+                        className="w-28 h-28 object-contain mx-auto"
+                      />
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400 font-mono mt-1">
+                      {sysSettings.upiQrUrl ? "Custom Uploaded QR Image" : `UPI: ${sysSettings.upiId || "pay@upi"}`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-6 pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sysSettings.enableUpiDeposit !== false}
+                    onChange={(e) => setSysSettings({ ...sysSettings, enableUpiDeposit: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-300">
+                    Enable Manual UPI QR Code Deposits
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sysSettings.enableOxaPayDeposit !== false}
+                    onChange={(e) => setSysSettings({ ...sysSettings, enableOxaPayDeposit: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-300">
+                    Enable OxaPay Crypto Deposits
+                  </span>
+                </label>
+              </div>
+            </div>
+
             <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
                 <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
@@ -3334,10 +3538,25 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
 
               {/* Deposit Gateways Configuration */}
               <div className="space-y-4 pt-4 border-t border-slate-800">
-                <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider flex items-center gap-2">
-                  <CreditCard className="w-4 h-4 text-emerald-400" />
-                  Deposit Gateways & API Credentials
-                </h4>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-emerald-400" />
+                    Deposit Gateways & API Credentials
+                  </h4>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sysSettings.enableFaucetPayDeposit === true}
+                        onChange={(e) => setSysSettings({ ...sysSettings, enableFaucetPayDeposit: e.target.checked })}
+                        className="w-4 h-4 text-amber-500 rounded border-slate-700 bg-slate-900 focus:ring-amber-500"
+                      />
+                      <span className="text-xs font-bold text-slate-300">
+                        {sysSettings.enableFaucetPayDeposit ? "🟢 FaucetPay Active" : "⏸️ FaucetPay Paused"}
+                      </span>
+                    </label>
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div>
@@ -3380,12 +3599,24 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">UPI ID for Manual Payments</label>
                     <input
                       type="text"
-                      placeholder="e.g. mybusiness@upi or 9876543210@ybl"
+                      placeholder="e.g. yourname@okaxis, 9876543210@paytm"
                       value={sysSettings.upiId || ""}
                       onChange={(e) => setSysSettings({ ...sysSettings, upiId: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono font-bold"
                     />
                     <p className="text-[10px] text-slate-500 mt-1">UPI VPA address for user scan & pay.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">UPI Payee / Account Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. TG Links, My Business"
+                      value={sysSettings.upiAccountHolderName || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, upiAccountHolderName: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Payee title shown in UPI payment apps.</p>
                   </div>
                 </div>
 
@@ -3466,36 +3697,51 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     {/* Live Deposit QR Code Preview */}
                     <div className="md:col-span-4 p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col items-center justify-center text-center">
                       <span className="text-[10px] font-bold uppercase text-emerald-400 tracking-wider mb-2">Deposit QR Preview</span>
-                      <div className="p-2.5 bg-white rounded-xl shadow-md mb-1">
+                      <div className="p-2 bg-white rounded-xl shadow-md mb-1 flex items-center justify-center">
                         <img
                           src={
                             sysSettings.upiQrUrl
                               ? sysSettings.upiQrUrl
-                              : `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                                  `upi://pay?pa=${sysSettings.upiId || "yourname@upi"}&pn=TGLINKS`
+                              : `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                                  `upi://pay?pa=${sysSettings.upiId || "pay@upi"}&pn=${encodeURIComponent(sysSettings.upiAccountHolderName || "TG Links Ads")}`
                                 )}`
                           }
                           alt="Deposit QR Code Preview"
-                          className="w-24 h-24 object-contain mx-auto"
+                          className="w-28 h-28 object-contain mx-auto"
                         />
                       </div>
                       <span className="text-[10px] font-bold text-slate-400 font-mono mt-1">
-                        {sysSettings.upiQrUrl ? "Custom Uploaded QR Image" : "Dynamic Auto-Generated QR"}
+                        {sysSettings.upiQrUrl ? "Custom Uploaded QR Image" : `UPI: ${sysSettings.upiId || "pay@upi"}`}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="enableUpiDeposit"
-                    checked={sysSettings.enableUpiDeposit !== false}
-                    onChange={(e) => setSysSettings({ ...sysSettings, enableUpiDeposit: e.target.checked })}
-                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 cursor-pointer"
-                  />
-                  <label htmlFor="enableUpiDeposit" className="text-xs font-bold text-slate-300 cursor-pointer">
-                    Enable Manual UPI QR Code Deposits
+                <div className="flex flex-wrap items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      id="enableUpiDeposit"
+                      checked={sysSettings.enableUpiDeposit !== false}
+                      onChange={(e) => setSysSettings({ ...sysSettings, enableUpiDeposit: e.target.checked })}
+                      className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-slate-300">
+                      Enable Manual UPI QR Code Deposits
+                    </span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      id="enableOxaPayDeposit"
+                      checked={sysSettings.enableOxaPayDeposit !== false}
+                      onChange={(e) => setSysSettings({ ...sysSettings, enableOxaPayDeposit: e.target.checked })}
+                      className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-slate-300">
+                      Enable OxaPay Crypto Deposits
+                    </span>
                   </label>
                 </div>
               </div>

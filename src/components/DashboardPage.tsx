@@ -105,10 +105,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
   const [convertSuccess, setConvertSuccess] = useState("");
 
   // Deposit state
-  const [depositTab, setDepositTab] = useState<"faucetpay" | "oxapay" | "upi">("faucetpay");
+  const [depositTab, setDepositTab] = useState<"faucetpay" | "oxapay" | "upi">("oxapay");
   const [depositAmount, setDepositAmount] = useState("5.00");
   const [upiScreenshotUrl, setUpiScreenshotUrl] = useState("");
   const [upiTxnId, setUpiTxnId] = useState("");
+  const [copiedUpiId, setCopiedUpiId] = useState(false);
   const [depositLoading, setDepositLoading] = useState(false);
   const [depositError, setDepositError] = useState("");
   const [depositSuccess, setDepositSuccess] = useState("");
@@ -170,6 +171,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
     setDepositLoading(true);
     try {
       if (depositTab === "faucetpay") {
+        if (!settings?.enableFaucetPayDeposit) {
+          setDepositError("FaucetPay deposits are currently paused. Please choose OxaPay Crypto or UPI.");
+          setDepositLoading(false);
+          return;
+        }
         const res = await fetchApi("/deposits/faucetpay", {
           method: "POST",
           body: JSON.stringify({ amount: amt })
@@ -504,19 +510,26 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
   const loadDashboardData = async () => {
     setIsDashboardLoading(true);
     try {
-      const [statsRes, linksRes, withdrawsRes, settingsRes] = await Promise.all([
+      const [statsRes, linksRes, withdrawsRes, settingsRes, depositSettingsRes] = await Promise.all([
         fetchApi(`/dashboard/stats/${user.id}`),
         fetchApi(`/links/user/${user.id}`),
         fetchApi(`/withdrawals/user/${user.id}`),
-        fetchApi("/settings")
+        fetchApi("/settings"),
+        fetchApi("/deposits/settings")
       ]);
 
       if (statsRes) setStats(statsRes);
       if (linksRes?.links) setLinks(linksRes.links);
       if (withdrawsRes?.withdrawals) setWithdrawals(withdrawsRes.withdrawals);
-      if (settingsRes) {
-        setSettings(settingsRes);
-        saveCachedSettings(settingsRes);
+      
+      const combinedSettings = {
+        ...(settingsRes || {}),
+        ...(depositSettingsRes || {})
+      };
+      
+      if (settingsRes || depositSettingsRes) {
+        setSettings(combinedSettings);
+        saveCachedSettings(combinedSettings);
       }
       
       // Update local profile states with fresh DB values if any
@@ -2418,16 +2431,24 @@ if( $result ) {
                   <div className="grid grid-cols-3 gap-3 max-w-xl">
                     <button
                       type="button"
-                      onClick={() => setDepositTab("faucetpay")}
-                      className={`p-3 rounded-xl border text-xs font-bold transition flex flex-col items-center gap-1.5 cursor-pointer ${
-                        depositTab === "faucetpay"
-                          ? "bg-amber-500/10 border-amber-500 text-amber-300 shadow-lg shadow-amber-500/10"
-                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                      onClick={() => {
+                        if (settings?.enableFaucetPayDeposit) {
+                          setDepositTab("faucetpay");
+                        }
+                      }}
+                      className={`p-3 rounded-xl border text-xs font-bold transition flex flex-col items-center gap-1.5 ${
+                        !settings?.enableFaucetPayDeposit
+                          ? "bg-slate-950/50 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed"
+                          : depositTab === "faucetpay"
+                          ? "bg-amber-500/10 border-amber-500 text-amber-300 shadow-lg shadow-amber-500/10 cursor-pointer"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
                       }`}
                     >
                       <CreditCard className="w-4 h-4 text-amber-400" />
                       <span>FaucetPay</span>
-                      <span className="text-[9px] font-mono text-emerald-400 uppercase">Auto Instant</span>
+                      <span className={`text-[9px] font-mono uppercase ${settings?.enableFaucetPayDeposit ? "text-emerald-400" : "text-amber-500/80"}`}>
+                        {settings?.enableFaucetPayDeposit ? "Auto Instant" : "Paused"}
+                      </span>
                     </button>
 
                     <button
@@ -2480,27 +2501,79 @@ if( $result ) {
                     {depositTab === "upi" && (
                       <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-4">
                         <div className="flex flex-col sm:flex-row items-center gap-4 border-b border-slate-800 pb-4">
-                          <div className="p-3 bg-white rounded-xl shrink-0 shadow">
+                          <div className="p-2.5 bg-white rounded-xl shrink-0 shadow-lg border border-slate-200 flex flex-col items-center justify-center">
                             <img
                               src={
                                 settings?.upiQrUrl
                                   ? settings.upiQrUrl
-                                  : `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                                      `upi://pay?pa=${settings?.upiId || "9988776655@upi"}&pn=TGLINKS&am=${depositAmount || "5"}`
+                                  : `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
+                                      `upi://pay?pa=${settings?.upiId || "pay@upi"}&pn=${encodeURIComponent(settings?.upiAccountHolderName || "TG Links Ads")}&am=${depositAmount || "5.00"}&cu=INR`
                                     )}`
                               }
-                              alt="Deposit QR Code"
-                              className="w-28 h-28 mx-auto object-contain"
+                              alt="Deposit UPI QR Code"
+                              className="w-32 h-32 object-contain mx-auto"
                             />
+                            {settings?.upiQrUrl && (
+                              <a
+                                href={settings.upiQrUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-1 text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5"
+                              >
+                                <ExternalLink className="w-2.5 h-2.5" /> Full QR
+                              </a>
+                            )}
                           </div>
 
-                          <div className="space-y-1 text-center sm:text-left">
-                            <span className="text-[10px] font-bold uppercase text-amber-400 tracking-wider">UPI Payment Details</span>
-                            <p className="text-sm font-bold text-white font-mono select-all p-2 bg-slate-900 border border-slate-800 rounded-lg">
-                              UPI ID: <span className="text-emerald-400">{settings?.upiId || "Configurable in Admin Settings"}</span>
-                            </p>
-                            <p className="text-[11px] text-slate-400">
-                              Scan QR Code or copy UPI ID to pay <strong>${depositAmount || "5.00"} USD</strong> via PhonePe, Google Pay, Paytm, or BHIM UPI.
+                          <div className="space-y-2 text-center sm:text-left flex-1">
+                            <div className="flex items-center justify-center sm:justify-between">
+                              <span className="text-[10px] font-bold uppercase text-amber-400 tracking-wider">UPI Payment Details</span>
+                              {settings?.upiAccountHolderName && (
+                                <span className="text-[11px] font-medium text-slate-400 hidden sm:inline">
+                                  Payee: <strong className="text-slate-200">{settings.upiAccountHolderName}</strong>
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 p-2 bg-slate-900 border border-slate-800 rounded-lg">
+                              <div className="text-left font-mono truncate">
+                                <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">UPI ID (VPA)</span>
+                                <span className="text-xs sm:text-sm font-bold text-emerald-400 select-all">
+                                  {settings?.upiId || "pay@upi"}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (settings?.upiId) {
+                                    navigator.clipboard.writeText(settings.upiId);
+                                    setCopiedUpiId(true);
+                                    setTimeout(() => setCopiedUpiId(false), 2000);
+                                  }
+                                }}
+                                className={`px-2.5 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer ${
+                                  copiedUpiId
+                                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                    : "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+                                }`}
+                                title="Copy UPI ID"
+                              >
+                                {copiedUpiId ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copy</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                              Scan QR code using <strong>PhonePe, Google Pay, Paytm, BHIM, or any UPI App</strong>. Amount: <strong>${depositAmount || "5.00"} USD</strong>.
                             </p>
                           </div>
                         </div>
