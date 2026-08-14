@@ -125,6 +125,37 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
     }
   };
 
+  const verifyFaucetPayDeposit = async (depId?: string, token?: string) => {
+    try {
+      const res = await fetchApi("/deposits/faucetpay/verify", {
+        method: "POST",
+        body: JSON.stringify({ depId, token })
+      });
+      if (res?.success && res.verified) {
+        setDepositSuccess("Payment verified! Your Advertiser Balance has been credited.");
+        if (typeof res.advertiserBalance === "number") {
+          setCurrentUser(prev => ({ ...prev, advertiserBalance: res.advertiserBalance }));
+        }
+        loadUserDeposits();
+      } else if (res?.deposit?.status === "approved") {
+        loadUserDeposits();
+      }
+    } catch (err) {
+      console.error("Failed to verify FaucetPay deposit:", err);
+    }
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("deposit") === "success") {
+      const depId = params.get("dep_id") || undefined;
+      const token = params.get("token") || undefined;
+      verifyFaucetPayDeposit(depId, token);
+      setDepositSuccess("Payment returned from FaucetPay! Verifying and crediting balance...");
+      loadUserDeposits();
+    }
+  }, []);
+
   const handleDepositSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setDepositError("");
@@ -2567,21 +2598,35 @@ if( $result ) {
                                   )}
                                 </td>
                                 <td className="p-3">
-                                  {dep.status === "approved" && (
-                                    <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase rounded-md">
-                                      Approved
-                                    </span>
-                                  )}
-                                  {dep.status === "pending" && (
-                                    <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase rounded-md animate-pulse">
-                                      Pending Review
-                                    </span>
-                                  )}
-                                  {dep.status === "rejected" && (
-                                    <span className="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold uppercase rounded-md">
-                                      Rejected
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    {dep.status === "approved" && (
+                                      <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase rounded-md">
+                                        Approved
+                                      </span>
+                                    )}
+                                    {dep.status === "pending" && (
+                                      <>
+                                        <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase rounded-md animate-pulse">
+                                          Pending
+                                        </span>
+                                        {dep.method === "faucetpay" && (
+                                          <button
+                                            type="button"
+                                            onClick={() => verifyFaucetPayDeposit(dep.id, dep.gatewayTxnId)}
+                                            className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded text-[9px] font-bold uppercase transition flex items-center gap-1 cursor-pointer"
+                                            title="Check gateway status"
+                                          >
+                                            <RefreshCw className="w-2.5 h-2.5" /> Check
+                                          </button>
+                                        )}
+                                      </>
+                                    )}
+                                    {dep.status === "rejected" && (
+                                      <span className="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold uppercase rounded-md">
+                                        Rejected
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             ))}

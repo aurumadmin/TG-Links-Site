@@ -1983,6 +1983,31 @@ function setupRoutes() {
     res.json({ success: true, message: "UPI deposit submitted successfully for admin verification!", deposit: newDep });
   });
 
+  // FaucetPay token check helper
+  async function checkFaucetPayPayment(token: string, secret: string) {
+    if (!token) return null;
+    try {
+      const fetchFn = typeof globalThis.fetch === "function" ? globalThis.fetch : (await import("node-fetch")).default;
+      const params = new URLSearchParams();
+      params.append("api_key", secret.trim());
+      params.append("token", token.trim());
+
+      const res = await fetchFn("https://faucetpay.io/api/v1/checkpayment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: params.toString()
+      });
+
+      const data: any = await res.json();
+      return data;
+    } catch (err: any) {
+      console.error("[FaucetPay API Error]:", err);
+      return null;
+    }
+  }
+
   // FaucetPay deposit request
   app.post("/api/deposits/faucetpay", (req, res) => {
     const user = getAuthUser(req);
@@ -1998,7 +2023,7 @@ function setupRoutes() {
     const db = loadDb();
     const merchant = db.settings?.faucetPayMerchant;
     if (!merchant) {
-      return res.status(400).json({ error: "FaucetPay merchant is not configured by Administrator in Admin Panel" });
+      return res.status(400).json({ error: "FaucetPay merchant username is not configured in Admin Panel Settings" });
     }
 
     const protocol = getRequestProtocol(req);
@@ -2019,8 +2044,8 @@ function setupRoutes() {
     saveDb(db);
 
     const callbackUrl = `${protocol}://${host}/api/deposits/faucetpay/callback`;
-    const successUrl = `${protocol}://${host}/dashboard?tab=advertiser&deposit=success`;
-    const cancelUrl = `${protocol}://${host}/dashboard?tab=advertiser&deposit=cancel`;
+    const successUrl = `${protocol}://${host}/dashboard?tab=advertiser&deposit=success&dep_id=${newDep.id}`;
+    const cancelUrl = `${protocol}://${host}/dashboard?tab=advertiser&deposit=cancel&dep_id=${newDep.id}`;
 
     res.json({
       success: true,
@@ -2038,24 +2063,138 @@ function setupRoutes() {
     });
   });
 
-  app.all("/api/deposits/faucetpay/callback", (req, res) => {
-    const custom = req.body?.custom || req.query?.custom;
-    const amount1 = req.body?.amount1 || req.query?.amount1;
+  // FaucetPay IPN Callback
+  app.all("/api/deposits/faucetpay/callback", async (req, res) => {
+    let custom = req.body?.custom || req.query?.custom;
+    let amount1 = req.body?.amount1 || req.query?.amount1;
     const token = req.body?.token || req.query?.token;
 
+    console.log("[FaucetPay Callback] Received IPN:", { custom, amount1, token, body: req.body, query: req.query });
+
     const db = loadDb();
-    const dep = (db.depositRequests || []).find((d: any) => d.id === custom);
+    const secret = db.settings?.faucetPaySecret || db.settings?.faucetPayMerchantKey || "";
+
+    // If token is present and secret is configured, verify with FaucetPay checkpayment API
+    if (token && secret) {
+      const verification = await checkFaucetPayPayment(String(token), secret);
+      console.log("[FaucetPay Callback] Verification response:", verification);
+      if (verification && (verification.valid === true || verification.status === 200)) {
+        if (verification.custom) custom = verification.custom;
+        if (verification.amount1) amount1 = verification.amount1;
+      }
+    }
+
+    // Find the pending deposit
+    let dep = (db.depositRequests || []).find((d: any) => {
+      if (custom && d.id === custom) return true;
+      if (token && d.gatewayTxnId === token) return true;
+      return false;
+    });
+
+    // If not found by custom/token, fallback to most recent matching pending faucetpay deposit if amount matches
+    if (!dep && amount1) {
+      const numAmt = Number(amount1);
+      dep = (db.depositRequests || []).find((d: any) => 
+        d.status === "pending" && 
+        d.method === "faucetpay" && 
+        Math.abs(d.amount - numAmt) < 0.01
+      );
+    }
+
     if (dep && dep.status === "pending") {
       dep.status = "approved";
-      dep.gatewayTxnId = String(token || "");
+      dep.gatewayTxnId = String(token || dep.gatewayTxnId || "faucetpay-verified");
+      dep.approvedAt = new Date().toISOString();
 
       const dbUser = db.users.find((u: any) => u.id === dep.userId);
       if (dbUser) {
         dbUser.advertiserBalance = Number(((dbUser.advertiserBalance || 0) + dep.amount).toFixed(6));
       }
       saveDb(db);
+
+      sendSmtpEmail({
+        to: dep.userEmail,
+        subject: `[${db.settings?.siteName || "TG Links"}] FaucetPay Deposit Approved! ($${dep.amount.toFixed(2)})`,
+        text: `Your FaucetPay deposit of $${dep.amount.toFixed(2)} has been automatically approved and credited to your Advertiser Balance!`,
+        html: `<div style="font-family: system-ui, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: #16a34a; margin-top: 0;">✅ FaucetPay Deposit Credited!</h2>
+          <p>Your deposit of <strong>$${dep.amount.toFixed(2)}</strong> via FaucetPay has been verified.</p>
+          <p>Your Advertiser Balance has been credited with <strong>+$${dep.amount.toFixed(2)}</strong>.</p>
+        </div>`
+      }).catch(e => console.error("FaucetPay deposit email err:", e));
+
+      console.log(`[FaucetPay Deposit] Successfully approved deposit ${dep.id} for user ${dep.userId}`);
     }
+
     res.send("OK");
+  });
+
+  // User/Client verification endpoint for FaucetPay deposit status
+  app.post("/api/deposits/faucetpay/verify", async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { depId, token } = req.body;
+    const db = loadDb();
+    const secret = db.settings?.faucetPaySecret || db.settings?.faucetPayMerchantKey || "";
+
+    let dep = (db.depositRequests || []).find((d: any) => {
+      if (depId && d.id === depId && d.userId === user.id) return true;
+      if (token && (d.gatewayTxnId === token || d.id === depId) && d.userId === user.id) return true;
+      return false;
+    });
+
+    if (!dep) {
+      // Find latest pending faucetpay deposit for this user
+      dep = (db.depositRequests || []).find((d: any) => d.userId === user.id && d.status === "pending" && d.method === "faucetpay");
+    }
+
+    if (!dep) {
+      return res.status(404).json({ error: "Deposit not found" });
+    }
+
+    if (dep.status === "approved") {
+      const dbUser = db.users.find((u: any) => u.id === user.id);
+      return res.json({ 
+        success: true, 
+        verified: true, 
+        deposit: dep, 
+        advertiserBalance: dbUser?.advertiserBalance || 0,
+        message: "Deposit is approved and active!" 
+      });
+    }
+
+    // Check with FaucetPay if token/secret available
+    const checkToken = token || dep.gatewayTxnId;
+    if (checkToken && secret) {
+      const verification = await checkFaucetPayPayment(String(checkToken), secret);
+      if (verification && (verification.valid === true || verification.status === 200)) {
+        dep.status = "approved";
+        dep.gatewayTxnId = String(checkToken);
+        dep.approvedAt = new Date().toISOString();
+
+        const dbUser = db.users.find((u: any) => u.id === user.id);
+        if (dbUser) {
+          dbUser.advertiserBalance = Number(((dbUser.advertiserBalance || 0) + dep.amount).toFixed(6));
+        }
+        saveDb(db);
+
+        return res.json({
+          success: true,
+          verified: true,
+          deposit: dep,
+          advertiserBalance: dbUser?.advertiserBalance || 0,
+          message: "FaucetPay payment verified successfully!"
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      verified: false,
+      deposit: dep,
+      message: "Deposit is still awaiting confirmation from FaucetPay gateway."
+    });
   });
 
   // OxaPay deposit request
@@ -2165,13 +2304,10 @@ function setupRoutes() {
     const dep = (db.depositRequests || []).find((d: any) => d.id === id);
     if (!dep) return res.status(404).json({ error: "Deposit request not found" });
 
-    if (dep.method !== "upi") {
-      return res.status(400).json({ error: "FaucetPay and OxaPay deposits are automatically processed by payment gateways and cannot be manually modified." });
-    }
-
     if (dep.status === "pending" && status === "approved") {
       dep.status = "approved";
       dep.adminNote = adminNote || "";
+      dep.approvedAt = new Date().toISOString();
 
       const dbUser = db.users.find((u: any) => u.id === dep.userId);
       if (dbUser) {
@@ -2715,9 +2851,15 @@ Sitemap: ${baseUrl}/sitemap.xml`
       targetUrl = "https://" + targetUrl;
     }
 
-    // Record view and process earnings for all visits reaching /go-final
-    if (vtok) {
-      verifyAndConsumeToken(vtok, code);
+    // Strictly enforce verification token check: view is only counted once user completes steps and reaches final destination
+    const isTokenValid = vtok ? verifyAndConsumeToken(vtok, code) : false;
+
+    if (!isTokenValid) {
+      // Re-verify URL has protocol and redirect directly without counting duplicate/unearned view
+      if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+        targetUrl = "https://" + targetUrl;
+      }
+      return res.redirect(targetUrl);
     }
 
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
@@ -2868,7 +3010,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const db = loadDb();
 
     const userLinks = db.links.filter((l: any) => l.userId === userId);
-    const userClicks = db.clicksLog.filter((c: any) => c.userId === userId);
+    const userLinkIds = new Set(userLinks.map((l: any) => l.id));
+    const userClicks = db.clicksLog.filter((c: any) => c.userId === userId || userLinkIds.has(c.linkId));
     const user = db.users.find((u: any) => u.id === userId);
 
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -3384,7 +3527,8 @@ ${ticket.message}
       if (!c) return;
       const dateStr = c.timestamp ? getISTDateString(c.timestamp) : todayStr;
       const monthStr = c.timestamp ? getISTMonthString(c.timestamp) : currentMonthStr;
-      const uId = c.userId || "guest";
+      const linkObj = linkMap.get(c.linkId);
+      const uId = c.userId || linkObj?.userId || "guest";
       const earning = Number(c.earning || 0);
 
       // System Daily
@@ -3512,13 +3656,14 @@ ${ticket.message}
 
     // Recent 100 logs
     const recentLogs = clicks.slice(-100).reverse().map((c: any) => {
-      const user = userMap.get(c.userId);
       const link = linkMap.get(c.linkId);
+      const effectiveUserId = c.userId || link?.userId || "guest";
+      const user = userMap.get(effectiveUserId);
       return {
         id: c.id,
         timestamp: c.timestamp,
-        userId: c.userId,
-        username: user ? (user.username || user.email) : (c.userId === "guest" ? "Guest" : "Unknown"),
+        userId: effectiveUserId,
+        username: user ? (user.username || user.email) : (effectiveUserId === "guest" ? "Guest" : "Unknown"),
         linkCode: link ? link.code : (c.linkId || "Direct"),
         originalUrl: link ? link.originalUrl : "",
         ip: c.ip || "Unknown",
@@ -3530,8 +3675,8 @@ ${ticket.message}
     res.json({
       success: true,
       totalViews: clicks.length,
-      todayViews: clicks.filter((c: any) => (c.timestamp || "").startsWith(todayStr)).length,
-      monthViews: clicks.filter((c: any) => (c.timestamp || "").startsWith(currentMonthStr)).length,
+      todayViews: clicks.filter((c: any) => getISTDateString(c.timestamp) === todayStr).length,
+      monthViews: clicks.filter((c: any) => getISTMonthString(c.timestamp) === currentMonthStr).length,
       dailyReports,
       monthlyReports,
       userBreakdown,

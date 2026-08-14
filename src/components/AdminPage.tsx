@@ -1827,29 +1827,25 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                             )}
                           </td>
                           <td className="p-3.5 text-right">
-                            {dep.method === "upi" ? (
-                              dep.status === "pending" ? (
-                                <div className="flex items-center justify-end gap-2">
-                                  <button
-                                    onClick={() => handleUpdateDepositStatus(dep.id, "approved")}
-                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <Check className="w-3 h-3" /> Approve
-                                  </button>
-                                  <button
-                                    onClick={() => handleUpdateDepositStatus(dep.id, "rejected")}
-                                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <X className="w-3 h-3" /> Reject
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-slate-500 text-xs font-medium">Processed</span>
-                              )
+                            {dep.status === "pending" ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => handleUpdateDepositStatus(dep.id, "approved")}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
+                                  title="Approve & Credit Balance"
+                                >
+                                  <Check className="w-3 h-3" /> Approve
+                                </button>
+                                <button
+                                  onClick={() => handleUpdateDepositStatus(dep.id, "rejected")}
+                                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
+                                  title="Reject Request"
+                                >
+                                  <X className="w-3 h-3" /> Reject
+                                </button>
+                              </div>
                             ) : (
-                              <span className="inline-flex px-2.5 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-[10px] font-bold uppercase rounded-lg">
-                                ⚡ Automatic Gateway
-                              </span>
+                              <span className="text-slate-500 text-xs font-medium">Processed</span>
                             )}
                           </td>
                         </tr>
@@ -3343,7 +3339,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   Deposit Gateways & API Credentials
                 </h4>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">FaucetPay Merchant Username</label>
                     <input
@@ -3353,6 +3349,19 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       onChange={(e) => setSysSettings({ ...sysSettings, faucetPayMerchant: e.target.value })}
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
                     />
+                    <p className="text-[10px] text-slate-500 mt-1">Your registered FaucetPay merchant name.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">FaucetPay Merchant API Key (Secret)</label>
+                    <input
+                      type="password"
+                      placeholder="e.g. fp_api_key_xxxxxxxx"
+                      value={sysSettings.faucetPaySecret || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, faucetPaySecret: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Found in FaucetPay &rarr; Merchant &rarr; API Keys. Enables instant auto-verification.</p>
                   </div>
 
                   <div>
@@ -3364,6 +3373,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       onChange={(e) => setSysSettings({ ...sysSettings, oxaPayApiKey: e.target.value })}
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
                     />
+                    <p className="text-[10px] text-slate-500 mt-1">Merchant key from OxaPay dashboard.</p>
                   </div>
 
                   <div>
@@ -3375,6 +3385,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       onChange={(e) => setSysSettings({ ...sysSettings, upiId: e.target.value })}
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
                     />
+                    <p className="text-[10px] text-slate-500 mt-1">UPI VPA address for user scan & pay.</p>
                   </div>
                 </div>
 
