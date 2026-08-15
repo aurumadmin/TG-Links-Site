@@ -114,9 +114,11 @@ export default function App() {
       else if (sub === "links") tab = "links";
       else if (sub === "withdrawals") tab = "withdrawals";
       else if (sub === "tickets") tab = "tickets";
-      else if (sub === "settings") tab = "settings";
-      else if (sub === "ad-settings" || sub === "ad_settings") tab = "ad_settings";
-      else if (sub === "external" || sub === "external-apis") tab = "external";
+      else if (sub === "settings" || sub === "system" || sub === "general") tab = "settings";
+      else if (sub === "ad-settings" || sub === "ad_settings" || sub === "ads") tab = "ad_settings";
+      else if (sub === "click-ads" || sub === "click_ads" || sub === "clickads") tab = "click_ads";
+      else if (sub === "backup" || sub === "database") tab = "backup";
+      else if (sub === "external" || sub === "external-apis" || sub === "apis") tab = "external";
       else if (sub === "views" || sub === "reports") tab = "views";
 
       setActivePage("admin");

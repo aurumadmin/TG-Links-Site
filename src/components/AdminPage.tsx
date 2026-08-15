@@ -57,21 +57,72 @@ import {
   ExternalLink,
   Target,
   QrCode,
-  Instagram
+  Instagram,
+  MousePointerClick
 } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
 import TopLoadingBar from "./TopLoadingBar";
 
-type AdminTab = "overview" | "users" | "links" | "withdrawals" | "deposits" | "tickets" | "settings" | "ad_settings" | "external" | "views" | "backup";
+type AdminTab = "overview" | "users" | "links" | "withdrawals" | "deposits" | "tickets" | "settings" | "ad_settings" | "click_ads" | "external" | "views" | "backup";
 
 interface AdminPageProps {
-  initialTab?: AdminTab;
+  initialTab?: string;
   onBackToDashboard: () => void;
 }
 
+const DEFAULT_ADMIN_SETTINGS: SystemSettings = {
+  siteName: "TG LINKS",
+  siteTitle: "High-Paying URL Shortener Platform",
+  siteDescription: "Monetize your traffic with the world's most transparent, high-paying URL shortener network.",
+  globalCpm: 5.0,
+  minWithdrawal: 5.0,
+  withdrawalMethods: ["PayPal", "UPI", "Bank Transfer", "Crypto"],
+  adPagesCount: 1,
+  bannerAd728x90: "",
+  bannerAd300x250: "",
+  bannerAd320x50: "",
+  popunderCode: "",
+  globalHeaderCode: "",
+  faviconUrl: "",
+  logoUrl: "",
+  enableOwnAds: true,
+  enableOfferWall: false,
+  enableNeonAdGate: false,
+  enableClickAdGate: false,
+  clickAdRandomRotation: true,
+  clickAdCodes: [],
+  clickAd728x90: "",
+  clickAd300x250: "",
+  clickAd300x600: "",
+  clickAd468x60: "",
+  clickAd320x50: "",
+  clickAdCustom1: "",
+  clickAdCustom2: "",
+  enableAdsLab: false,
+  adslabIntPlacement: "int-aK6sT5CbQbdc",
+  adslabRewPlacement: "rew-uhPNwWfp0hLN",
+  adslabUserId: "",
+  adslabAutoInterstitial: true,
+  adslabRewardedSkip: false
+};
+
+function normalizeAdminTab(rawTab?: string): AdminTab {
+  if (!rawTab) return "overview";
+  if (rawTab === "system" || rawTab === "general" || rawTab === "settings") return "settings";
+  if (rawTab === "ad-settings" || rawTab === "ad_settings" || rawTab === "ads") return "ad_settings";
+  if (rawTab === "click-ads" || rawTab === "click_ads" || rawTab === "clickads") return "click_ads";
+  if (rawTab === "backup" || rawTab === "database") return "backup";
+  if (rawTab === "external" || rawTab === "external-apis" || rawTab === "apis") return "external";
+  if (rawTab === "views" || rawTab === "reports") return "overview";
+  if (["overview", "users", "links", "withdrawals", "deposits", "tickets"].includes(rawTab)) {
+    return rawTab as AdminTab;
+  }
+  return "overview";
+}
+
 export default function AdminPage({ initialTab, onBackToDashboard }: AdminPageProps) {
-  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab || "overview");
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => normalizeAdminTab(initialTab));
   
   // Data states
   const [adminStats, setAdminStats] = useState<any>(null);
@@ -80,7 +131,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [withdrawalsList, setWithdrawalsList] = useState<Withdrawal[]>([]);
   const [depositsList, setDepositsList] = useState<DepositRequest[]>([]);
   const [ticketsList, setTicketsList] = useState<SupportTicket[]>([]);
-  const [sysSettings, setSysSettings] = useState<SystemSettings | null>(() => getCachedSettings());
+  const [sysSettings, setSysSettings] = useState<SystemSettings>(() => getCachedSettings() || DEFAULT_ADMIN_SETTINGS);
   const [isAdminLoading, setIsAdminLoading] = useState(true);
   const [externalApis, setExternalApis] = useState<AdFlyShortener[]>([]);
   const [alsoSetFavicon, setAlsoSetFavicon] = useState(true);
@@ -93,17 +144,15 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
 
   // Settings Dropdown Menu state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(() => {
-    return initialTab === "settings" || initialTab === "ad_settings" || initialTab === "backup" || initialTab === "external";
+    const norm = normalizeAdminTab(initialTab);
+    return norm === "settings" || norm === "ad_settings" || norm === "click_ads" || norm === "backup" || norm === "external";
   });
 
   useEffect(() => {
     if (initialTab) {
-      if (initialTab === "views") {
-        setActiveTab("overview");
-      } else {
-        setActiveTab(initialTab);
-      }
-      if (initialTab === "settings" || initialTab === "ad_settings" || initialTab === "backup" || initialTab === "external") {
+      const norm = normalizeAdminTab(initialTab);
+      setActiveTab(norm);
+      if (norm === "settings" || norm === "ad_settings" || norm === "click_ads" || norm === "backup" || norm === "external") {
         setIsSettingsOpen(true);
       }
     }
@@ -112,7 +161,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const changeTab = (tab: AdminTab, path: string) => {
     const targetTab = tab === "views" ? "overview" : tab;
     setActiveTab(targetTab);
-    if (targetTab === "settings" || targetTab === "ad_settings" || targetTab === "backup" || targetTab === "external") {
+    if (targetTab === "settings" || targetTab === "ad_settings" || targetTab === "click_ads" || targetTab === "backup" || targetTab === "external") {
       setIsSettingsOpen(true);
     }
     if (window.location.pathname !== path) {
@@ -747,9 +796,16 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
           {/* Collapsible Settings Dropdown */}
           <div className="space-y-1 pt-1">
             <button
-              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+              onClick={() => {
+                setIsSettingsOpen(true);
+                if (activeTab !== "settings" && activeTab !== "ad_settings" && activeTab !== "click_ads" && activeTab !== "backup" && activeTab !== "external") {
+                  changeTab("settings", "/admin/settings");
+                } else {
+                  setIsSettingsOpen(!isSettingsOpen);
+                }
+              }}
               className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition cursor-pointer ${
-                (activeTab === "settings" || activeTab === "ad_settings" || activeTab === "backup" || activeTab === "external")
+                (activeTab === "settings" || activeTab === "ad_settings" || activeTab === "click_ads" || activeTab === "backup" || activeTab === "external")
                   ? "bg-indigo-600/20 text-indigo-300 font-bold border border-indigo-500/30"
                   : "hover:bg-slate-850 hover:text-white text-slate-300 font-semibold"
               }`}
@@ -789,6 +845,18 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 >
                   <Target className="w-3.5 h-3.5 text-amber-400" />
                   <span>Ad Zones & CPM Rates</span>
+                </button>
+
+                <button
+                  onClick={() => changeTab("click_ads", "/admin/click-ads")}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                    activeTab === "click_ads"
+                      ? "bg-indigo-600 text-white font-extrabold shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:bg-slate-850 hover:text-white font-semibold"
+                  }`}
+                >
+                  <MousePointerClick className="w-3.5 h-3.5 text-pink-400" />
+                  <span>Click-To-Unlock Ads</span>
                 </button>
 
                 <button
@@ -4002,6 +4070,293 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       Enable OxaPay Crypto Deposits
                     </span>
                   </label>
+                </div>
+              </div>
+            </div>
+          </form>
+        )}
+
+        {/* TAB WORKSPACE: CLICK-TO-UNLOCK ADS CONFIGURATION */}
+        {activeTab === "click_ads" && sysSettings && (
+          <form onSubmit={handleSaveSettings} className="space-y-8" id="admin_click_ads">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-2xl font-black text-white flex items-center gap-2">
+                  <MousePointerClick className="w-6 h-6 text-pink-400" />
+                  Sponsored Click-To-Unlock Ad Verification
+                </h1>
+                <p className="text-xs text-slate-400">
+                  Configure rotation and multiple ad codes (300x250, 728x90, 300x600, 468x60, 320x50, neon.today, etc.) for the mandatory "Click Ad To Unlock" gate.
+                </p>
+              </div>
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                Save Click Ads Settings
+              </button>
+            </div>
+
+            {settingsSuccess && (
+              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs font-semibold flex items-start gap-2">
+                <Check className="w-4 h-4 flex-shrink-0 text-emerald-400 mt-0.5" />
+                <span>{settingsSuccess}</span>
+              </div>
+            )}
+
+            {settingsError && (
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs font-semibold flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-400 mt-0.5" />
+                <span>{settingsError}</span>
+              </div>
+            )}
+
+            {/* MAIN GATE CONTROLS */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-pink-500/30 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400">
+                    <MousePointerClick className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-white text-base">Sponsored Ad Click Verification Gate</h3>
+                    <p className="text-xs text-slate-400">
+                      When enabled, users MUST click on the displayed sponsored advertisement banner to verify and unlock the countdown / final destination link.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <select
+                    value={(sysSettings.enableClickAdGate ?? sysSettings.enableNeonAdGate) ? "true" : "false"}
+                    onChange={(e) => {
+                      const enabled = e.target.value === "true";
+                      setSysSettings({ 
+                        ...sysSettings, 
+                        enableClickAdGate: enabled,
+                        enableNeonAdGate: enabled
+                      });
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider outline-none border transition ${
+                      (sysSettings.enableClickAdGate ?? sysSettings.enableNeonAdGate)
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                        : "bg-slate-950 text-slate-400 border-slate-800"
+                    }`}
+                  >
+                    <option value="true" className="bg-slate-950 text-emerald-400">🟢 GATE ACTIVE (MANDATORY AD CLICK)</option>
+                    <option value="false" className="bg-slate-950 text-slate-400">⏸️ GATE DISABLED (NO CLICK REQUIRED)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* RANDOM ROTATION TOGGLE */}
+              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>Multi-Ad Random Rotation Mode</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    When multiple ad codes are configured below, picking a random ad for every visitor prevents ad fatigue and maximizes CTR across different ad networks and sizes.
+                  </p>
+                </div>
+
+                <label className="flex items-center gap-2.5 cursor-pointer select-none shrink-0 bg-slate-900 px-3.5 py-2 rounded-lg border border-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={sysSettings.clickAdRandomRotation !== false}
+                    onChange={(e) => setSysSettings({ ...sysSettings, clickAdRandomRotation: e.target.checked })}
+                    className="w-4 h-4 rounded text-pink-500 border-slate-700 bg-slate-950 focus:ring-pink-500"
+                  />
+                  <span className="text-xs font-bold text-slate-200">
+                    {sysSettings.clickAdRandomRotation !== false ? "Randomize on Each Load" : "Sequential / First Code"}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* AD SLOTS BY SIZE & FORMAT */}
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                    <Target className="w-5 h-5 text-indigo-400" />
+                    Multi-Format Click-To-Unlock Ad Units
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Add codes for different ad formats and networks. The system will automatically adapt its container size and rotate randomly between all non-empty codes!
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* 300x250 Medium Rectangle (High CTR) */}
+                <div className="p-5 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <div>
+                      <span className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-pink-500"></span>
+                        Medium Rectangle Ad
+                      </span>
+                      <p className="text-[10px] text-slate-400">Highest converting format for mobile and desktop.</p>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-pink-300 font-mono font-bold px-2 py-0.5 rounded">300x250</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.clickAd300x250 || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, clickAd300x250: e.target.value })}
+                    placeholder="Paste 300x250 HTML / iframe / script code here..."
+                    className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-pink-500/20 focus:border-pink-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                </div>
+
+                {/* 728x90 Leaderboard Unit */}
+                <div className="p-5 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <div>
+                      <span className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                        Leaderboard Banner Ad
+                      </span>
+                      <p className="text-[10px] text-slate-400">Wide display banner format.</p>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded">728x90</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.clickAd728x90 || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, clickAd728x90: e.target.value })}
+                    placeholder="Paste 728x90 HTML / iframe / script code here..."
+                    className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                </div>
+
+                {/* 300x600 Half Page / Large Skyscraper */}
+                <div className="p-5 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <div>
+                      <span className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                        Large Half-Page / Skyscraper
+                      </span>
+                      <p className="text-[10px] text-slate-400">Large format for massive visibility.</p>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-purple-300 font-mono font-bold px-2 py-0.5 rounded">300x600</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.clickAd300x600 || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, clickAd300x600: e.target.value })}
+                    placeholder="Paste 300x600 HTML / iframe / script code here..."
+                    className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                </div>
+
+                {/* 468x60 Full Banner Unit */}
+                <div className="p-5 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <div>
+                      <span className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                        Classic Full Banner Ad
+                      </span>
+                      <p className="text-[10px] text-slate-400">Standard responsive desktop unit.</p>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-amber-300 font-mono font-bold px-2 py-0.5 rounded">468x60</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.clickAd468x60 || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, clickAd468x60: e.target.value })}
+                    placeholder="Paste 468x60 HTML / iframe / script code here..."
+                    className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                </div>
+
+                {/* 320x50 Mobile Small Leaderboard */}
+                <div className="p-5 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <div>
+                      <span className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        Mobile Smartphone Banner
+                      </span>
+                      <p className="text-[10px] text-slate-400">Compact mobile optimized banner format.</p>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-emerald-300 font-mono font-bold px-2 py-0.5 rounded">320x50</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.clickAd320x50 || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, clickAd320x50: e.target.value })}
+                    placeholder="Paste 320x50 HTML / mobile tag here..."
+                    className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                </div>
+
+                {/* Neon.today / Custom Iframe Code */}
+                <div className="p-5 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <div>
+                      <span className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+                        Neon.today / Custom Surf Iframe Code
+                      </span>
+                      <p className="text-[10px] text-slate-400">PTP, Neon.today or custom click exchange widget.</p>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-teal-300 font-mono font-bold px-2 py-0.5 rounded">IFRAME</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.neonTodayAdCode || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, neonTodayAdCode: e.target.value })}
+                    placeholder='e.g. <iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px;" frameborder="0"></iframe>'
+                    className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                </div>
+
+                {/* Custom Additional Network Ad #1 */}
+                <div className="p-5 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <div>
+                      <span className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-sky-500"></span>
+                        Custom Ad Unit #1 (Any Network / Size)
+                      </span>
+                      <p className="text-[10px] text-slate-400">AdsLab, Adsterra, PropellerAds, Monetag, etc.</p>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-sky-300 font-mono font-bold px-2 py-0.5 rounded">CUSTOM</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.clickAdCustom1 || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, clickAdCustom1: e.target.value })}
+                    placeholder="Paste custom ad snippet from any network..."
+                    className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                </div>
+
+                {/* Custom Additional Network Ad #2 */}
+                <div className="p-5 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <div>
+                      <span className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                        Custom Ad Unit #2 (Any Network / Size)
+                      </span>
+                      <p className="text-[10px] text-slate-400">Another backup or rotation partner ad snippet.</p>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-rose-300 font-mono font-bold px-2 py-0.5 rounded">CUSTOM</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={sysSettings.clickAdCustom2 || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, clickAdCustom2: e.target.value })}
+                    placeholder="Paste custom ad snippet from any network..."
+                    className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-rose-500/20 focus:border-rose-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
                 </div>
               </div>
             </div>

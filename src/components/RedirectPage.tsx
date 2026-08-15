@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { fetchApi } from "../lib/api";
 import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck, Play, Pause } from "lucide-react";
 import { motion } from "motion/react";
@@ -180,12 +180,19 @@ const AdBlock = ({
   );
 };
 
+interface ClickAdCandidate {
+  code: string;
+  sizeName: string;
+  minHeight: string;
+  maxWidth: string;
+}
+
 const SponsoredAdGateBlock = React.memo(({ 
-  adCode, 
+  settings,
   adClicked, 
   onAdClicked 
 }: { 
-  adCode?: string; 
+  settings?: any; 
   adClicked: boolean; 
   onAdClicked: () => void; 
 }) => {
@@ -194,9 +201,55 @@ const SponsoredAdGateBlock = React.memo(({
   const isHoveringRef = useRef(false);
   isHoveringRef.current = isHovering;
 
+  // Compile active ad candidates from settings
+  const selectedAd = useMemo<ClickAdCandidate>(() => {
+    const candidates: ClickAdCandidate[] = [];
+
+    if (settings?.clickAd300x250?.trim()) {
+      candidates.push({ code: settings.clickAd300x250, sizeName: "300x250 Medium Rectangle", minHeight: "250px", maxWidth: "300px" });
+    }
+    if (settings?.clickAd728x90?.trim()) {
+      candidates.push({ code: settings.clickAd728x90, sizeName: "728x90 Leaderboard", minHeight: "90px", maxWidth: "728px" });
+    }
+    if (settings?.clickAd300x600?.trim()) {
+      candidates.push({ code: settings.clickAd300x600, sizeName: "300x600 Half-Page", minHeight: "600px", maxWidth: "300px" });
+    }
+    if (settings?.clickAd468x60?.trim()) {
+      candidates.push({ code: settings.clickAd468x60, sizeName: "468x60 Banner", minHeight: "60px", maxWidth: "468px" });
+    }
+    if (settings?.clickAd320x50?.trim()) {
+      candidates.push({ code: settings.clickAd320x50, sizeName: "320x50 Mobile Banner", minHeight: "50px", maxWidth: "320px" });
+    }
+    if (settings?.neonTodayAdCode?.trim()) {
+      candidates.push({ code: settings.neonTodayAdCode, sizeName: "Neon.today / Surf Iframe", minHeight: "250px", maxWidth: "100%" });
+    }
+    if (settings?.clickAdCustom1?.trim()) {
+      candidates.push({ code: settings.clickAdCustom1, sizeName: "Sponsored Partner Ad 1", minHeight: "200px", maxWidth: "100%" });
+    }
+    if (settings?.clickAdCustom2?.trim()) {
+      candidates.push({ code: settings.clickAdCustom2, sizeName: "Sponsored Partner Ad 2", minHeight: "200px", maxWidth: "100%" });
+    }
+
+    if (candidates.length === 0) {
+      return {
+        code: settings?.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`,
+        sizeName: "Sponsored Ad Unit",
+        minHeight: "250px",
+        maxWidth: "100%"
+      };
+    }
+
+    if (settings?.clickAdRandomRotation !== false) {
+      const randomIndex = Math.floor(Math.random() * candidates.length);
+      return candidates[randomIndex];
+    }
+
+    return candidates[0];
+  }, [settings]);
+
   useEffect(() => {
     if (!containerRef.current) return;
-    const htmlToInject = adCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`;
+    const htmlToInject = selectedAd.code;
     
     containerRef.current.innerHTML = "";
     try {
@@ -207,7 +260,7 @@ const SponsoredAdGateBlock = React.memo(({
     } catch (e) {
       containerRef.current.innerHTML = htmlToInject;
     }
-  }, [adCode]);
+  }, [selectedAd]);
 
   useEffect(() => {
     if (adClicked) return;
@@ -242,33 +295,43 @@ const SponsoredAdGateBlock = React.memo(({
   }, [adClicked, onAdClicked]);
 
   return (
-    <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-3 text-left">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-          🎯 Sponsored Ad Verification
-        </span>
-        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${adClicked ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"}`}>
-          {adClicked ? "VERIFIED" : "CLICK AD TO UNLOCK"}
+    <div className="p-4 bg-slate-900/80 border border-slate-800/90 rounded-2xl space-y-3 text-left shadow-xl backdrop-blur-sm">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-black text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-pink-500 animate-ping"></span>
+            🎯 Sponsored Ad Verification
+          </span>
+          <span className="text-[10px] font-mono text-pink-400 bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20">
+            {selectedAd.sizeName}
+          </span>
+        </div>
+        <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider ${adClicked ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30" : "bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse"}`}>
+          {adClicked ? "✅ AD CLICK VERIFIED" : "👉 CLICK AD TO UNLOCK"}
         </span>
       </div>
       
       <p className="text-[11px] text-slate-400 leading-normal">
-        Please click on the advertisement banner below to unlock your destination link.
+        Please click anywhere on the sponsored advertisement below to verify you are a human visitor and immediately unlock your destination link.
       </p>
 
       <div 
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
-        className={`relative bg-slate-950 rounded-lg overflow-hidden border transition-all p-1 flex justify-center items-center ${isHovering ? "border-indigo-500/80 shadow-md shadow-indigo-500/10" : "border-slate-800/80"}`}
+        className={`relative bg-slate-950 rounded-xl overflow-hidden border transition-all p-2 flex justify-center items-center ${isHovering ? "border-pink-500 shadow-lg shadow-pink-500/10" : "border-slate-800"}`}
       >
-        <div ref={containerRef} className="w-full flex justify-center items-center min-h-[200px]" />
+        <div 
+          ref={containerRef} 
+          style={{ minHeight: selectedAd.minHeight, maxWidth: selectedAd.maxWidth }} 
+          className="w-full flex justify-center items-center overflow-auto" 
+        />
       </div>
       
       {adClicked && (
-        <p className="text-[11px] text-emerald-400 font-bold text-center mt-1 flex items-center justify-center gap-1">
-          <CheckCircle className="w-3.5 h-3.5" />
-          Sponsored click verified! You can now continue.
-        </p>
+        <div className="p-2.5 bg-emerald-950/50 border border-emerald-800/60 rounded-xl text-emerald-400 text-xs font-bold text-center flex items-center justify-center gap-1.5">
+          <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>Sponsored click verified! You can now proceed.</span>
+        </div>
       )}
     </div>
   );
@@ -816,6 +879,19 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     setCaptchaError(false);
     if (parseInt(captchaAnswer) === captchaPrompt.a) {
       setVerifiedHuman(true);
+
+      // Trigger AdsLab's Interstitial Ad immediately upon completing Anti-Bot Verification
+      if (settings?.enableAdsLab !== false) {
+        try {
+          if (typeof (window as any).adslabShowInterstitial === "function") {
+            (window as any).adslabShowInterstitial();
+          } else if (typeof (window as any).showAd === "function") {
+            (window as any).showAd();
+          }
+        } catch (err) {
+          console.warn("[AdsLab] Interstitial ad trigger error upon verification:", err);
+        }
+      }
     } else {
       setCaptchaError(true);
       setCaptchaAnswer("");
@@ -945,6 +1021,19 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     } else {
       // Final step: Get Link!
       if (faucetLimitDetected) return;
+
+      // Trigger AdsLab Rewarded Ad on Get Final Link (with fail-safe fallback)
+      if (settings?.enableAdsLab !== false) {
+        try {
+          if (typeof (window as any).adslabShowRewarded === "function") {
+            (window as any).adslabShowRewarded();
+          } else if (typeof (window as any).showRewardedAd === "function") {
+            (window as any).showRewardedAd();
+          }
+        } catch (err) {
+          console.warn("[AdsLab] Rewarded ad trigger error on Get Final Link:", err);
+        }
+      }
 
       setRedirecting(true);
       try {
@@ -1566,10 +1655,10 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     </div>
                   )}
 
-                  {/* NEON.TODAY SPONSOR AD GATE */}
-                  {settings?.enableNeonAdGate && (
+                  {/* SPONSORED CLICK AD GATE (ROTATING MULTI-FORMAT ADS) */}
+                  {(settings?.enableClickAdGate || settings?.enableNeonAdGate) && (
                     <SponsoredAdGateBlock 
-                      adCode={settings?.neonTodayAdCode}
+                      settings={settings}
                       adClicked={adClicked}
                       onAdClicked={() => setAdClicked(true)}
                     />
@@ -1601,7 +1690,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* SUBMIT STEP BUTTON */}
                   <button
-                    disabled={!isTimerFinished || !verifiedHuman || (settings?.enableNeonAdGate && !adClicked)}
+                    disabled={!isTimerFinished || !verifiedHuman || ((settings?.enableClickAdGate || settings?.enableNeonAdGate) && !adClicked)}
                     onClick={handleNextStep}
                     className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-wider shadow-xl transition-all duration-150 flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white disabled:cursor-not-allowed cursor-pointer"
                   >
@@ -1609,7 +1698,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                       `Please wait... ${timer}s`
                     ) : !verifiedHuman ? (
                       "Complete Puzzle Verification First"
-                    ) : (settings?.enableNeonAdGate && !adClicked) ? (
+                    ) : ((settings?.enableClickAdGate || settings?.enableNeonAdGate) && !adClicked) ? (
                       "Click the Ad Above to Continue"
                     ) : hasMoreSteps ? (
                       <>

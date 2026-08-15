@@ -146,6 +146,17 @@ export interface SystemSettings {
   upiId?: string;
   upiQrUrl?: string;
   upiAccountHolderName?: string;
+  // Click-To-Unlock Sponsored Verification Ads
+  enableClickAdGate?: boolean;
+  clickAdRandomRotation?: boolean;
+  clickAdCodes?: string[];
+  clickAd728x90?: string;
+  clickAd300x250?: string;
+  clickAd300x600?: string;
+  clickAd468x60?: string;
+  clickAd320x50?: string;
+  clickAdCustom1?: string;
+  clickAdCustom2?: string;
   // Official Telegram Channel / Support Link
   telegramChannelUrl?: string;
   // Official Instagram Link
