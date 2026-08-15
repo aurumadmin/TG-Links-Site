@@ -250,8 +250,6 @@ const SponsoredAdGateBlock = React.memo(({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isHovering, setIsHovering] = useState(false);
-  const [adFailTimer, setAdFailTimer] = useState<number>(10);
-  const [adFallbackUnlocked, setAdFallbackUnlocked] = useState<boolean>(false);
   const [currentCandidateIdx, setCurrentCandidateIdx] = useState<number>(0);
   const isHoveringRef = useRef(false);
   isHoveringRef.current = isHovering;
@@ -318,24 +316,6 @@ const SponsoredAdGateBlock = React.memo(({
       setCurrentCandidateIdx(Math.floor(Math.random() * adCandidates.length));
     }
   }, [adCandidates, settings?.clickAdRandomRotation]);
-
-  // Countdown timer for automatic fail-safe unlock if ad blocker or network fails to load the ad
-  useEffect(() => {
-    if (adClicked) return;
-
-    const failSafeTimer = setInterval(() => {
-      setAdFailTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(failSafeTimer);
-          setAdFallbackUnlocked(true);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(failSafeTimer);
-  }, [adClicked]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -436,7 +416,7 @@ const SponsoredAdGateBlock = React.memo(({
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
         onClick={() => {
-          // If clicking anywhere in container, grant verification
+          // Clicking on the ad verifies the user
           onAdClicked();
         }}
         className={`relative bg-slate-950 rounded-xl overflow-hidden border transition-all p-2 flex flex-col justify-center items-center cursor-pointer group ${isHovering ? "border-pink-500 shadow-lg shadow-pink-500/10" : "border-slate-800"}`}
@@ -447,52 +427,16 @@ const SponsoredAdGateBlock = React.memo(({
           className="w-full flex justify-center items-center overflow-auto" 
         />
         
-        {/* Fallback internal banner clickable layer if script is blocked or blank */}
+        {/* Banner Click Prompt */}
         <div className="w-full mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
           <span className="text-slate-400 group-hover:text-pink-300 transition-colors">
-            👉 Click here or anywhere on this banner to verify
+            👉 Click anywhere on this advertisement banner to verify
           </span>
           <span className="text-pink-400 underline font-bold group-hover:text-pink-300">
             Open Sponsor ➔
           </span>
         </div>
       </div>
-      
-      {/* Fail-safe Fallback Unlock Box if Ad Fails to Load */}
-      {!adClicked && (
-        <div className="pt-1">
-          {adFallbackUnlocked ? (
-            <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl flex items-center justify-between gap-3 text-xs">
-              <div className="space-y-0.5">
-                <p className="font-bold text-amber-300 flex items-center gap-1.5">
-                  <span>⚠️</span> Ad blocked or taking too long to load?
-                </p>
-                <p className="text-[11px] text-slate-400">
-                  You can bypass the ad click requirement and continue directly.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onAdClicked}
-                className="px-3 py-1.5 bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-white font-black text-xs rounded-lg shadow uppercase tracking-wider shrink-0 transition cursor-pointer"
-              >
-                Skip Ad & Unlock
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
-              <span>If ad is blocked, alternative unlock activates in <strong className="text-slate-400 font-mono">{adFailTimer}s</strong></span>
-              <button
-                type="button"
-                onClick={onAdClicked}
-                className="text-slate-400 hover:text-slate-300 underline cursor-pointer"
-              >
-                Having trouble? Click to verify
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
       {adClicked && (
         <div className="p-2.5 bg-emerald-950/50 border border-emerald-800/60 rounded-xl text-emerald-400 text-xs font-bold text-center flex items-center justify-center gap-1.5">
