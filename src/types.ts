@@ -150,6 +150,14 @@ export interface SystemSettings {
   telegramChannelUrl?: string;
   // Official Instagram Link
   instagramUrl?: string;
+  // AdsLab Monetization SDK & Ad Placements
+  enableAdsLab?: boolean;
+  adslabIntPlacement?: string;
+  adslabRewPlacement?: string;
+  adslabUserId?: string;
+  adslabAutoInterstitial?: boolean;
+  adslabRewardedSkip?: boolean;
+  adslabBannerCode?: string;
   // Public Counter Metric Boosts
   fakeExtraViews?: number;
   fakeExtraWithdrawn?: number;

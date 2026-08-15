@@ -3311,6 +3311,143 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </div>
             </div>
 
+            {/* ADSLAB MONETIZATION SDK (INTERSTITIALS, REWARDED & BANNERS) */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-indigo-500/30 space-y-5 mt-6 shadow-xl relative overflow-hidden">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-black text-sm shadow">
+                    AL
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                      AdsLab Web SDK Monetization
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                        adslab.me
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Configure AdsLab placements for Interstitial, Rewarded Video, and Display Banner advertisements.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-bold text-slate-300">AdsLab SDK:</label>
+                  <select
+                    value={sysSettings.enableAdsLab ? "true" : "false"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, enableAdsLab: e.target.value === "true" })}
+                    className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="true" className="text-emerald-400">ENABLED</option>
+                    <option value="false" className="text-slate-400">DISABLED</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl text-xs text-indigo-200 space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5 text-white">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  How AdsLab Works (Banners vs Interstitial / Rewarded):
+                </div>
+                <p className="text-[11px] leading-relaxed text-indigo-300">
+                  • <strong>Interstitial Ads:</strong> Full-screen high CPM ads triggered automatically when users click "Next Step" or "Get Link" during the gateway redirection.<br />
+                  • <strong>Rewarded Video Ads:</strong> Optional high-earning video ads that allow users to instantly skip the countdown timer or solve captcha.<br />
+                  • <strong>Banner Ads:</strong> Standard display ads (300x250, 728x90, etc.) from your AdsLab publisher dashboard can be pasted directly into the <em>AdsLab Banner Zone</em> below or in any of the individual ad zones below.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Interstitial Placement ID (<code className="text-indigo-400 font-mono">window.ADSLAB_INT</code>)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="int-46FOXZxueFfc"
+                    value={sysSettings.adslabIntPlacement || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adslabIntPlacement: e.target.value })}
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                  <p className="text-[10px] text-slate-500">Your AdsLab Interstitial Tag ID (e.g. <code className="text-slate-400">int-46FOXZxueFfc</code>).</p>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Rewarded Placement ID (<code className="text-indigo-400 font-mono">window.ADSLAB_REW</code>)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="rew-wBuPOOmM7YwY"
+                    value={sysSettings.adslabRewPlacement || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adslabRewPlacement: e.target.value })}
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                  />
+                  <p className="text-[10px] text-slate-500">Your AdsLab Rewarded Tag ID (e.g. <code className="text-slate-400">rew-wBuPOOmM7YwY</code>).</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">Auto Trigger Interstitial</label>
+                  <select
+                    value={sysSettings.adslabAutoInterstitial !== false ? "true" : "false"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adslabAutoInterstitial: e.target.value === "true" })}
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs font-bold text-white outline-none"
+                  >
+                    <option value="true">YES - Trigger on Step / Button Click</option>
+                    <option value="false">NO - Manual only</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500">Shows AdsLab Interstitial when visitor advances steps.</p>
+                </div>
+
+                <div className="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">Rewarded Ad Skip Button</label>
+                  <select
+                    value={sysSettings.adslabRewardedSkip ? "true" : "false"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adslabRewardedSkip: e.target.value === "true" })}
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs font-bold text-white outline-none"
+                  >
+                    <option value="true">ENABLED - Fast-Skip Video Button</option>
+                    <option value="false">DISABLED</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500">Offers users a rewarded video ad to bypass the 10s timer.</p>
+                </div>
+
+                <div className="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">Custom User ID / Tag</label>
+                  <input
+                    type="text"
+                    placeholder="Leave blank for dynamic user ID"
+                    value={sysSettings.adslabUserId || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adslabUserId: e.target.value })}
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono text-emerald-400 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500">Overrides <code className="text-slate-400">window.ADSLAB_USER</code> tracking ID.</p>
+                </div>
+              </div>
+
+              {/* ADSLAB BANNER CODE SNIPPET */}
+              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    AdsLab Banner Ad HTML / JS Snippet (Optional)
+                  </label>
+                  <span className="text-[10px] bg-indigo-500/10 text-indigo-400 font-mono font-bold px-2 py-0.5 rounded border border-indigo-500/20">
+                    Banner Display
+                  </span>
+                </div>
+                <textarea
+                  rows={3}
+                  value={sysSettings.adslabBannerCode || ""}
+                  onChange={(e) => setSysSettings({ ...sysSettings, adslabBannerCode: e.target.value })}
+                  placeholder="<!-- Paste your AdsLab Banner ad code or iframe tag here -->"
+                  className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
+                />
+                <p className="text-[10px] text-slate-500">
+                  If your AdsLab account includes responsive or standard display banner zone tags, paste the HTML/JS snippet here to render it prominently on the gateway.
+                </p>
+              </div>
+            </div>
+
             {/* ADVERTISING BANNER HTML INJECTIONS */}
             <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-6 mt-6">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">

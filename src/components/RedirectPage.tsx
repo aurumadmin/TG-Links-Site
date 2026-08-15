@@ -545,6 +545,29 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           runEmbeddedScripts(res.settings.globalHeaderCode);
         }
 
+        // Initialize AdsLab Web Monetization SDK if enabled
+        if (res.settings?.enableAdsLab) {
+          try {
+            const intTag = res.settings.adslabIntPlacement || "int-46FOXZxueFfc";
+            const rewTag = res.settings.adslabRewPlacement || "rew-wBuPOOmM7YwY";
+            const uid = res.settings.adslabUserId || res.link?.userId || "visitor";
+
+            (window as any).ADSLAB_INT = intTag;
+            (window as any).ADSLAB_REW = rewTag;
+            (window as any).ADSLAB_USER = String(uid);
+
+            const existingSdk = document.querySelector('script[src*="adslab.me/api/sdk.js"]');
+            if (!existingSdk) {
+              const sdkScript = document.createElement("script");
+              sdkScript.src = "https://adslab.me/api/sdk.js";
+              sdkScript.async = true;
+              document.head.appendChild(sdkScript);
+            }
+          } catch (e) {
+            console.warn("[AdsLab] Error mounting SDK:", e);
+          }
+        }
+
         // Setup mathematical captcha
         const num1 = Math.floor(Math.random() * 9) + 2;
         const num2 = Math.floor(Math.random() * 8) + 2;
@@ -892,6 +915,17 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       setVpsDetected(true);
       setVpsDetails(vpnResult);
       return;
+    }
+
+    // Trigger AdsLab Interstitial Ad if enabled
+    if (settings?.enableAdsLab && settings?.adslabAutoInterstitial !== false) {
+      try {
+        if (typeof (window as any).adslabShowInterstitial === "function") {
+          (window as any).adslabShowInterstitial();
+        }
+      } catch (err) {
+        console.warn("[AdsLab] Interstitial trigger error:", err);
+      }
     }
 
     const maxSteps = settings?.adPagesCount || 1;
@@ -1395,6 +1429,16 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                   
                   {/* TOP SPONSOR AD BANNERS (DIVERSE FORMATS: 728x90, 300x250, 468x60) */}
                   <div className="flex flex-col items-center gap-4 py-4 border-b border-slate-800/60">
+                    {/* AdsLab Dedicated Banner Zone if configured */}
+                    {settings?.enableAdsLab && settings?.adslabBannerCode && (
+                      <div className="w-full flex justify-center mb-2">
+                        <AdBlock
+                          htmlCode={settings.adslabBannerCode}
+                          placeholder="AdsLab Responsive Banner"
+                          size="728x90"
+                        />
+                      </div>
+                    )}
                     <AdBlock 
                       htmlCode={settings?.adTopLeftCode || settings?.bannerAd728x90} 
                       placeholder="Top Leaderboard Unit" 
@@ -1451,6 +1495,29 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                       </span>
                     </div>
                   </div>
+
+                  {/* OPTIONAL ADSLAB REWARDED AD FAST-SKIP */}
+                  {settings?.enableAdsLab && settings?.adslabRewardedSkip && (!isTimerFinished || !verifiedHuman) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          if (typeof (window as any).adslabShowRewarded === "function") {
+                            (window as any).adslabShowRewarded();
+                          }
+                        } catch (err) {
+                          console.warn("[AdsLab] Rewarded show error:", err);
+                        }
+                        setIsTimerFinished(true);
+                        setVerifiedHuman(true);
+                        setAdClicked(true);
+                      }}
+                      className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
+                    >
+                      <span>🎁</span>
+                      <span>Watch Quick Video Ad to Instantly Skip Timer & Captcha</span>
+                    </button>
+                  )}
 
                   {/* CAPTCHA CHALLENGE FORM */}
                   {!verifiedHuman && (

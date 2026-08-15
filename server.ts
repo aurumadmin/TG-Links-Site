@@ -725,7 +725,14 @@ function loadDb() {
       sponsoredAd2Url: "https://www.rotate4all.com/promote/pt13azaa9mf1",
       sponsoredAd2Timer: 12,
       telegramChannelUrl: "https://t.me/tglinks_official",
-      instagramUrl: "https://instagram.com/tglinks_official"
+      instagramUrl: "https://instagram.com/tglinks_official",
+      enableAdsLab: false,
+      adslabIntPlacement: "int-46FOXZxueFfc",
+      adslabRewPlacement: "rew-wBuPOOmM7YwY",
+      adslabUserId: "",
+      adslabAutoInterstitial: true,
+      adslabRewardedSkip: false,
+      adslabBannerCode: ""
     }
   };
 
@@ -2740,6 +2747,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
         enableSponsoredAd2: db.settings.enableSponsoredAd2 ?? true,
         sponsoredAd2Url: db.settings.sponsoredAd2Url || "https://www.rotate4all.com/promote/pt13azaa9mf1",
         sponsoredAd2Timer: db.settings.sponsoredAd2Timer ?? 12,
+        enableAdsLab: !!db.settings.enableAdsLab,
+        adslabIntPlacement: db.settings.adslabIntPlacement || "int-46FOXZxueFfc",
+        adslabRewPlacement: db.settings.adslabRewPlacement || "rew-wBuPOOmM7YwY",
+        adslabUserId: db.settings.adslabUserId || "",
+        adslabAutoInterstitial: db.settings.adslabAutoInterstitial !== false,
+        adslabRewardedSkip: !!db.settings.adslabRewardedSkip,
+        adslabBannerCode: db.settings.adslabBannerCode || "",
         activeAdvertiserAds: getActiveAdvertiserAds(db, typeof ip === "string" ? ip : Array.isArray(ip) ? ip[0] : String(ip))
       }
     });
