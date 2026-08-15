@@ -415,27 +415,13 @@ const SponsoredAdGateBlock = React.memo(({
       <div 
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
-        onClick={() => {
-          // Clicking on the ad verifies the user
-          onAdClicked();
-        }}
-        className={`relative bg-slate-950 rounded-xl overflow-hidden border transition-all p-2 flex flex-col justify-center items-center cursor-pointer group ${isHovering ? "border-pink-500 shadow-lg shadow-pink-500/10" : "border-slate-800"}`}
+        className={`relative bg-slate-950 rounded-xl overflow-hidden border transition-all p-2 flex justify-center items-center ${isHovering ? "border-pink-500 shadow-lg shadow-pink-500/10" : "border-slate-800"}`}
       >
         <div 
           ref={containerRef} 
           style={{ minHeight: selectedAd.minHeight, maxWidth: selectedAd.maxWidth }} 
           className="w-full flex justify-center items-center overflow-auto" 
         />
-        
-        {/* Banner Click Prompt */}
-        <div className="w-full mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-          <span className="text-slate-400 group-hover:text-pink-300 transition-colors">
-            👉 Click anywhere on this advertisement banner to verify
-          </span>
-          <span className="text-pink-400 underline font-bold group-hover:text-pink-300">
-            Open Sponsor ➔
-          </span>
-        </div>
       </div>
 
       {adClicked && (
