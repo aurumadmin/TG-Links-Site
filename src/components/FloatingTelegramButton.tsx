@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Instagram } from "lucide-react";
 import { getCachedSettings } from "./SiteLogo";
 
 interface FloatingSocialProps {
@@ -103,29 +104,21 @@ export default function FloatingTelegramButton({
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Instagram"
-            className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full text-white shadow-lg transition-all duration-200 hover:scale-105 active:scale-95 group"
+            className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full shadow-lg transition-all duration-200 hover:scale-105 active:scale-95 group"
             style={{
               background: "radial-gradient(circle at 30% 107%, #fdf497 0%, #fdf497 5%, #fd5949 45%, #d6249f 60%, #285AEB 90%)",
               boxShadow: hoveredButton === "ig" 
                 ? "0 6px 16px -2px rgba(225, 48, 108, 0.6), 0 2px 6px -1px rgba(0, 0, 0, 0.3)" 
                 : "0 4px 10px -2px rgba(225, 48, 108, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.2)",
-              border: "1px solid rgba(255, 255, 255, 0.35)",
+              border: "1px solid rgba(255, 255, 255, 0.4)",
               color: "#ffffff",
               textDecoration: "none"
             }}
           >
-            {/* Instagram Camera SVG Icon */}
-            <svg 
-              className="w-4 h-4 fill-none stroke-current stroke-[2] transition-transform duration-200 group-hover:scale-105" 
-              viewBox="0 0 24 24"
-              strokeLinecap="round" 
-              strokeLinejoin="round"
-              style={{ filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.3))" }}
-            >
-              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
-              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
-            </svg>
+            <Instagram 
+              className="w-4 h-4 text-white drop-shadow-sm transition-transform duration-200 group-hover:scale-110" 
+              strokeWidth={2.2}
+            />
           </a>
 
           {/* Instagram Tooltip on hover */}
@@ -146,7 +139,7 @@ export default function FloatingTelegramButton({
         </div>
       )}
 
-      {/* Compact Telegram Support Button (Icon + "Support", No Green Dot) */}
+      {/* Compact Telegram Support Button (Icon + "Support") */}
       {showTg && (
         <div 
           className="relative flex items-center group"
