@@ -8,6 +8,7 @@ import { User } from "./types";
 import { fetchApi } from "./lib/api";
 import { getCachedSettings, saveCachedSettings } from "./components/SiteLogo";
 import TopLoadingBar from "./components/TopLoadingBar";
+import FloatingTelegramButton from "./components/FloatingTelegramButton";
 
 export default function App() {
   const [user, setUser] = useState<User | null>(() => {
@@ -254,12 +255,15 @@ export default function App() {
     }
 
     return (
-      <DashboardPage 
-        user={user} 
-        initialTab={activeTab as any}
-        onLogout={handleLogout} 
-        onNavigate={handleNavigate} 
-      />
+      <>
+        <DashboardPage 
+          user={user} 
+          initialTab={activeTab as any}
+          onLogout={handleLogout} 
+          onNavigate={handleNavigate} 
+        />
+        <FloatingTelegramButton channelUrl={siteSettings?.telegramChannelUrl} />
+      </>
     );
   }
 
@@ -295,18 +299,21 @@ export default function App() {
 
   // Default: Landing/Guest page
   return (
-    <LandingPage 
-      user={user} 
-      initialTab={activeTab}
-      siteSettings={siteSettings}
-      isSettingsLoaded={isSettingsLoaded}
-      onNavigate={handleNavigate} 
-      onOpenAuth={() => {
-        setShowAuth(true);
-        if (window.location.pathname !== "/login") {
-          window.history.pushState({}, "", "/login");
-        }
-      }} 
-    />
+    <>
+      <LandingPage 
+        user={user} 
+        initialTab={activeTab}
+        siteSettings={siteSettings}
+        isSettingsLoaded={isSettingsLoaded}
+        onNavigate={handleNavigate} 
+        onOpenAuth={() => {
+          setShowAuth(true);
+          if (window.location.pathname !== "/login") {
+            window.history.pushState({}, "", "/login");
+          }
+        }} 
+      />
+      <FloatingTelegramButton channelUrl={siteSettings?.telegramChannelUrl} />
+    </>
   );
 }

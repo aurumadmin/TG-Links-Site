@@ -723,7 +723,8 @@ function loadDb() {
       sponsoredAd1Timer: 12,
       enableSponsoredAd2: true,
       sponsoredAd2Url: "https://www.rotate4all.com/promote/pt13azaa9mf1",
-      sponsoredAd2Timer: 12
+      sponsoredAd2Timer: 12,
+      telegramChannelUrl: "https://t.me/tglinks_official"
     }
   };
 
@@ -902,6 +903,7 @@ function loadDb() {
     if (db.settings.upiId === undefined) { db.settings.upiId = "pay@upi"; changed = true; }
     if (db.settings.upiQrUrl === undefined) { db.settings.upiQrUrl = ""; changed = true; }
     if (db.settings.upiAccountHolderName === undefined) { db.settings.upiAccountHolderName = "TG Links Ads"; changed = true; }
+    if (db.settings.telegramChannelUrl === undefined) { db.settings.telegramChannelUrl = "https://t.me/tglinks_official"; changed = true; }
     if (db.settings.fakeExtraViews === undefined) { db.settings.fakeExtraViews = 0; changed = true; }
     if (db.settings.fakeExtraWithdrawn === undefined) { db.settings.fakeExtraWithdrawn = 0; changed = true; }
     if (db.settings.fakeExtraUsers === undefined) { db.settings.fakeExtraUsers = 0; changed = true; }
@@ -4087,6 +4089,7 @@ ${ticket.adminReply}
       upiId: s.upiId !== undefined ? s.upiId : "pay@upi",
       upiQrUrl: s.upiQrUrl || "",
       upiAccountHolderName: s.upiAccountHolderName || "TG Links Ads",
+      telegramChannelUrl: s.telegramChannelUrl || "https://t.me/tglinks_official",
       advCpmOfferWall: s.advCpmOfferWall ?? 3.0,
       advCpmSponsoredPopup: s.advCpmSponsoredPopup ?? 4.0,
       advCpmBanner728x90: s.advCpmBanner728x90 ?? 1.5,

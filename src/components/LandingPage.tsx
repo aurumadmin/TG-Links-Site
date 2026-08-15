@@ -768,8 +768,23 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
               <span className="text-[10px] text-slate-500 mt-0.5">© 2026 TG Links Inc. All rights reserved.</span>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 bg-slate-900/80 px-3.5 py-1.5 rounded-full border border-slate-800/80 shadow-inner">
-            <span>Proudly Made with 💝 in India</span>
+          <div className="flex flex-wrap items-center gap-3">
+            {siteSettings?.telegramChannelUrl && (
+              <a
+                href={siteSettings.telegramChannelUrl.startsWith("http") ? siteSettings.telegramChannelUrl : `https://${siteSettings.telegramChannelUrl}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-950/60 hover:bg-sky-900/60 px-3 py-1.5 rounded-full border border-sky-800/60 transition shadow-sm"
+              >
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.19-.08-.05-.19-.02-.27 0-.12.03-1.99 1.27-5.61 3.72-.53.36-1.01.54-1.44.53-.47-.01-1.38-.27-2.05-.49-.83-.27-1.49-.42-1.43-.88.03-.24.37-.49 1.02-.75 3.99-1.73 6.66-2.88 8.01-3.44 3.81-1.59 4.6-1.87 5.12-1.88.11 0 .37.03.54.17.14.12.18.28.2.45-.02.07-.02.13-.03.22z"/>
+                </svg>
+                <span>Telegram Community</span>
+              </a>
+            )}
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 bg-slate-900/80 px-3.5 py-1.5 rounded-full border border-slate-800/80 shadow-inner">
+              <span>Proudly Made with 💝 in India</span>
+            </div>
           </div>
         </div>
       </footer>

@@ -3,6 +3,7 @@ import { fetchApi } from "../lib/api";
 import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck, Play, Pause } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings } from "./SiteLogo";
+import FloatingTelegramButton from "./FloatingTelegramButton";
 
 const ensureAbsoluteUrl = (url: string) => {
   if (!url) return "";
@@ -1796,6 +1797,9 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           Proudly Made with 💝 in India
         </div>
       </footer>
+
+      {/* Floating Telegram Channel CTA */}
+      <FloatingTelegramButton channelUrl={settings?.telegramChannelUrl} />
     </div>
   );
 }

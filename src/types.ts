@@ -146,6 +146,8 @@ export interface SystemSettings {
   upiId?: string;
   upiQrUrl?: string;
   upiAccountHolderName?: string;
+  // Official Telegram Channel / Support Link
+  telegramChannelUrl?: string;
   // Public Counter Metric Boosts
   fakeExtraViews?: number;
   fakeExtraWithdrawn?: number;
