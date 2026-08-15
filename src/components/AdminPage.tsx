@@ -3362,12 +3362,12 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   </label>
                   <input
                     type="text"
-                    placeholder="int-46FOXZxueFfc"
+                    placeholder="int-aK6sT5CbQbdc"
                     value={sysSettings.adslabIntPlacement || ""}
                     onChange={(e) => setSysSettings({ ...sysSettings, adslabIntPlacement: e.target.value })}
                     className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
                   />
-                  <p className="text-[10px] text-slate-500">Your AdsLab Interstitial Tag ID (e.g. <code className="text-slate-400">int-46FOXZxueFfc</code>).</p>
+                  <p className="text-[10px] text-slate-500">Your AdsLab Interstitial Tag ID (e.g. <code className="text-slate-400">int-aK6sT5CbQbdc</code>).</p>
                 </div>
 
                 <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
@@ -3376,12 +3376,12 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   </label>
                   <input
                     type="text"
-                    placeholder="rew-wBuPOOmM7YwY"
+                    placeholder="rew-uhPNwWfp0hLN"
                     value={sysSettings.adslabRewPlacement || ""}
                     onChange={(e) => setSysSettings({ ...sysSettings, adslabRewPlacement: e.target.value })}
                     className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
                   />
-                  <p className="text-[10px] text-slate-500">Your AdsLab Rewarded Tag ID (e.g. <code className="text-slate-400">rew-wBuPOOmM7YwY</code>).</p>
+                  <p className="text-[10px] text-slate-500">Your AdsLab Rewarded Tag ID (e.g. <code className="text-slate-400">rew-uhPNwWfp0hLN</code>).</p>
                 </div>
               </div>
 

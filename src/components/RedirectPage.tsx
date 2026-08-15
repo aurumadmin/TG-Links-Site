@@ -548,8 +548,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         // Initialize AdsLab Web Monetization SDK if enabled
         if (res.settings?.enableAdsLab) {
           try {
-            const intTag = res.settings.adslabIntPlacement || "int-46FOXZxueFfc";
-            const rewTag = res.settings.adslabRewPlacement || "rew-wBuPOOmM7YwY";
+            const intTag = res.settings.adslabIntPlacement || "int-aK6sT5CbQbdc";
+            const rewTag = res.settings.adslabRewPlacement || "rew-uhPNwWfp0hLN";
             const uid = res.settings.adslabUserId || res.link?.userId || "visitor";
 
             (window as any).ADSLAB_INT = intTag;
