@@ -146,6 +146,11 @@ export interface SystemSettings {
   upiId?: string;
   upiQrUrl?: string;
   upiAccountHolderName?: string;
+  // Public Counter Metric Boosts
+  fakeExtraViews?: number;
+  fakeExtraWithdrawn?: number;
+  fakeExtraUsers?: number;
+  fakeExtraLinks?: number;
 }
 
 export interface DepositRequest {

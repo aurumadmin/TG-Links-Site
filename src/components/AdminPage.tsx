@@ -2435,6 +2435,87 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </div>
             </div>
 
+            {/* HOMEPAGE ANALYTICS COUNTER BOOST CONTROLS */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-indigo-500/30 space-y-4">
+              <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+                <BarChart3 className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-extrabold text-white text-base">Homepage Analytics Boost & Fake Metrics</h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                Add extra display counts to the public homepage counters (Clicks/Views, Total Withdrawn $, Shortened URLs, and Registered Users) to enhance social proof. The values entered here are seamlessly added to real platform numbers in real-time.
+              </p>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Extra Views / Clicks</span>
+                    <span className="text-[10px] text-slate-500 font-mono">Views Boost</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="e.g. 50000"
+                    value={sysSettings.fakeExtraViews !== undefined ? sysSettings.fakeExtraViews : 0}
+                    onChange={(e) => setSysSettings({ ...sysSettings, fakeExtraViews: parseInt(e.target.value) || 0 })}
+                    className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-sm text-white font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                  <p className="text-[11px] text-slate-500">Appears on the homepage "Total Click Views Served" counter.</p>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Extra Total Withdrawn ($)</span>
+                    <span className="text-[10px] text-slate-500 font-mono">Payouts Boost</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="e.g. 12500"
+                    value={sysSettings.fakeExtraWithdrawn !== undefined ? sysSettings.fakeExtraWithdrawn : 0}
+                    onChange={(e) => setSysSettings({ ...sysSettings, fakeExtraWithdrawn: parseFloat(e.target.value) || 0 })}
+                    className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-sm text-white font-mono focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                  <p className="text-[11px] text-slate-500">Appears on the homepage "Total Withdrawn ($)" counter.</p>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Extra Shortened URLs</span>
+                    <span className="text-[10px] text-slate-500 font-mono">Links Boost</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="e.g. 15000"
+                    value={sysSettings.fakeExtraLinks !== undefined ? sysSettings.fakeExtraLinks : 0}
+                    onChange={(e) => setSysSettings({ ...sysSettings, fakeExtraLinks: parseInt(e.target.value) || 0 })}
+                    className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-sm text-white font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <p className="text-[11px] text-slate-500">Appears on the homepage "Shortened URLs Created" counter.</p>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Extra Registered Users</span>
+                    <span className="text-[10px] text-slate-500 font-mono">Users Boost</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="e.g. 8500"
+                    value={sysSettings.fakeExtraUsers !== undefined ? sysSettings.fakeExtraUsers : 0}
+                    onChange={(e) => setSysSettings({ ...sysSettings, fakeExtraUsers: parseInt(e.target.value) || 0 })}
+                    className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-sm text-white font-mono focus:ring-2 focus:ring-purple-500 outline-none"
+                  />
+                  <p className="text-[11px] text-slate-500">Appears on the homepage "Happy Publisher Users" counter.</p>
+                </div>
+              </div>
+            </div>
+
             {/* DEPOSIT GATEWAYS & MANUAL UPI QR CONFIGURATION */}
             <div className="bg-slate-900/40 p-6 rounded-xl border border-emerald-500/30 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">

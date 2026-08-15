@@ -286,15 +286,15 @@ function createVerificationToken(code: string, ip: string): string {
   const vtok = "vtok_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
   pendingVerificationsMap.set(vtok, {
     code,
-    ip,
+    ip: String(ip || ""),
     createdAt: Date.now(),
     used: false
   });
   
-  // Clean up tokens older than 1 hour
+  // Clean up tokens older than 2 hours
   const now = Date.now();
   for (const [key, value] of pendingVerificationsMap.entries()) {
-    if (now - value.createdAt > 60 * 60 * 1000) {
+    if (now - value.createdAt > 2 * 60 * 60 * 1000) {
       pendingVerificationsMap.delete(key);
     }
   }
@@ -302,17 +302,35 @@ function createVerificationToken(code: string, ip: string): string {
   return vtok;
 }
 
-function verifyAndConsumeToken(vtok: string | undefined, code: string): boolean {
-  if (!vtok || typeof vtok !== "string") return false;
-  const entry = pendingVerificationsMap.get(vtok);
-  if (!entry) return false;
-  if (entry.code !== code) return false;
-  if (entry.used) return false;
-  // 30-minute expiry window
-  if (Date.now() - entry.createdAt > 30 * 60 * 1000) return false;
+function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: string): boolean {
+  if (vtok && typeof vtok === "string") {
+    const entry = pendingVerificationsMap.get(vtok);
+    if (entry && entry.code === code && !entry.used) {
+      if (Date.now() - entry.createdAt <= 2 * 60 * 60 * 1000) {
+        entry.used = true;
+        return true;
+      }
+    }
+  }
+  
+  // Fallback: Check if there's a recent active pending token for this (code, ip) in case external shortener stripped query params
+  if (ip) {
+    const cleanIp = String(ip).trim();
+    const now = Date.now();
+    for (const [, entry] of pendingVerificationsMap.entries()) {
+      if (entry.code === code && !entry.used) {
+        const entryIp = entry.ip.trim();
+        if (entryIp === cleanIp || cleanIp === "127.0.0.1" || entryIp === "127.0.0.1" || !entryIp) {
+          if (now - entry.createdAt <= 2 * 60 * 60 * 1000) {
+            entry.used = true;
+            return true;
+          }
+        }
+      }
+    }
+  }
 
-  entry.used = true;
-  return true;
+  return false;
 }
 
 // --- GOOGLE DRIVE DATABASE SYNC INTEGRATION ---
@@ -876,7 +894,6 @@ function loadDb() {
     if (db.settings.advCpmBannerLeft === undefined) { db.settings.advCpmBannerLeft = 1.5; changed = true; }
     if (db.settings.advCpmBannerRight === undefined) { db.settings.advCpmBannerRight = 1.5; changed = true; }
     if (db.settings.enableFaucetPayDeposit === undefined) { db.settings.enableFaucetPayDeposit = false; changed = true; }
-    if (db.settings.enableFaucetPayDeposit === true) { db.settings.enableFaucetPayDeposit = false; changed = true; }
     if (db.settings.faucetPayMerchant === undefined) { db.settings.faucetPayMerchant = ""; changed = true; }
     if (db.settings.faucetPaySecret === undefined) { db.settings.faucetPaySecret = ""; changed = true; }
     if (db.settings.enableOxaPayDeposit === undefined) { db.settings.enableOxaPayDeposit = true; changed = true; }
@@ -885,6 +902,10 @@ function loadDb() {
     if (db.settings.upiId === undefined) { db.settings.upiId = "pay@upi"; changed = true; }
     if (db.settings.upiQrUrl === undefined) { db.settings.upiQrUrl = ""; changed = true; }
     if (db.settings.upiAccountHolderName === undefined) { db.settings.upiAccountHolderName = "TG Links Ads"; changed = true; }
+    if (db.settings.fakeExtraViews === undefined) { db.settings.fakeExtraViews = 0; changed = true; }
+    if (db.settings.fakeExtraWithdrawn === undefined) { db.settings.fakeExtraWithdrawn = 0; changed = true; }
+    if (db.settings.fakeExtraUsers === undefined) { db.settings.fakeExtraUsers = 0; changed = true; }
+    if (db.settings.fakeExtraLinks === undefined) { db.settings.fakeExtraLinks = 0; changed = true; }
     if (db.settings.enableEmailBackup === undefined) { db.settings.enableEmailBackup = false; changed = true; }
   } else {
     db.settings = initialDb.settings;
@@ -2407,24 +2428,27 @@ function setupRoutes() {
     res.json({ success: true, user: safeUser });
   });
 
-  // --- SYSTEM SETTINGS ---
+  // --- SYSTEM SETTINGS & PUBLIC STATS ---
   
-  app.get("/api/settings", (req, res) => {
-    const db = loadDb();
-    // Return only public non-sensitive settings to client
-    const { siteName, siteTitle, siteDescription, globalCpm, minWithdrawal, withdrawalMethods, faviconUrl, logoUrl, enableOwnAds } = db.settings;
-    res.json({ siteName, siteTitle, siteDescription, globalCpm, minWithdrawal, withdrawalMethods, faviconUrl, logoUrl, enableOwnAds });
-  });
-
   app.get("/api/public/stats", (req, res) => {
     const db = loadDb();
-    const totalUsers = db.users.length;
-    const totalLinks = (db.links ? db.links.length : 0) + (db.deletedLinksCount || 0);
-    const totalClicks = db.clicksLog.length;
+    const fakeViews = Number(db.settings.fakeExtraViews || 0);
+    const fakeLinks = Number(db.settings.fakeExtraLinks || 0);
+    const fakeUsers = Number(db.settings.fakeExtraUsers || 0);
+    const fakeWithdrawn = Number(db.settings.fakeExtraWithdrawn || 0);
+
+    const realUsers = db.users.length;
+    const realLinks = (db.links ? db.links.length : 0) + (db.deletedLinksCount || 0);
+    const realClicks = db.clicksLog.length;
+    const realWithdrawn = (db.withdrawals || [])
+      .filter((w: any) => w.status === "completed" || w.status === "approved")
+      .reduce((sum: number, w: any) => sum + (Number(w.amount) || 0), 0);
+
     res.json({
-      totalUsers,
-      totalLinks,
-      totalClicks,
+      totalUsers: realUsers + fakeUsers,
+      totalLinks: realLinks + fakeLinks,
+      totalClicks: realClicks + fakeViews,
+      totalWithdrawn: Number((realWithdrawn + fakeWithdrawn).toFixed(2)),
       globalCpm: db.settings.globalCpm || 5.0
     });
   });
@@ -2748,13 +2772,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
         if (typeof loggedIp === "string" && loggedIp.includes(",")) {
           loggedIp = loggedIp.split(",")[0].trim();
         }
-        return loggedIp === ip && getISTDateString(c.timestamp) === todayIST;
+        return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST;
       }
     );
 
     if (isFaucetMode && hasCompletedToday) {
       return res.status(429).json({ 
-        error: "Faucet Mode Daily Limit Reached: Your IP address has already completed a shortener link today.",
+        error: "Faucet Mode Daily Limit Reached: Your IP address has already completed this shortener link today.",
         faucetLimitReached: true 
       });
     }
@@ -2765,34 +2789,17 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const vtok = createVerificationToken(link.code, String(ip));
     const finalLandingUrl = `${protocol}://${host}/go-final/${link.code}?vtok=${vtok}`;
 
-    // Dynamically retrieve or re-evaluate the external shortened URL
-    let adFlyShortenedUrl = link.adFlyShortenedUrl;
-    
-    // Check if cached shortener matches the link's current faucet mode and is still enabled
-    let needRegenerate = !adFlyShortenedUrl;
-    if (adFlyShortenedUrl && link.adFlyShortenerId) {
-      const existingShortener = (db.adFlyShorteners || []).find((s: any) => s.id === link.adFlyShortenerId);
-      if (existingShortener) {
-        const isFaucetShortener = !!existingShortener.isFaucetApi;
-        if (isFaucetShortener !== isFaucetMode || !existingShortener.enabled) {
-          needRegenerate = true;
-        }
-      } else {
-        needRegenerate = true;
-      }
-    }
-
-    if (needRegenerate) {
-      const external = await getExternalShortenedUrl(finalLandingUrl, db, user, isFaucetMode);
-      if (external) {
-        adFlyShortenedUrl = external.url;
-        link.adFlyShortenedUrl = external.url;
-        link.adFlyShortenerId = external.id;
-      } else {
-        adFlyShortenedUrl = undefined;
-        link.adFlyShortenedUrl = undefined;
-        link.adFlyShortenerId = undefined;
-      }
+    // Dynamically retrieve or re-evaluate the external shortened URL wrapping finalLandingUrl
+    let adFlyShortenedUrl: string | undefined = undefined;
+    const external = await getExternalShortenedUrl(finalLandingUrl, db, user, isFaucetMode);
+    if (external) {
+      adFlyShortenedUrl = external.url;
+      link.adFlyShortenedUrl = external.url;
+      link.adFlyShortenerId = external.id;
+    } else {
+      adFlyShortenedUrl = undefined;
+      link.adFlyShortenedUrl = undefined;
+      link.adFlyShortenerId = undefined;
     }
 
     saveDb(db);
@@ -2803,7 +2810,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
       success: true, 
       targetUrl: targetUrl,
       originalUrl: link.originalUrl,
-      adFlyShortenedUrl: adFlyShortenedUrl
+      adFlyShortenedUrl: adFlyShortenedUrl,
+      vtok: vtok
     });
   });
 
@@ -2884,19 +2892,51 @@ Sitemap: ${baseUrl}/sitemap.xml`
       targetUrl = "https://" + targetUrl;
     }
 
-    // Strictly enforce verification token check: view is only counted once user completes steps and reaches final destination
-    const isTokenValid = vtok ? verifyAndConsumeToken(vtok, code) : false;
-
-    if (!isTokenValid) {
-      // Re-verify URL has protocol and redirect directly without counting duplicate/unearned view
-      if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-        targetUrl = "https://" + targetUrl;
-      }
-      return res.redirect(targetUrl);
-    }
-
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
     const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
+    const hasActiveShorteners = (db.adFlyShorteners || []).some((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
+
+    // Strictly enforce verification token check: view is only counted once user completes steps and reaches final destination
+    const isTokenValid = verifyAndConsumeToken(vtok, code, String(ip));
+
+    if (!isTokenValid) {
+      // IN FAUCET MODE OR WHEN EXTERNAL SHORTENERS ARE CONFIGURED: BLOCK DIRECT BYPASS COMPLETELY!
+      if (isFaucetMode || hasActiveShorteners) {
+        return res.status(403).send(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Verification Required - Step Incomplete</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { background-color: #020617; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+              .card { background: #0f172a; border: 1px solid #1e293b; padding: 36px; border-radius: 20px; max-width: 460px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
+              .icon { width: 64px; height: 64px; margin: 0 auto 16px; background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.3); color: #f43f5e; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; }
+              h2 { color: #f43f5e; margin: 0 0 10px; font-size: 20px; font-weight: 800; }
+              p { color: #94a3b8; font-size: 13px; line-height: 1.6; margin: 0 0 20px; }
+              .badge { background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.3); color: #fda4af; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: bold; margin-bottom: 16px; display: inline-block; }
+              .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 14px 20px; background: #6366f1; color: white; border-radius: 12px; text-decoration: none; font-weight: bold; font-size: 14px; transition: all 0.2s; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4); }
+              .btn:hover { background: #4f46e5; transform: translateY(-1px); }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="icon">⚠️</div>
+              <div class="badge">Shortener Verification Required</div>
+              <h2>Access Verification Incomplete</h2>
+              <p>You cannot access this destination without completing the required API shortener steps. Please visit the short link again to complete verification.</p>
+              <a href="/go/${code}" class="btn">Start Shortener Verification →</a>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+
+      // If no external shorteners and not faucet mode, return to start
+      return res.redirect(`/go/${code}`);
+    }
 
     const todayIST = getISTDateString();
     const hasCompletedToday = db.clicksLog.some(
@@ -2905,7 +2945,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
         if (typeof loggedIp === "string" && loggedIp.includes(",")) {
           loggedIp = loggedIp.split(",")[0].trim();
         }
-        return loggedIp === ip && getISTDateString(c.timestamp) === todayIST;
+        return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST;
       }
     );
 
@@ -2927,9 +2967,9 @@ Sitemap: ${baseUrl}/sitemap.xml`
         <body>
           <div class="card">
             <h2>Faucet Mode Daily Limit Reached</h2>
-            <p>Your IP address has already completed a shortener link today.</p>
+            <p>Your IP address has already completed this shortener link today.</p>
             <div class="badge">1 Completion Per IP / Daily Limit Enforced (Resets 00:00 IST)</div>
-            <p style="margin-top: 16px; font-size: 12px; color: #64748b;">In Faucet Mode, access to additional shortener links is blocked until 00:00 IST to ensure valid advertiser view counting.</p>
+            <p style="margin-top: 16px; font-size: 12px; color: #64748b;">In Faucet Mode, access to the same shortener link is limited to 1 valid claim per IP per day.</p>
           </div>
         </body>
         </html>
@@ -2942,7 +2982,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
         if (typeof loggedIp === "string" && loggedIp.includes(",")) {
           loggedIp = loggedIp.split(",")[0].trim();
         }
-        return loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
+        return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
       }
     );
 

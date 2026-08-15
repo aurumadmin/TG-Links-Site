@@ -24,10 +24,17 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
   const [shortenedLink, setShortenedLink] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<{
+    totalLinks: number;
+    totalClicks: number;
+    totalUsers: number;
+    totalWithdrawn?: number;
+    globalCpm: number;
+  }>({
     totalLinks: 0,
     totalClicks: 0,
     totalUsers: 0,
+    totalWithdrawn: 0,
     globalCpm: 5.0
   });
   const [siteSettings, setSiteSettings] = useState<any>(() => propSettings || getCachedSettings());
@@ -53,6 +60,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
           totalLinks: res.totalLinks !== undefined ? res.totalLinks : 0,
           totalClicks: res.totalClicks !== undefined ? res.totalClicks : 0,
           totalUsers: res.totalUsers !== undefined ? res.totalUsers : 0,
+          totalWithdrawn: res.totalWithdrawn !== undefined ? res.totalWithdrawn : 0,
           globalCpm: res.globalCpm || 5.0
         });
       })
@@ -187,26 +195,26 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                 {/* Payout Badge */}
                 <div className="inline-flex">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-950/40 text-xs font-bold text-indigo-400 border border-indigo-900/50">
-                    <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] uppercase font-black">#1 Rated</span>
-                    Best Telegram URL Shortener ($7.00 CPM)
+                    <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] uppercase font-black">Top Rated</span>
+                    Universal URL Shortener & Monetization Network
                     <ArrowRight className="w-3.5 h-3.5" />
                   </span>
                 </div>
 
                 {/* Hero Headings */}
                 <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight">
-                  <span className="text-indigo-400">TG Links</span> — Shorten URLs & <span className="text-emerald-400">Earn $7 CPM</span>
+                  <span className="text-indigo-400">{siteSettings?.siteName || "TG Links"}</span> — Shorten URLs & <span className="text-emerald-400">Earn ${(stats.globalCpm || 5.0).toFixed(2)} CPM</span>
                   <br />
-                  <span className="text-slate-100">Monetize Your </span>
+                  <span className="text-slate-100">Monetize All Your </span>
                   <span className="text-indigo-400 inline-block relative">
-                    Telegram Links.
+                    Web & Social Traffic.
                     <span className="absolute left-0 right-0 bottom-1 h-2 bg-indigo-950/80 -z-10 rounded-full"></span>
                   </span>
                 </h1>
 
                 {/* Hero Description */}
                 <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
-                  Step into the highest paying Telegram link shortener network. Every link you share on TG channels, Telegram bots, blogs, or social networks generates real income with guaranteed $7.00 CPM payout rates, instant crypto withdrawals, and live real-time click tracking.
+                  Step into the highest paying URL shortener platform. Monetize traffic from YouTube, Telegram, WhatsApp, Discord, blogs, social networks, and crypto faucets with guaranteed high CPM payout rates, instant payment withdrawals, and live real-time click tracking.
                 </p>
 
                 {/* Get Started Button */}
@@ -433,18 +441,22 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
 
             {/* STATISTICS OVERVIEW */}
             <section className="bg-slate-900/40 border-t border-b border-slate-850 py-16">
-              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
-                <div>
-                  <div className="text-4xl sm:text-5xl font-black text-emerald-400">{stats.totalClicks.toLocaleString()}+</div>
-                  <p className="text-slate-400 mt-2 font-semibold text-sm uppercase tracking-wider">Total Click Views Served</p>
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 text-center">
+                <div className="bg-slate-950/60 p-6 rounded-2xl border border-slate-800/80 shadow-md">
+                  <div className="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-400 font-mono tracking-tight">{stats.totalClicks.toLocaleString()}+</div>
+                  <p className="text-slate-400 mt-2 font-bold text-xs uppercase tracking-wider">Total Click Views Served</p>
                 </div>
-                <div>
-                  <div className="text-4xl sm:text-5xl font-black text-indigo-400">{stats.totalLinks.toLocaleString()}+</div>
-                  <p className="text-slate-400 mt-2 font-semibold text-sm uppercase tracking-wider">Shortened URLs Created</p>
+                <div className="bg-slate-950/60 p-6 rounded-2xl border border-slate-800/80 shadow-md">
+                  <div className="text-3xl sm:text-4xl lg:text-5xl font-black text-amber-400 font-mono tracking-tight">${(stats.totalWithdrawn || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}+</div>
+                  <p className="text-slate-400 mt-2 font-bold text-xs uppercase tracking-wider">Total Amount Withdrawn</p>
                 </div>
-                <div>
-                  <div className="text-4xl sm:text-5xl font-black text-purple-400">{stats.totalUsers.toLocaleString()}+</div>
-                  <p className="text-slate-400 mt-2 font-semibold text-sm uppercase tracking-wider">Happy Publisher Users</p>
+                <div className="bg-slate-950/60 p-6 rounded-2xl border border-slate-800/80 shadow-md">
+                  <div className="text-3xl sm:text-4xl lg:text-5xl font-black text-indigo-400 font-mono tracking-tight">{stats.totalLinks.toLocaleString()}+</div>
+                  <p className="text-slate-400 mt-2 font-bold text-xs uppercase tracking-wider">Shortened URLs Created</p>
+                </div>
+                <div className="bg-slate-950/60 p-6 rounded-2xl border border-slate-800/80 shadow-md">
+                  <div className="text-3xl sm:text-4xl lg:text-5xl font-black text-purple-400 font-mono tracking-tight">{stats.totalUsers.toLocaleString()}+</div>
+                  <p className="text-slate-400 mt-2 font-bold text-xs uppercase tracking-wider">Happy Publisher Users</p>
                 </div>
               </div>
             </section>
@@ -453,8 +465,8 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
             <section className="py-20 bg-slate-950">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="text-center max-w-3xl mx-auto mb-16">
-                  <h2 className="text-3xl font-extrabold text-white tracking-tight">Why Choose TG Links?</h2>
-                  <p className="text-slate-400 mt-2">We provide the most feature-rich, high-paying adlink syndication platform on the web.</p>
+                  <h2 className="text-3xl font-extrabold text-white tracking-tight">Why Choose {siteSettings?.siteName || "TG Links"}?</h2>
+                  <p className="text-slate-400 mt-2">We provide the most feature-rich, high-paying adlink monetization platform on the web.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
@@ -463,7 +475,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                       <DollarSign className="w-6 h-6" />
                     </div>
                     <h3 className="font-extrabold text-white text-lg mb-2">Highest CPM Rates</h3>
-                    <p className="text-sm text-slate-400 leading-relaxed">Earn up to $15.00 per 1,000 views! We negotiate top-tier ad network rates to maximize your returns.</p>
+                    <p className="text-sm text-slate-400 leading-relaxed">Earn guaranteed top-tier payouts for every single view across mobile and desktop devices.</p>
                   </div>
 
                   <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
@@ -471,23 +483,23 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                       <Activity className="w-6 h-6" />
                     </div>
                     <h3 className="font-extrabold text-white text-lg mb-2">Deep Live Analytics</h3>
-                    <p className="text-sm text-slate-400 leading-relaxed">Track your impressions, referral performance, and CPM rates live in our client dashboard.</p>
+                    <p className="text-sm text-slate-400 leading-relaxed">Track your impressions, referral performance, and CPM rates live in your client dashboard.</p>
                   </div>
 
                   <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
                     <div className="w-12 h-12 rounded-xl bg-purple-950/60 border border-purple-900/30 text-purple-400 flex items-center justify-center mb-4">
                       <ShieldAlert className="w-6 h-6" />
                     </div>
-                    <h3 className="font-extrabold text-white text-lg mb-2">Multiple APIs Chaining</h3>
-                    <p className="text-sm text-slate-400 leading-relaxed">Admin can pool external AdLinkFly shorteners inside our platform. Maximum passive yields guaranteed.</p>
+                    <h3 className="font-extrabold text-white text-lg mb-2">Multi-API Syndication</h3>
+                    <p className="text-sm text-slate-400 leading-relaxed">Chain external AdLinkFly shorteners with full Faucet Mode support for maximum passive revenue.</p>
                   </div>
 
                   <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
                     <div className="w-12 h-12 rounded-xl bg-rose-950/60 border border-rose-900/30 text-rose-400 flex items-center justify-center mb-4">
                       <Mail className="w-6 h-6" />
                     </div>
-                    <h3 className="font-extrabold text-white text-lg mb-2">Dedicated Support</h3>
-                    <p className="text-sm text-slate-400 leading-relaxed">Got questions? Our customer service team is online 24/7 to help approve payments and manage links.</p>
+                    <h3 className="font-extrabold text-white text-lg mb-2">Instant Cashouts & Support</h3>
+                    <p className="text-sm text-slate-400 leading-relaxed">Low $2.00 minimum threshold with fast payouts via UPI, Crypto, FaucetPay, and Bank Transfer.</p>
                   </div>
                 </div>
               </div>
@@ -500,13 +512,13 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                 {/* Article Header */}
                 <div className="text-center space-y-3">
                   <span className="text-xs font-bold uppercase tracking-widest text-emerald-400 px-3 py-1 bg-emerald-950/60 border border-emerald-900/50 rounded-full">
-                    #1 Telegram Link Monetization
+                    #1 Universal Link Monetization
                   </span>
                   <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-                    TG Links — The Ultimate Telegram Link Shortener & URL Shrinker
+                    {siteSettings?.siteName || "TG Links"} — The Ultimate URL Shortener for All Traffic Sources
                   </h2>
                   <p className="text-slate-400 text-sm max-w-2xl mx-auto leading-relaxed">
-                    Designed specifically for Telegram channel owners, bot developers, group admins, and content creators looking for maximum CPM payouts and instant payment processing.
+                    Engineered for social media influencers, webmasters, crypto faucets, bot developers, and content creators looking for maximum CPM payouts and instant payment processing.
                   </p>
                 </div>
 
@@ -515,26 +527,26 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                   <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-3">
                     <h3 className="text-lg font-bold text-indigo-400 flex items-center gap-2">
                       <Sparkles className="w-5 h-5 text-indigo-400" />
-                      Highest Paying Telegram Link Shortener
+                      Highest Paying URL Shortener Platform
                     </h3>
                     <p>
-                      <strong>TG Links</strong> is engineered to give publishers the absolute highest CPM rate in the industry. With a guaranteed <strong>$7.00 CPM</strong> worldwide rate, every 1,000 completed visitor views directly generates $7.00 in revenue.
+                      <strong>{siteSettings?.siteName || "TG Links"}</strong> is engineered to give publishers the absolute highest CPM rate in the industry. With guaranteed worldwide rates, every completed visitor view directly generates real revenue.
                     </p>
                     <p>
-                      Whether you post download links, movie links, APK software, trading signals, or educational resources in your Telegram channels, TG Links transforms your audience into a daily revenue stream.
+                      Whether you post download links, tutorials, videos, APK software, gaming mods, crypto faucets, or social media posts, our platform transforms your audience into a predictable daily income stream.
                     </p>
                   </div>
 
                   <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-3">
                     <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
                       <DollarSign className="w-5 h-5 text-emerald-400" />
-                      Instant API Shortening & Bot Integration
+                      Developer API & Faucet Traffic Monetization
                     </h3>
                     <p>
-                      Easily automate link generation with our Developer API! Connect TG Links directly to your Telegram bots, auto-posting scripts, and web platforms using standard HTTP GET/POST endpoints.
+                      Easily automate link generation with our Developer API! Connect shortener endpoints directly to your bots, auto-posting scripts, and web platforms using standard HTTP GET/POST API calls.
                     </p>
                     <p>
-                      TG Links also supports <strong>Crypto Faucet Mode</strong>, enabling micro-task websites, PTCS, and faucet networks to route traffic cleanly without getting flagged or blocked.
+                      Our platform also natively supports <strong>Crypto Faucet Mode</strong>, enabling micro-task websites, PTCS, and faucet networks to route traffic cleanly without getting flagged or blocked.
                     </p>
                   </div>
                 </div>
@@ -549,21 +561,21 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                   <div className="space-y-3">
                     <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
                       <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
-                        <span>What is TG Links and how does it work?</span>
+                        <span>What is {siteSettings?.siteName || "TG Links"} and how does it work?</span>
                         <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
                       </summary>
                       <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
-                        TG Links is a free URL shortener platform that pays you whenever visitors click and complete shortener steps on your links. Simply shorten any long URL, share it across Telegram channels, social media, or websites, and get paid for every view.
+                        It is a free URL shortener platform that pays you whenever visitors click and complete shortener steps on your links. Simply shorten any long URL, share it across social networks, websites, faucets, or apps, and get paid for every view.
                       </p>
                     </details>
 
                     <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
                       <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
-                        <span>What is the CPM rate on TG Links?</span>
+                        <span>What are the CPM payout rates?</span>
                         <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
                       </summary>
                       <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
-                        TG Links offers a guaranteed $7.00 CPM (Cost Per Mille) for traffic from all countries worldwide. Every 1,000 valid views equals $7.00 added directly to your account balance.
+                        We offer high guaranteed CPM (Cost Per Mille) rates for traffic from all countries worldwide. Every 1,000 valid views equals real money added directly to your account balance.
                       </p>
                     </details>
 
@@ -573,17 +585,17 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                         <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
                       </summary>
                       <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
-                        The minimum payout threshold is only $2.00! We support fast withdrawals via FaucetPay (USDT/TRX/BTC), UPI, PayTM, PhonePe, Bank Transfer, PayPal, and WebMoney.
+                        The minimum payout threshold is only $2.00! We support fast withdrawals via UPI, Crypto USDT / TRX / BTC, FaucetPay, PayTM, PhonePe, Bank Transfer, PayPal, and WebMoney.
                       </p>
                     </details>
 
                     <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
                       <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
-                        <span>Is TG Links safe for Telegram Channels and Bots?</span>
+                        <span>What traffic types and platforms are supported?</span>
                         <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
                       </summary>
                       <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
-                        Yes! TG Links uses high-reputation domain names and secure SSL redirection scripts specifically designed to bypass Telegram spam filters and work seamlessly inside Telegram in-app browsers.
+                        All authentic traffic is welcome! You can monetize visits from social media (YouTube, WhatsApp, Telegram, Discord, TikTok, Facebook, Twitter/X), blogs, content portals, crypto faucets, PTCS networks, and custom applications.
                       </p>
                     </details>
                   </div>
