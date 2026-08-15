@@ -3517,6 +3517,40 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   If your AdsLab account includes responsive or standard display banner zone tags, paste the HTML/JS snippet here to render it prominently on the gateway.
                 </p>
               </div>
+
+              {/* WHY ADS MIGHT NOT SHOW YET (DIAGNOSTICS & INVENTORY GUIDE) */}
+              <div className="p-4 bg-indigo-950/30 border border-indigo-500/30 rounded-xl space-y-2.5">
+                <div className="flex items-center gap-2 text-indigo-300 font-bold text-xs">
+                  <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span>Why AdsLab Interstitials / Rewarded Ads Might Not Show Immediately:</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-slate-300">
+                  <div className="p-2.5 bg-slate-900/60 rounded-lg border border-slate-800/80 space-y-1">
+                    <strong className="text-amber-400 block font-semibold">1. Ad Inventory & Geo-Targeting (No-Fill)</strong>
+                    <p className="text-slate-400 leading-relaxed">
+                      Ad networks like AdsLab serve ads depending on advertiser demand for your specific visitor country, IP type, and device. If there are no active campaigns for your region, the network returns an empty response (no-fill).
+                    </p>
+                  </div>
+                  <div className="p-2.5 bg-slate-900/60 rounded-lg border border-slate-800/80 space-y-1">
+                    <strong className="text-amber-400 block font-semibold">2. Domain Authorization in AdsLab Dashboard</strong>
+                    <p className="text-slate-400 leading-relaxed">
+                      Make sure your website domain or public URL is added and approved inside your AdsLab publisher account. Unapproved domains or temporary dev preview URLs often get blocked by ad network fraud filters.
+                    </p>
+                  </div>
+                  <div className="p-2.5 bg-slate-900/60 rounded-lg border border-slate-800/80 space-y-1">
+                    <strong className="text-emerald-400 block font-semibold">3. Built-In Fail-Safe Protection</strong>
+                    <p className="text-slate-400 leading-relaxed">
+                      Your platform code contains non-blocking wrappers. If AdsLab has 0 inventory or fails to deliver an ad, your visitors can still solve captcha, advance steps, and reach destination URLs without being stuck.
+                    </p>
+                  </div>
+                  <div className="p-2.5 bg-slate-900/60 rounded-lg border border-slate-800/80 space-y-1">
+                    <strong className="text-emerald-400 block font-semibold">4. Multi-Network Monetization Backup</strong>
+                    <p className="text-slate-400 leading-relaxed">
+                      You can paste backup display ads, Popunder networks (Monetag, Adsterra, PropellerAds), or Neon.today banners below. When AdsLab is dry, other ad networks will keep generating revenue for you!
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* ADVERTISING BANNER HTML INJECTIONS */}
