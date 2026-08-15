@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { fetchApi } from "../lib/api";
-import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck, Play, Pause } from "lucide-react";
+import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck, Play, Pause, RotateCw } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings } from "./SiteLogo";
 import FloatingTelegramButton from "./FloatingTelegramButton";
@@ -45,6 +45,57 @@ interface AdvertiserAdProp {
   bannerImageUrl?: string;
   adCode?: string;
 }
+
+// Universal helpers to trigger AdsLab Interstitial & Rewarded Ads safely
+const triggerAdsLabInterstitial = (settings?: any) => {
+  if (settings?.enableAdsLab === false) return;
+  try {
+    const w = window as any;
+    if (typeof w.adslabShowInterstitial === "function") {
+      w.adslabShowInterstitial();
+    } else if (w.adslab && typeof w.adslab.showInterstitial === "function") {
+      w.adslab.showInterstitial();
+    } else if (w.adslab && typeof w.adslab.interstitial === "function") {
+      w.adslab.interstitial();
+    } else if (typeof w.showInterstitial === "function") {
+      w.showInterstitial();
+    } else if (typeof w.showAd === "function") {
+      w.showAd();
+    } else if (Array.isArray(w.adslab)) {
+      w.adslab.push(["interstitial"]);
+    }
+  } catch (err) {
+    console.warn("[AdsLab] Interstitial ad trigger notice:", err);
+  }
+};
+
+const triggerAdsLabRewarded = (settings?: any, onRewardEarned?: () => void) => {
+  if (settings?.enableAdsLab === false) {
+    onRewardEarned?.();
+    return;
+  }
+  try {
+    const w = window as any;
+    if (typeof w.adslabShowRewarded === "function") {
+      w.adslabShowRewarded(onRewardEarned);
+    } else if (w.adslab && typeof w.adslab.showRewarded === "function") {
+      w.adslab.showRewarded(onRewardEarned);
+    } else if (w.adslab && typeof w.adslab.rewarded === "function") {
+      w.adslab.rewarded(onRewardEarned);
+    } else if (typeof w.showRewardedAd === "function") {
+      w.showRewardedAd(onRewardEarned);
+    } else if (typeof w.showRewarded === "function") {
+      w.showRewarded(onRewardEarned);
+    } else if (Array.isArray(w.adslab)) {
+      w.adslab.push(["rewarded", onRewardEarned]);
+    } else {
+      onRewardEarned?.();
+    }
+  } catch (err) {
+    console.warn("[AdsLab] Rewarded ad trigger notice:", err);
+    onRewardEarned?.();
+  }
+};
 
 const AdBlock = ({ 
   htmlCode, 
@@ -311,9 +362,20 @@ const SponsoredAdGateBlock = React.memo(({
         </span>
       </div>
       
-      <p className="text-[11px] text-slate-400 leading-normal">
-        Please click anywhere on the sponsored advertisement below to verify you are a human visitor and immediately unlock your destination link.
-      </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-400 leading-normal">
+        <p>
+          Please click anywhere on the sponsored advertisement below to verify you are a human visitor and immediately unlock your destination link. <span className="text-amber-400 font-semibold">(Refresh the page if the ad doesn't load)</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 px-2.5 py-1 rounded-lg border border-slate-700/80 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-sm"
+          title="Reload page if ad doesn't load"
+        >
+          <RotateCw className="w-3 h-3 text-pink-400" />
+          <span>Refresh Page</span>
+        </button>
+      </div>
 
       <div 
         onMouseEnter={() => setIsHovering(true)}
@@ -613,18 +675,40 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           try {
             const intTag = res.settings.adslabIntPlacement || "int-aK6sT5CbQbdc";
             const rewTag = res.settings.adslabRewPlacement || "rew-uhPNwWfp0hLN";
-            const uid = res.settings.adslabUserId || res.link?.userId || "visitor";
+            const uid = res.settings.adslabUserId?.trim() || "";
 
+            // Configure global properties expected by AdsLab Web SDK
             (window as any).ADSLAB_INT = intTag;
             (window as any).ADSLAB_REW = rewTag;
-            (window as any).ADSLAB_USER = String(uid);
+            (window as any).adslab_int = intTag;
+            (window as any).adslab_rew = rewTag;
+            (window as any).adslab = (window as any).adslab || [];
 
-            const existingSdk = document.querySelector('script[src*="adslab.me/api/sdk.js"]');
+            // Custom User ID is completely optional (omit if empty for standard anonymous tracking)
+            if (uid) {
+              (window as any).ADSLAB_USER = uid;
+            } else {
+              delete (window as any).ADSLAB_USER;
+            }
+
+            const existingSdk = document.querySelector('script[src*="adslab.me/api/sdk.js"]') as HTMLScriptElement;
             if (!existingSdk) {
               const sdkScript = document.createElement("script");
+              sdkScript.id = "adslab-sdk";
               sdkScript.src = "https://adslab.me/api/sdk.js";
               sdkScript.async = true;
+              sdkScript.setAttribute("data-adslab-int", intTag);
+              sdkScript.setAttribute("data-adslab-rew", rewTag);
+              sdkScript.setAttribute("data-placement-int", intTag);
+              sdkScript.setAttribute("data-placement-rew", rewTag);
+              if (uid) {
+                sdkScript.setAttribute("data-adslab-user", uid);
+              }
               document.head.appendChild(sdkScript);
+            } else {
+              existingSdk.setAttribute("data-adslab-int", intTag);
+              existingSdk.setAttribute("data-adslab-rew", rewTag);
+              if (uid) existingSdk.setAttribute("data-adslab-user", uid);
             }
           } catch (e) {
             console.warn("[AdsLab] Error mounting SDK:", e);
@@ -881,17 +965,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       setVerifiedHuman(true);
 
       // Trigger AdsLab's Interstitial Ad immediately upon completing Anti-Bot Verification
-      if (settings?.enableAdsLab !== false) {
-        try {
-          if (typeof (window as any).adslabShowInterstitial === "function") {
-            (window as any).adslabShowInterstitial();
-          } else if (typeof (window as any).showAd === "function") {
-            (window as any).showAd();
-          }
-        } catch (err) {
-          console.warn("[AdsLab] Interstitial ad trigger error upon verification:", err);
-        }
-      }
+      triggerAdsLabInterstitial(settings);
     } else {
       setCaptchaError(true);
       setCaptchaAnswer("");
@@ -995,13 +1069,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
     // Trigger AdsLab Interstitial Ad if enabled
     if (settings?.enableAdsLab && settings?.adslabAutoInterstitial !== false) {
-      try {
-        if (typeof (window as any).adslabShowInterstitial === "function") {
-          (window as any).adslabShowInterstitial();
-        }
-      } catch (err) {
-        console.warn("[AdsLab] Interstitial trigger error:", err);
-      }
+      triggerAdsLabInterstitial(settings);
     }
 
     const maxSteps = settings?.adPagesCount || 1;
@@ -1023,17 +1091,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       if (faucetLimitDetected) return;
 
       // Trigger AdsLab Rewarded Ad on Get Final Link (with fail-safe fallback)
-      if (settings?.enableAdsLab !== false) {
-        try {
-          if (typeof (window as any).adslabShowRewarded === "function") {
-            (window as any).adslabShowRewarded();
-          } else if (typeof (window as any).showRewardedAd === "function") {
-            (window as any).showRewardedAd();
-          }
-        } catch (err) {
-          console.warn("[AdsLab] Rewarded ad trigger error on Get Final Link:", err);
-        }
-      }
+      triggerAdsLabRewarded(settings);
 
       setRedirecting(true);
       try {
@@ -1590,13 +1648,12 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     <button
                       type="button"
                       onClick={() => {
-                        try {
-                          if (typeof (window as any).adslabShowRewarded === "function") {
-                            (window as any).adslabShowRewarded();
-                          }
-                        } catch (err) {
-                          console.warn("[AdsLab] Rewarded show error:", err);
-                        }
+                        triggerAdsLabRewarded(settings, () => {
+                          setIsTimerFinished(true);
+                          setVerifiedHuman(true);
+                          setAdClicked(true);
+                        });
+                        // Also proactively complete step for user satisfaction
                         setIsTimerFinished(true);
                         setVerifiedHuman(true);
                         setAdClicked(true);

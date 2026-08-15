@@ -3481,15 +3481,18 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 </div>
 
                 <div className="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-300 uppercase">Custom User ID / Tag</label>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-300 uppercase">Custom User ID / Tag</label>
+                    <span className="text-[9px] font-bold text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">OPTIONAL</span>
+                  </div>
                   <input
                     type="text"
-                    placeholder="Leave blank for dynamic user ID"
+                    placeholder="Leave blank (NOT required)"
                     value={sysSettings.adslabUserId || ""}
                     onChange={(e) => setSysSettings({ ...sysSettings, adslabUserId: e.target.value })}
                     className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono text-emerald-400 outline-none"
                   />
-                  <p className="text-[10px] text-slate-500">Overrides <code className="text-slate-400">window.ADSLAB_USER</code> tracking ID.</p>
+                  <p className="text-[10px] text-slate-500"><strong>Not required.</strong> Leave blank for automatic anonymous visitor tracking.</p>
                 </div>
               </div>
 
