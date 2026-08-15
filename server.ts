@@ -689,8 +689,8 @@ function loadDb() {
       siteName: "TG LINKS",
       siteTitle: "Shorten Links and Earn Money",
       siteDescription: "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
-      globalCpm: 5.0, // $5 per 1000 clicks
-      minWithdrawal: 2.0,
+      globalCpm: 7.0, // $7 per 1000 clicks
+      minWithdrawal: 0.5, // $0.5 minimum withdrawal
       withdrawalMethods: ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
       adPagesCount: 1,
       bannerAd728x90: `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center">
@@ -2449,7 +2449,8 @@ function setupRoutes() {
       totalLinks: realLinks + fakeLinks,
       totalClicks: realClicks + fakeViews,
       totalWithdrawn: Number((realWithdrawn + fakeWithdrawn).toFixed(2)),
-      globalCpm: db.settings.globalCpm || 5.0
+      globalCpm: db.settings.globalCpm !== undefined ? db.settings.globalCpm : 7.0,
+      minWithdrawal: db.settings.minWithdrawal !== undefined ? db.settings.minWithdrawal : 0.5
     });
   });
 
@@ -4064,8 +4065,8 @@ ${ticket.adminReply}
       siteName: s.siteName || "TG LINKS",
       siteTitle: s.siteTitle || "Shorten Links and Earn Money",
       siteDescription: s.siteDescription || "",
-      globalCpm: s.globalCpm || 5,
-      minWithdrawal: s.minWithdrawal || 2,
+      globalCpm: s.globalCpm !== undefined ? s.globalCpm : 7.0,
+      minWithdrawal: s.minWithdrawal !== undefined ? s.minWithdrawal : 0.5,
       withdrawalMethods: s.withdrawalMethods || ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
       adPagesCount: s.adPagesCount || 1,
       bannerAd728x90: s.bannerAd728x90 || "",
@@ -4526,8 +4527,8 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     siteName: rawSettings.siteName || rawSettings.site_name || rawSettings.title || "TG LINKS",
     siteTitle: rawSettings.siteTitle || rawSettings.site_title || "Shorten Links and Earn Money",
     siteDescription: rawSettings.siteDescription || rawSettings.site_description || "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
-    globalCpm: cleanNumber(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 5, 5),
-    minWithdrawal: cleanNumber(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 2, 2),
+    globalCpm: cleanNumber(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 7, 7),
+    minWithdrawal: cleanNumber(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 0.5, 0.5),
     withdrawalMethods: Array.isArray(rawSettings.withdrawalMethods) ? rawSettings.withdrawalMethods : ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
     adPagesCount: cleanNumber(rawSettings.adPagesCount ?? rawSettings.ad_pages_count ?? 1, 1),
     bannerAd728x90: rawSettings.bannerAd728x90 || rawSettings.banner_728x90 || `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center"><span class="text-xs uppercase tracking-widest font-bold opacity-75">Sponsor Banner (728x90)</span></div>`,

@@ -1736,7 +1736,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                     />
                     <div className="flex justify-between mt-1.5 text-[10px] text-slate-500 font-semibold">
                       <span>Available: ${stats?.balance ? stats.balance.toFixed(4) : "0.00"}</span>
-                      <span>Min Threshold: ${settings?.minWithdrawal.toFixed(2) || "2.00"}</span>
+                      <span>Min Threshold: ${settings?.minWithdrawal !== undefined ? Number(settings.minWithdrawal).toFixed(2) : "0.50"}</span>
                     </div>
                   </div>
 

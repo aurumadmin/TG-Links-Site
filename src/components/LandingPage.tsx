@@ -24,20 +24,23 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
   const [shortenedLink, setShortenedLink] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const initialSettings = propSettings || getCachedSettings();
+  const [siteSettings, setSiteSettings] = useState<any>(() => initialSettings);
   const [stats, setStats] = useState<{
     totalLinks: number;
     totalClicks: number;
     totalUsers: number;
     totalWithdrawn?: number;
     globalCpm: number;
-  }>({
+    minWithdrawal?: number;
+  }>(() => ({
     totalLinks: 0,
     totalClicks: 0,
     totalUsers: 0,
     totalWithdrawn: 0,
-    globalCpm: 5.0
-  });
-  const [siteSettings, setSiteSettings] = useState<any>(() => propSettings || getCachedSettings());
+    globalCpm: initialSettings?.globalCpm !== undefined ? Number(initialSettings.globalCpm) : 7.0,
+    minWithdrawal: initialSettings?.minWithdrawal !== undefined ? Number(initialSettings.minWithdrawal) : 0.5
+  }));
   const [activeTab, setActiveTab] = useState(initialTab || "home"); // home, rates, contact, privacy, dmca, terms
 
   useEffect(() => {
@@ -61,17 +64,44 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
           totalClicks: res.totalClicks !== undefined ? res.totalClicks : 0,
           totalUsers: res.totalUsers !== undefined ? res.totalUsers : 0,
           totalWithdrawn: res.totalWithdrawn !== undefined ? res.totalWithdrawn : 0,
-          globalCpm: res.globalCpm || 5.0
+          globalCpm: res.globalCpm !== undefined ? res.globalCpm : (initialSettings?.globalCpm || 7.0),
+          minWithdrawal: res.minWithdrawal !== undefined ? res.minWithdrawal : (initialSettings?.minWithdrawal || 0.5)
         });
       })
       .catch((err) => console.error("Error loading public stats:", err));
 
-    if (!propSettings) {
-      fetchApi("/settings")
-        .then((res) => setSiteSettings(res))
-        .catch((err) => console.error("Error loading public settings:", err));
-    }
+    const handleSettingsUpdated = () => {
+      const c = getCachedSettings();
+      if (c) {
+        setSiteSettings(c);
+      }
+      fetchApi("/public/stats").then((res) => {
+        if (!res) return;
+        setStats(prev => ({
+          ...prev,
+          totalLinks: res.totalLinks !== undefined ? res.totalLinks : prev.totalLinks,
+          totalClicks: res.totalClicks !== undefined ? res.totalClicks : prev.totalClicks,
+          totalUsers: res.totalUsers !== undefined ? res.totalUsers : prev.totalUsers,
+          totalWithdrawn: res.totalWithdrawn !== undefined ? res.totalWithdrawn : prev.totalWithdrawn,
+          globalCpm: res.globalCpm !== undefined ? res.globalCpm : prev.globalCpm,
+          minWithdrawal: res.minWithdrawal !== undefined ? res.minWithdrawal : prev.minWithdrawal
+        }));
+      }).catch(() => {});
+    };
+
+    window.addEventListener("site_settings_updated", handleSettingsUpdated);
+    return () => window.removeEventListener("site_settings_updated", handleSettingsUpdated);
   }, [propSettings]);
+
+  const currentCpm = siteSettings?.globalCpm !== undefined 
+    ? Number(siteSettings.globalCpm) 
+    : (stats.globalCpm !== undefined ? Number(stats.globalCpm) : 7.0);
+
+  const minWithdrawal = siteSettings?.minWithdrawal !== undefined
+    ? Number(siteSettings.minWithdrawal)
+    : (stats.minWithdrawal !== undefined ? Number(stats.minWithdrawal) : 0.5);
+
+  const formattedMinPayout = minWithdrawal === 0.5 ? "$0.5" : `$${minWithdrawal.toFixed(2)}`;
 
   const changeTab = (tab: string, path: string) => {
     setActiveTab(tab);
@@ -113,7 +143,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
 
   // Publisher Rates country list with multipliers
   const countries = [
-    { name: "Worldwide Deal (Global)", code: "GL", cpm: stats.globalCpm, type: "Desktop / Mobile" },
+    { name: "Worldwide Deal (Global)", code: "GL", cpm: currentCpm, type: "Desktop / Mobile" },
   ];
 
   return (
@@ -203,7 +233,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
 
                 {/* Hero Headings */}
                 <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight">
-                  <span className="text-indigo-400">{siteSettings?.siteName || "TG Links"}</span> — Shorten URLs & <span className="text-emerald-400">Earn ${(stats.globalCpm || 5.0).toFixed(2)} CPM</span>
+                  <span className="text-indigo-400">{siteSettings?.siteName || "TG Links"}</span> — Shorten URLs & <span className="text-emerald-400">Earn ${currentCpm.toFixed(2)} CPM</span>
                   <br />
                   <span className="text-slate-100">Monetize All Your </span>
                   <span className="text-indigo-400 inline-block relative">
@@ -433,7 +463,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                   <div className="flex flex-col items-center text-center p-6 bg-slate-900 border border-slate-800/60 rounded-2xl hover:shadow-md transition">
                     <div className="w-16 h-16 rounded-2xl bg-emerald-950/60 text-emerald-400 border border-emerald-900/30 flex items-center justify-center mb-6 font-black text-2xl">3</div>
                     <h3 className="text-lg font-bold text-white mb-2">Withdraw Earnings</h3>
-                    <p className="text-slate-400 text-sm leading-relaxed">Earn money based on link impressions. Instantly withdraw payouts once you hit only $2.00!</p>
+                    <p className="text-slate-400 text-sm leading-relaxed">Earn money based on link impressions. Instantly withdraw payouts once you hit only {formattedMinPayout}!</p>
                   </div>
                 </div>
               </div>
@@ -499,7 +529,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                       <Mail className="w-6 h-6" />
                     </div>
                     <h3 className="font-extrabold text-white text-lg mb-2">Instant Cashouts & Support</h3>
-                    <p className="text-sm text-slate-400 leading-relaxed">Low $2.00 minimum threshold with fast payouts via UPI, Crypto, FaucetPay, and Bank Transfer.</p>
+                    <p className="text-sm text-slate-400 leading-relaxed">Low {formattedMinPayout} minimum threshold with fast payouts via UPI, Crypto, FaucetPay, and Bank Transfer.</p>
                   </div>
                 </div>
               </div>
@@ -585,7 +615,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                         <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
                       </summary>
                       <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
-                        The minimum payout threshold is only $2.00! We support fast withdrawals via UPI, Crypto USDT / TRX / BTC, FaucetPay, PayTM, PhonePe, Bank Transfer, PayPal, and WebMoney.
+                        The minimum payout threshold is only {formattedMinPayout}! We support fast withdrawals via UPI, Crypto USDT / TRX / BTC, FaucetPay, PayTM, PhonePe, Bank Transfer, PayPal, and WebMoney.
                       </p>
                     </details>
 
