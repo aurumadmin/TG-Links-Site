@@ -262,7 +262,10 @@ export default function App() {
           onLogout={handleLogout} 
           onNavigate={handleNavigate} 
         />
-        <FloatingTelegramButton channelUrl={siteSettings?.telegramChannelUrl} />
+        <FloatingTelegramButton 
+          channelUrl={siteSettings?.telegramChannelUrl} 
+          instagramUrl={siteSettings?.instagramUrl} 
+        />
       </>
     );
   }
@@ -313,7 +316,10 @@ export default function App() {
           }
         }} 
       />
-      <FloatingTelegramButton channelUrl={siteSettings?.telegramChannelUrl} />
+      <FloatingTelegramButton 
+        channelUrl={siteSettings?.telegramChannelUrl} 
+        instagramUrl={siteSettings?.instagramUrl} 
+      />
     </>
   );
 }

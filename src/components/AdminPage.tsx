@@ -56,7 +56,8 @@ import {
   CreditCard,
   ExternalLink,
   Target,
-  QrCode
+  QrCode,
+  Instagram
 } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
@@ -2363,24 +2364,44 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-sky-400 uppercase mb-1 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Send className="w-3.5 h-3.5" />
-                    Official Telegram Channel / Support Link
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-normal">Controls floating Telegram button & footer link</span>
-                </label>
-                <input
-                  type="url"
-                  placeholder="https://t.me/your_telegram_channel"
-                  value={sysSettings.telegramChannelUrl || ""}
-                  onChange={(e) => setSysSettings({ ...sysSettings, telegramChannelUrl: e.target.value })}
-                  className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition text-sm text-white font-mono"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Visitors on the landing page, dashboard, and redirect page can click the right-side floating Telegram widget to join this channel. Leave empty to hide.
-                </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-sky-400 uppercase mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Send className="w-3.5 h-3.5" />
+                      Official Telegram Channel / Group
+                    </span>
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://t.me/your_telegram_channel"
+                    value={sysSettings.telegramChannelUrl || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, telegramChannelUrl: e.target.value })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition text-sm text-white font-mono"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Floating Telegram widget link on landing page, dashboard & link gateways.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-pink-400 uppercase mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Instagram className="w-3.5 h-3.5" />
+                      Official Instagram Profile Link
+                    </span>
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://instagram.com/your_handle"
+                    value={sysSettings.instagramUrl || ""}
+                    onChange={(e) => setSysSettings({ ...sysSettings, instagramUrl: e.target.value })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-pink-500/20 focus:border-pink-500 outline-none transition text-sm text-white font-mono"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Small floating Instagram button link on bottom right. Leave empty to hide.
+                  </p>
+                </div>
               </div>
             </div>
 

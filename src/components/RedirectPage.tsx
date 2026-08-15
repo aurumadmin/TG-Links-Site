@@ -1798,8 +1798,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         </div>
       </footer>
 
-      {/* Floating Telegram Channel CTA */}
-      <FloatingTelegramButton channelUrl={settings?.telegramChannelUrl} />
+      {/* Floating Social CTAs */}
+      <FloatingTelegramButton 
+        channelUrl={settings?.telegramChannelUrl} 
+        instagramUrl={settings?.instagramUrl} 
+      />
     </div>
   );
 }
