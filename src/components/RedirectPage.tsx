@@ -232,6 +232,7 @@ const AdBlock = ({
 };
 
 interface ClickAdCandidate {
+  id: string;
   code: string;
   sizeName: string;
   minHeight: string;
@@ -249,54 +250,92 @@ const SponsoredAdGateBlock = React.memo(({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isHovering, setIsHovering] = useState(false);
+  const [adFailTimer, setAdFailTimer] = useState<number>(10);
+  const [adFallbackUnlocked, setAdFallbackUnlocked] = useState<boolean>(false);
+  const [currentCandidateIdx, setCurrentCandidateIdx] = useState<number>(0);
   const isHoveringRef = useRef(false);
   isHoveringRef.current = isHovering;
 
   // Compile active ad candidates from settings
-  const selectedAd = useMemo<ClickAdCandidate>(() => {
+  const adCandidates = useMemo<ClickAdCandidate[]>(() => {
     const candidates: ClickAdCandidate[] = [];
 
     if (settings?.clickAd300x250?.trim()) {
-      candidates.push({ code: settings.clickAd300x250, sizeName: "300x250 Medium Rectangle", minHeight: "250px", maxWidth: "300px" });
+      candidates.push({ id: "300x250", code: settings.clickAd300x250, sizeName: "300x250 Medium Rectangle", minHeight: "250px", maxWidth: "300px" });
     }
     if (settings?.clickAd728x90?.trim()) {
-      candidates.push({ code: settings.clickAd728x90, sizeName: "728x90 Leaderboard", minHeight: "90px", maxWidth: "728px" });
+      candidates.push({ id: "728x90", code: settings.clickAd728x90, sizeName: "728x90 Leaderboard", minHeight: "90px", maxWidth: "728px" });
     }
     if (settings?.clickAd300x600?.trim()) {
-      candidates.push({ code: settings.clickAd300x600, sizeName: "300x600 Half-Page", minHeight: "600px", maxWidth: "300px" });
+      candidates.push({ id: "300x600", code: settings.clickAd300x600, sizeName: "300x600 Half-Page", minHeight: "600px", maxWidth: "300px" });
     }
     if (settings?.clickAd468x60?.trim()) {
-      candidates.push({ code: settings.clickAd468x60, sizeName: "468x60 Banner", minHeight: "60px", maxWidth: "468px" });
+      candidates.push({ id: "468x60", code: settings.clickAd468x60, sizeName: "468x60 Banner", minHeight: "60px", maxWidth: "468px" });
     }
     if (settings?.clickAd320x50?.trim()) {
-      candidates.push({ code: settings.clickAd320x50, sizeName: "320x50 Mobile Banner", minHeight: "50px", maxWidth: "320px" });
+      candidates.push({ id: "320x50", code: settings.clickAd320x50, sizeName: "320x50 Mobile Banner", minHeight: "50px", maxWidth: "320px" });
     }
     if (settings?.neonTodayAdCode?.trim()) {
-      candidates.push({ code: settings.neonTodayAdCode, sizeName: "Neon.today / Surf Iframe", minHeight: "250px", maxWidth: "100%" });
+      candidates.push({ id: "neon", code: settings.neonTodayAdCode, sizeName: "Neon.today / Surf Iframe", minHeight: "250px", maxWidth: "100%" });
     }
     if (settings?.clickAdCustom1?.trim()) {
-      candidates.push({ code: settings.clickAdCustom1, sizeName: "Sponsored Partner Ad 1", minHeight: "200px", maxWidth: "100%" });
+      candidates.push({ id: "custom1", code: settings.clickAdCustom1, sizeName: "Sponsored Partner Ad 1", minHeight: "200px", maxWidth: "100%" });
     }
     if (settings?.clickAdCustom2?.trim()) {
-      candidates.push({ code: settings.clickAdCustom2, sizeName: "Sponsored Partner Ad 2", minHeight: "200px", maxWidth: "100%" });
+      candidates.push({ id: "custom2", code: settings.clickAdCustom2, sizeName: "Sponsored Partner Ad 2", minHeight: "200px", maxWidth: "100%" });
     }
 
     if (candidates.length === 0) {
-      return {
+      return [{
+        id: "default",
         code: settings?.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`,
+        sizeName: "Sponsored Ad Unit",
+        minHeight: "250px",
+        maxWidth: "100%"
+      }];
+    }
+
+    return candidates;
+  }, [settings]);
+
+  // Handle active ad selection with rotation
+  const selectedAd = useMemo<ClickAdCandidate>(() => {
+    if (!adCandidates.length) {
+      return {
+        id: "empty",
+        code: "",
         sizeName: "Sponsored Ad Unit",
         minHeight: "250px",
         maxWidth: "100%"
       };
     }
+    return adCandidates[currentCandidateIdx % adCandidates.length];
+  }, [adCandidates, currentCandidateIdx]);
 
-    if (settings?.clickAdRandomRotation !== false) {
-      const randomIndex = Math.floor(Math.random() * candidates.length);
-      return candidates[randomIndex];
+  // Set initial random candidate index if rotation is enabled
+  useEffect(() => {
+    if (settings?.clickAdRandomRotation !== false && adCandidates.length > 1) {
+      setCurrentCandidateIdx(Math.floor(Math.random() * adCandidates.length));
     }
+  }, [adCandidates, settings?.clickAdRandomRotation]);
 
-    return candidates[0];
-  }, [settings]);
+  // Countdown timer for automatic fail-safe unlock if ad blocker or network fails to load the ad
+  useEffect(() => {
+    if (adClicked) return;
+
+    const failSafeTimer = setInterval(() => {
+      setAdFailTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(failSafeTimer);
+          setAdFallbackUnlocked(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(failSafeTimer);
+  }, [adClicked]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -345,10 +384,14 @@ const SponsoredAdGateBlock = React.memo(({
     };
   }, [adClicked, onAdClicked]);
 
+  const switchNextAd = () => {
+    setCurrentCandidateIdx((prev) => (prev + 1) % adCandidates.length);
+  };
+
   return (
     <div className="p-4 bg-slate-900/80 border border-slate-800/90 rounded-2xl space-y-3 text-left shadow-xl backdrop-blur-sm">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-black text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-pink-500 animate-ping"></span>
             🎯 Sponsored Ad Verification
@@ -366,29 +409,91 @@ const SponsoredAdGateBlock = React.memo(({
         <p>
           Please click anywhere on the sponsored advertisement below to verify you are a human visitor and immediately unlock your destination link. <span className="text-amber-400 font-semibold">(Refresh the page if the ad doesn't load)</span>
         </p>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 px-2.5 py-1 rounded-lg border border-slate-700/80 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-sm"
-          title="Reload page if ad doesn't load"
-        >
-          <RotateCw className="w-3 h-3 text-pink-400" />
-          <span>Refresh Page</span>
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-auto">
+          {adCandidates.length > 1 && (
+            <button
+              type="button"
+              onClick={switchNextAd}
+              className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 px-2 py-1 rounded-lg border border-slate-700/80 transition cursor-pointer shadow-sm"
+              title="Try another sponsored banner"
+            >
+              <span>Switch Ad</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 px-2.5 py-1 rounded-lg border border-slate-700/80 transition cursor-pointer shadow-sm"
+            title="Reload page if ad doesn't load"
+          >
+            <RotateCw className="w-3 h-3 text-pink-400" />
+            <span>Refresh Page</span>
+          </button>
+        </div>
       </div>
 
       <div 
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
-        className={`relative bg-slate-950 rounded-xl overflow-hidden border transition-all p-2 flex justify-center items-center ${isHovering ? "border-pink-500 shadow-lg shadow-pink-500/10" : "border-slate-800"}`}
+        onClick={() => {
+          // If clicking anywhere in container, grant verification
+          onAdClicked();
+        }}
+        className={`relative bg-slate-950 rounded-xl overflow-hidden border transition-all p-2 flex flex-col justify-center items-center cursor-pointer group ${isHovering ? "border-pink-500 shadow-lg shadow-pink-500/10" : "border-slate-800"}`}
       >
         <div 
           ref={containerRef} 
           style={{ minHeight: selectedAd.minHeight, maxWidth: selectedAd.maxWidth }} 
           className="w-full flex justify-center items-center overflow-auto" 
         />
+        
+        {/* Fallback internal banner clickable layer if script is blocked or blank */}
+        <div className="w-full mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+          <span className="text-slate-400 group-hover:text-pink-300 transition-colors">
+            👉 Click here or anywhere on this banner to verify
+          </span>
+          <span className="text-pink-400 underline font-bold group-hover:text-pink-300">
+            Open Sponsor ➔
+          </span>
+        </div>
       </div>
       
+      {/* Fail-safe Fallback Unlock Box if Ad Fails to Load */}
+      {!adClicked && (
+        <div className="pt-1">
+          {adFallbackUnlocked ? (
+            <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl flex items-center justify-between gap-3 text-xs">
+              <div className="space-y-0.5">
+                <p className="font-bold text-amber-300 flex items-center gap-1.5">
+                  <span>⚠️</span> Ad blocked or taking too long to load?
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  You can bypass the ad click requirement and continue directly.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onAdClicked}
+                className="px-3 py-1.5 bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-white font-black text-xs rounded-lg shadow uppercase tracking-wider shrink-0 transition cursor-pointer"
+              >
+                Skip Ad & Unlock
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
+              <span>If ad is blocked, alternative unlock activates in <strong className="text-slate-400 font-mono">{adFailTimer}s</strong></span>
+              <button
+                type="button"
+                onClick={onAdClicked}
+                className="text-slate-400 hover:text-slate-300 underline cursor-pointer"
+              >
+                Having trouble? Click to verify
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {adClicked && (
         <div className="p-2.5 bg-emerald-950/50 border border-emerald-800/60 rounded-xl text-emerald-400 text-xs font-bold text-center flex items-center justify-center gap-1.5">
           <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
