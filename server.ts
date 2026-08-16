@@ -2,9 +2,11 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import fetch from "node-fetch";
 import nodemailer from "nodemailer";
 import zlib from "zlib";
+
+// Universal native fetch helper safe for CJS/ESM bundles
+const safeFetch = (...args: Parameters<typeof globalThis.fetch>): Promise<Response> => globalThis.fetch(...args);
 
 import { 
   User, 
@@ -2831,14 +2833,22 @@ Sitemap: ${baseUrl}/sitemap.xml`
     });
   });
 
+  app.get("/api/ptc/test-ping", (req, res) => {
+    return res.json({ ping: "pong-v2", time: Date.now() });
+  });
+
   // --- ADSLAB PTC TASKS API ENDPOINT ---
   app.get("/api/ptc/tasks", async (req, res) => {
+    res.setHeader("x-ptc-debug", "v3-active");
     try {
       const db = loadDb();
-      const placement = db.settings?.adslabPtcPlacement || "task-WdjEOqaZBE5l";
-      const apiKey = db.settings?.adslabApiKey || db.settings?.adslabCaptchaApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr";
+      const rawPlacement = db.settings?.adslabPtcPlacement;
+      const rawApiKey = db.settings?.adslabApiKey || db.settings?.adslabCaptchaApiKey;
       
-      let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+      const placement = (typeof rawPlacement === "string" && rawPlacement.trim()) ? rawPlacement.trim() : "task-WdjEOqaZBE5l";
+      const apiKey = (typeof rawApiKey === "string" && rawApiKey.trim()) ? rawApiKey.trim() : "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr";
+      
+      let ip = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
       if (typeof ip === "string" && ip.includes(",")) {
         ip = ip.split(",")[0].trim();
       }
@@ -2846,21 +2856,62 @@ Sitemap: ${baseUrl}/sitemap.xml`
       const country = (req.query.country as string) || "all";
       const userId = (req.query.userId as string) || (req.query.sub_id as string) || "anon_" + Math.random().toString(36).substring(2, 8);
 
-      const safeIp = typeof ip === "string" ? ip : Array.isArray(ip) ? ip[0] : String(ip);
-      const apiUrl = `https://adslab.me/api/tasks-share/${encodeURIComponent(placement)}/${encodeURIComponent(apiKey)}/${encodeURIComponent(country)}/${encodeURIComponent(userId)}/${encodeURIComponent(safeIp)}/ptc`;
+      let safeIp = typeof ip === "string" ? ip : Array.isArray(ip) ? ip[0] : String(ip);
+      if (safeIp.startsWith("::ffff:")) {
+        safeIp = safeIp.replace("::ffff:", "");
+      }
 
-      const apiRes = await fetch(apiUrl, {
+      // Stage 1: Try client IP
+      const apiUrl = `https://adslab.me/api/tasks-share/${encodeURIComponent(placement)}/${encodeURIComponent(apiKey)}/${encodeURIComponent(country)}/${encodeURIComponent(userId)}/${encodeURIComponent(safeIp)}/ptc`;
+      console.log(`[AdsLab PTC API] Requesting primary AdsLab URL: ${apiUrl}`);
+
+      let apiRes = await safeFetch(apiUrl, {
         headers: { "User-Agent": "TGLinks-Server/1.0" }
       });
 
-      if (!apiRes.ok) {
-        throw new Error(`AdsLab API returned HTTP ${apiRes.status}`);
+      let data: any = null;
+      if (apiRes.ok) {
+        data = await apiRes.json();
       }
 
-      const data = await apiRes.json();
-      return res.json(data);
+      // Stage 2: Fallback if primary returned 0 tasks or failed
+      if (!data || !Array.isArray(data.tasks) || data.tasks.length === 0) {
+        console.log("[AdsLab PTC API] Primary call yielded 0 tasks. Trying fallback with 127.0.0.1...");
+        const fallbackUrl = `https://adslab.me/api/tasks-share/task-WdjEOqaZBE5l/QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr/all/${encodeURIComponent(userId)}/127.0.0.1/ptc`;
+        const fallbackRes = await safeFetch(fallbackUrl, {
+          headers: { "User-Agent": "TGLinks-Server/1.0" }
+        });
+        if (fallbackRes.ok) {
+          data = await fallbackRes.json();
+        }
+      }
+
+      if (data && Array.isArray(data.tasks)) {
+        return res.json(data);
+      }
+
+      return res.json({
+        success: true,
+        count: 0,
+        tasks: []
+      });
     } catch (err: any) {
-      console.error("[AdsLab PTC API] Error fetching live PTC tasks:", err.message);
+      console.error("[AdsLab PTC API] Error fetching live PTC tasks:", err.message || err);
+      // Fail-safe attempt
+      try {
+        const userId = (req.query.userId as string) || (req.query.sub_id as string) || "anon_123";
+        const fallbackUrl = `https://adslab.me/api/tasks-share/task-WdjEOqaZBE5l/QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr/all/${encodeURIComponent(userId)}/127.0.0.1/ptc`;
+        const fbRes = await safeFetch(fallbackUrl, { headers: { "User-Agent": "TGLinks-Server/1.0" } });
+        if (fbRes.ok) {
+          const fbData = await fbRes.json();
+          if (fbData && Array.isArray(fbData.tasks)) {
+            return res.json(fbData);
+          }
+        }
+      } catch (fbErr) {
+        // Ignore fallback error
+      }
+
       return res.json({
         success: true,
         count: 0,
