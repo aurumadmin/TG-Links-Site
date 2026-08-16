@@ -225,17 +225,7 @@ const AdBlock = ({
   }
 
   if (!htmlCode) {
-    return (
-      <div className={`bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border border-slate-800/80 rounded-2xl p-4 text-center select-none flex flex-col items-center justify-center space-y-2 shadow-2xl backdrop-blur-md relative overflow-hidden group hover:border-indigo-500/40 transition-all ${sizeContainerStyle} ${className}`}>
-        <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 via-purple-500/5 to-emerald-500/5 opacity-50 group-hover:opacity-100 transition-opacity"></div>
-        <span className="px-3 py-1 bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-[10px] font-black uppercase rounded-full tracking-widest shadow-sm relative z-10 flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
-          SPONSOR UNIT
-        </span>
-        <span className="text-white font-black text-sm uppercase tracking-wide relative z-10 drop-shadow">{placeholder}</span>
-        <span className="text-[11px] font-mono text-emerald-400 font-bold bg-slate-900/90 px-2.5 py-0.5 rounded border border-slate-800 relative z-10">{sizeLabel}</span>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -503,6 +493,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
   // PTC (Paid-To-Click) Gate State
   const [adslabPtcTasks, setAdslabPtcTasks] = useState<any[]>([]);
+  const [ptcTasksLoading, setPtcTasksLoading] = useState<boolean>(true);
   const [ptcGatePassed, setPtcGatePassed] = useState<boolean>(false);
   const [completedPtcAds, setCompletedPtcAds] = useState<Record<string, boolean>>({});
   const [activePtcId, setActivePtcId] = useState<string | null>(null);
@@ -511,47 +502,21 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [ptcFocusActive, setPtcFocusActive] = useState<boolean>(true);
   const [ptcJustClicked, setPtcJustClicked] = useState<boolean>(false);
 
-  const defaultPtcAds = [
-    {
-      id: "ptc-1",
-      title: "Free Crypto Faucet & High-Yield Rewards",
-      description: "Claim instant Bitcoin, USDT & Dogecoin faucet earnings with zero minimum withdrawal.",
-      url: "https://url.thunder-appz.eu.org",
-      timer: 10,
-      badge: "HIGH CPM",
-      active: true
-    },
-    {
-      id: "ptc-2",
-      title: "High-Speed NVMe Cloud VPS Hosting - 50% Off",
-      description: "Deploy ultra-fast DDoS protected Linux & Windows VPS servers with instant setup.",
-      url: "https://url.thunder-appz.eu.org",
-      timer: 10,
-      badge: "SPONSORED",
-      active: true
-    },
-    {
-      id: "ptc-3",
-      title: "Top Web3 Trading & Automated Yield Portal",
-      description: "Explore decentralized liquidity pools and high-frequency automated algorithmic trading.",
-      url: "https://url.thunder-appz.eu.org",
-      timer: 10,
-      badge: "PREMIUM",
-      active: true
-    }
-  ];
-
   const ptcAdsToDisplay = (adslabPtcTasks && adslabPtcTasks.length > 0)
     ? adslabPtcTasks
     : (Array.isArray(settings?.ptcCustomAds) && settings.ptcCustomAds.length > 0)
       ? settings.ptcCustomAds.filter((a: any) => a && a.active !== false)
-      : defaultPtcAds;
+      : [];
 
   const requiredPtcCount = Math.max(1, Number(settings?.ptcRequiredCount || 1));
   const completedPtcCount = completedPtcAds && typeof completedPtcAds === "object"
     ? Object.values(completedPtcAds).filter(Boolean).length
     : 0;
   const isPtcRequirementMet = completedPtcCount >= requiredPtcCount;
+
+  const hasBanner300x250 = !!(settings?.bannerAd300x250 || settings?.activeAdvertiserAds?.activeBanners?.["banner_300x250"]);
+  const hasBanner300x600 = !!(settings?.ad300x600Code || settings?.bannerAd300x600 || settings?.activeAdvertiserAds?.activeBanners?.["banner_300x600"]);
+  const hasSidebarAds = hasBanner300x250 || hasBanner300x600;
 
   // Offer Wall State
   const [offerCompleted, setOfferCompleted] = useState<boolean[]>([false, false, false, false]);
@@ -832,12 +797,15 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         // Fetch live AdsLab PTC tasks directly via S2S API
         fetchApi(`/ptc/tasks?sub_id=${encodeURIComponent(captchaSubId)}`)
           .then((ptcRes) => {
-            if (ptcRes && Array.isArray(ptcRes.tasks) && ptcRes.tasks.length > 0) {
+            if (ptcRes && Array.isArray(ptcRes.tasks)) {
               setAdslabPtcTasks(ptcRes.tasks);
             }
           })
           .catch((err) => {
             console.warn("Live AdsLab PTC tasks fetch notice:", err);
+          })
+          .finally(() => {
+            setPtcTasksLoading(false);
           });
 
         // Run popunder & global header scripts
@@ -1701,7 +1669,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       <div className="flex-grow max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
         {/* Left Column: Interactive Ads Portal */}
-        <div className="lg:col-span-8 space-y-6">
+        <div className={`lg:col-span-${hasSidebarAds ? "8" : "12"} space-y-6`}>
           
           <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 md:p-8 shadow-2xl backdrop-blur-md">
             {/* Redirection Header / Stepper */}
@@ -1778,7 +1746,25 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
                   {/* PTC CAMPAIGNS LIST */}
                   <div className="space-y-3">
-                    {ptcAdsToDisplay.map((ad: any, idx: number) => {
+                    {ptcTasksLoading ? (
+                      <div className="p-8 text-center bg-slate-900/40 rounded-xl border border-slate-800 space-y-3">
+                        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                        <p className="text-xs font-semibold text-cyan-400">Loading live AdsLab PTC sponsored tasks...</p>
+                      </div>
+                    ) : ptcAdsToDisplay.length === 0 ? (
+                      <div className="p-6 text-center bg-slate-900/40 rounded-xl border border-slate-800 space-y-4">
+                        <p className="text-sm font-bold text-white">No active sponsored PTC tasks available at this time.</p>
+                        <p className="text-xs text-slate-400">Click below to continue directly to your redirection gateway.</p>
+                        <button
+                          type="button"
+                          onClick={() => setPtcGatePassed(true)}
+                          className="px-6 py-3 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-xl transition transform hover:scale-[1.02] cursor-pointer"
+                        >
+                          Continue to Redirection Gateway ➔
+                        </button>
+                      </div>
+                    ) : (
+                      ptcAdsToDisplay.map((ad: any, idx: number) => {
                       if (!ad || typeof ad !== "object") return null;
 
                       const adId = String(ad.id || ad._id || `ptc_ad_${idx}`);
@@ -1905,7 +1891,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                           </div>
                         </div>
                       );
-                    })}
+                    }))}
                   </div>
 
                   {/* BOTTOM ACTION */}
@@ -2418,27 +2404,31 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         </div>
 
         {/* Right Column: 300x600 / 300x250 Sidebar Banner Slots */}
-        <div className="lg:col-span-4 flex flex-col gap-6" id="sidebar_ads_container">
-          <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md min-h-[300px]" id="banner_300x250">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 block text-center">SPONSOR ADVERTISEMENT (300x250)</span>
-            <AdBlock 
-              htmlCode={settings?.bannerAd300x250} 
-              placeholder="High CPM Sponsor Slot" 
-              size="300x250" 
-              advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_300x250"]}
-            />
-          </div>
+        {hasSidebarAds && (
+          <div className="lg:col-span-4 flex flex-col gap-6" id="sidebar_ads_container">
+            {hasBanner300x250 && (
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md min-h-[300px]" id="banner_300x250">
+                <AdBlock 
+                  htmlCode={settings?.bannerAd300x250} 
+                  placeholder="High CPM Sponsor Slot" 
+                  size="300x250" 
+                  advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_300x250"]}
+                />
+              </div>
+            )}
 
-          <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md min-h-[620px]" id="banner_300x600">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 block text-center">SIDEBAR SKYSCRAPER (300x600)</span>
-            <AdBlock 
-              htmlCode={settings?.ad300x600Code || settings?.bannerAd300x600} 
-              placeholder="300x600 Premium Skyscraper" 
-              size="300x600" 
-              advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_300x600"]}
-            />
+            {hasBanner300x600 && (
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6 flex flex-col justify-center items-center shadow-xl backdrop-blur-md min-h-[620px]" id="banner_300x600">
+                <AdBlock 
+                  htmlCode={settings?.ad300x600Code || settings?.bannerAd300x600} 
+                  placeholder="300x600 Premium Skyscraper" 
+                  size="300x600" 
+                  advertiserAd={settings?.activeAdvertiserAds?.activeBanners?.["banner_300x600"]}
+                />
+              </div>
+            )}
           </div>
-        </div>
+        )}
       </div>
 
       {/* SPONSORED PREMIUM TRAFFIC NETWORK POPUP MODAL */}

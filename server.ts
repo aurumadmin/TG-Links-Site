@@ -2861,38 +2861,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return res.json(data);
     } catch (err: any) {
       console.error("[AdsLab PTC API] Error fetching live PTC tasks:", err.message);
-      // Fallback AdsLab PTC tasks if API is temporarily unreachable
       return res.json({
         success: true,
-        count: 3,
-        tasks: [
-          {
-            id: "adslab-ptc-fallback-1",
-            type: "PTC",
-            title: "Free Crypto Faucet & Rewards",
-            description: "View site for 10 seconds to unlock your redirection link.",
-            reward: 0.001,
-            reward_usd: 0.001,
-            vsingular: "$",
-            vplural: "$",
-            url: "https://adslab.me",
-            duration: 10,
-            icon: ""
-          },
-          {
-            id: "adslab-ptc-fallback-2",
-            type: "PTC",
-            title: "High-Speed NVMe VPS Hosting",
-            description: "View cloud infrastructure details for 10 seconds.",
-            reward: 0.001,
-            reward_usd: 0.001,
-            vsingular: "$",
-            vplural: "$",
-            url: "https://adslab.me",
-            duration: 10,
-            icon: ""
-          }
-        ]
+        count: 0,
+        tasks: []
       });
     }
   });
