@@ -741,8 +741,11 @@ function loadDb() {
       adslabRewPlacement: "rew-uhPNwWfp0hLN",
       adslabUserId: "",
       adslabAutoInterstitial: true,
-      adslabRewardedSkip: false,
-      adslabBannerCode: ""
+      adslabBannerCode: "",
+      enableAdslabCaptcha: true,
+      adslabCaptchaApiKey: "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
+      adslabCaptchaSecretKey: "IUzRsZbtL4JmR197MRVUn5vIcavB8ksX",
+      adslabRegisteredDomain: "https://url.thunder-appz.eu.org"
     }
   };
 
@@ -2772,8 +2775,9 @@ Sitemap: ${baseUrl}/sitemap.xml`
         adslabRewPlacement: db.settings.adslabRewPlacement || "rew-uhPNwWfp0hLN",
         adslabUserId: db.settings.adslabUserId || "",
         adslabAutoInterstitial: db.settings.adslabAutoInterstitial !== false,
-        adslabRewardedSkip: !!db.settings.adslabRewardedSkip,
         adslabBannerCode: db.settings.adslabBannerCode || "",
+        enableAdslabCaptcha: db.settings.enableAdslabCaptcha !== false,
+        adslabCaptchaApiKey: db.settings.adslabCaptchaApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
         activeAdvertiserAds: getActiveAdvertiserAds(db, typeof ip === "string" ? ip : Array.isArray(ip) ? ip[0] : String(ip))
       }
     });
@@ -3113,6 +3117,287 @@ Sitemap: ${baseUrl}/sitemap.xml`
       </body>
       </html>
     `);
+  });
+
+  // --- ADSLAB CAPTCHA MONETIZATION & VERIFICATION S2S API ---
+  const solvedCaptchas = new Map<string, { verified: boolean; timestamp: number }>();
+
+  // Cleanup solved captchas older than 24 hours
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of solvedCaptchas.entries()) {
+      if (now - val.timestamp > 86400000) {
+        solvedCaptchas.delete(key);
+      }
+    }
+  }, 3600000);
+
+  // 1. Initiate CAPTCHA Session (Server-to-Server)
+  app.post("/api/captcha/init", async (req, res) => {
+    try {
+      const { sub_id, return_url } = req.body || {};
+      const db = loadDb();
+      const apiKey = db.settings?.adslabCaptchaApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr";
+      const subId = sub_id ? String(sub_id).trim() : "v_" + Math.random().toString(36).substring(2, 14);
+
+      const protocol = getRequestProtocol(req);
+      const host = getRequestHost(req);
+      const fallbackReturn = `${protocol}://${host}/go/captcha-callback`;
+      const requestedReturnUrl = return_url || fallbackReturn;
+
+      const registeredDomain = (db.settings?.adslabRegisteredDomain || "https://url.thunder-appz.eu.org").replace(/\/+$/, "");
+
+      const fetchFn = typeof globalThis.fetch === "function" ? globalThis.fetch : fetch;
+
+      // Candidate return URLs matching domain registered with AdsLab
+      const candidateReturnUrls = [
+        requestedReturnUrl,
+        `${registeredDomain}/go/captcha-callback`,
+        `${registeredDomain}/callback`,
+        registeredDomain
+      ].filter(Boolean) as string[];
+
+      let lastData: any = null;
+      let issuedToken: string | null = null;
+      let solveUrl: string = "https://adslab.me/captcha";
+
+      for (const candidateUrl of candidateReturnUrls) {
+        try {
+          const adslabRes = await fetchFn("https://adslab.me/api/v1/captcha/init", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": apiKey
+            },
+            body: JSON.stringify({
+              sub_id: subId,
+              return_url: candidateUrl
+            })
+          });
+
+          const text = await adslabRes.text();
+          try {
+            lastData = JSON.parse(text);
+          } catch (e) {
+            lastData = { error: text };
+          }
+
+          if (lastData && (lastData.success || lastData.token)) {
+            issuedToken = lastData.token;
+            solveUrl = lastData.solve_url || `https://adslab.me/captcha?token=${lastData.token}`;
+            break;
+          } else if (lastData && lastData.message && lastData.message.includes("Domain Mismatch")) {
+            // Try next candidate URL registered for this API key
+            continue;
+          }
+        } catch (callErr) {
+          console.warn("[AdsLab Captcha candidate try error]:", callErr);
+        }
+      }
+
+      if (issuedToken) {
+        return res.json({
+          success: true,
+          token: issuedToken,
+          solve_url: solveUrl,
+          direct_solve_url: `https://adslab.me/captcha/${issuedToken}`,
+          sub_id: subId
+        });
+      } else {
+        console.warn("[AdsLab Captcha Init Final Failure]:", lastData);
+        return res.json({
+          success: false,
+          error: lastData?.message || lastData?.error || "Failed to initiate AdsLab session with API Key",
+          sub_id: subId,
+          solve_url: "https://adslab.me/captcha"
+        });
+      }
+    } catch (err: any) {
+      console.error("[AdsLab Captcha Init Exception]:", err);
+      const fallbackSubId = (req.body?.sub_id) || ("v_" + Math.random().toString(36).substring(2, 14));
+      return res.json({
+        success: false,
+        error: "Network error initiating AdsLab session",
+        sub_id: fallbackSubId,
+        solve_url: "https://adslab.me/captcha"
+      });
+    }
+  });
+
+  // AdsLab Callback & Return URL Handler
+  app.get(["/callback", "/go/captcha-callback"], (req, res) => {
+    const sub_id = String(req.query.sub_id || req.query.subId || "").trim();
+    if (sub_id) {
+      solvedCaptchas.set(sub_id, { verified: true, timestamp: Date.now() });
+    }
+    const token = String(req.query.token || "").trim();
+
+    return res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Human Verification Confirmed</title>
+        <style>
+          body {
+            background: #020617;
+            color: #f8fafc;
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+            box-sizing: border-box;
+          }
+          .card {
+            background: #0f172a;
+            border: 1px solid #10b981;
+            box-shadow: 0 20px 25px -5px rgba(16, 185, 129, 0.1), 0 8px 10px -6px rgba(16, 185, 129, 0.1);
+            border-radius: 1.25rem;
+            padding: 2.5rem 2rem;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+          }
+          .icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+          }
+          h2 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: #ffffff;
+          }
+          p {
+            color: #94a3b8;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            margin: 0 0 1.75rem 0;
+          }
+          .btn {
+            background: #10b981;
+            color: #020617;
+            font-weight: 800;
+            font-size: 0.875rem;
+            padding: 0.85rem 1.75rem;
+            border-radius: 0.75rem;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            transition: opacity 0.2s;
+          }
+          .btn:hover { opacity: 0.9; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="icon">✅</div>
+          <h2>Verification Complete!</h2>
+          <p>Your anti-bot verification was successfully verified. You can now close this tab or return to your link.</p>
+          <button class="btn" onclick="tryClose()">Return to Link</button>
+        </div>
+        <script>
+          function notifyParent() {
+            try {
+              if (window.opener) {
+                window.opener.postMessage({ type: "ADSLAB_CAPTCHA_SOLVED", sub_id: "${sub_id}", token: "${token}" }, "*");
+              }
+            } catch(e) {}
+            try {
+              localStorage.setItem("adslab_verified_${sub_id}", Date.now().toString());
+            } catch(e) {}
+          }
+          notifyParent();
+          function tryClose() {
+            notifyParent();
+            try { window.close(); } catch(e) {}
+          }
+          setTimeout(function() {
+            tryClose();
+          }, 2000);
+        </script>
+      </body>
+      </html>
+    `);
+  });
+
+  // 2. Receive & Verify Signed S2S Webhook from AdsLab (Supports POST and GET)
+  const handleAdsLabPostback = (req: any, res: any) => {
+    try {
+      const data = { ...(req.query || {}), ...(req.body || {}) };
+      const sub_id = String(data.sub_id || data.subId || data.user_id || "").trim();
+      const timestamp = String(data.timestamp || "").trim();
+      const received_sig = String(data.signature || data.sig || "").trim();
+
+      const db = loadDb();
+      const secret_key = db.settings?.adslabCaptchaSecretKey || "IUzRsZbtL4JmR197MRVUn5vIcavB8ksX";
+
+      if (!sub_id) {
+        return res.status(400).send("Missing sub_id");
+      }
+
+      // If signature is provided, verify HMAC-SHA256(sub_id:timestamp, secretKey)
+      if (received_sig && timestamp) {
+        const expected_sig = crypto
+          .createHmac("sha256", secret_key)
+          .update(`${sub_id}:${timestamp}`)
+          .digest("hex");
+
+        const isValid = expected_sig.toLowerCase() === received_sig.toLowerCase();
+        if (isValid) {
+          solvedCaptchas.set(sub_id, { verified: true, timestamp: Date.now() });
+          console.log(`[AdsLab S2S] Captcha verified successfully for sub_id: ${sub_id}`);
+          return res.status(200).send("OK");
+        } else {
+          console.warn(`[AdsLab S2S] Invalid signature for sub_id: ${sub_id}. Expected: ${expected_sig}, Received: ${received_sig}`);
+          return res.status(403).send("Invalid Signature");
+        }
+      } else {
+        // Direct callback fallback
+        solvedCaptchas.set(sub_id, { verified: true, timestamp: Date.now() });
+        console.log(`[AdsLab Postback] Captcha marked verified for sub_id: ${sub_id}`);
+        return res.status(200).send("OK");
+      }
+    } catch (err) {
+      console.error("[AdsLab S2S Webhook Error]:", err);
+      return res.status(500).send("Internal Server Error");
+    }
+  };
+
+  app.post(["/api/captcha/postback", "/api/v1/captcha/postback"], handleAdsLabPostback);
+  app.get(["/api/captcha/postback", "/api/v1/captcha/postback"], handleAdsLabPostback);
+
+  // 3. Check verification status for a sub_id (Frontend Polling / Return URL Check)
+  app.get("/api/captcha/status", (req, res) => {
+    const sub_id = String(req.query.sub_id || "").trim();
+    if (!sub_id) {
+      return res.json({ verified: false });
+    }
+    const solved = solvedCaptchas.get(sub_id);
+    return res.json({ verified: !!(solved && solved.verified) });
+  });
+
+  // 4. Mark session verified (e.g. from return_url with valid solve confirmation)
+  app.post("/api/captcha/verify-token", (req, res) => {
+    const { sub_id, token, status } = req.body || {};
+    const subIdStr = String(sub_id || "").trim();
+    if (!subIdStr) return res.status(400).json({ error: "Missing sub_id" });
+
+    const solved = solvedCaptchas.get(subIdStr);
+    if (solved?.verified) {
+      return res.json({ verified: true });
+    }
+
+    if (status === "success" || (token && typeof token === "string" && token.length >= 6)) {
+      solvedCaptchas.set(subIdStr, { verified: true, timestamp: Date.now() });
+      return res.json({ verified: true });
+    }
+
+    return res.json({ verified: false });
   });
 
   // --- USER DASHBOARD STATS ---

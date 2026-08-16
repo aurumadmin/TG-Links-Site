@@ -167,8 +167,12 @@ export interface SystemSettings {
   adslabRewPlacement?: string;
   adslabUserId?: string;
   adslabAutoInterstitial?: boolean;
-  adslabRewardedSkip?: boolean;
   adslabBannerCode?: string;
+  // AdsLab CAPTCHA Monetization & Verification API
+  enableAdslabCaptcha?: boolean;
+  adslabCaptchaApiKey?: string;
+  adslabCaptchaSecretKey?: string;
+  adslabRegisteredDomain?: string;
   // Public Counter Metric Boosts
   fakeExtraViews?: number;
   fakeExtraWithdrawn?: number;

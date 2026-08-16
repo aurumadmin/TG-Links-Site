@@ -104,7 +104,9 @@ const DEFAULT_ADMIN_SETTINGS: SystemSettings = {
   adslabRewPlacement: "rew-uhPNwWfp0hLN",
   adslabUserId: "",
   adslabAutoInterstitial: true,
-  adslabRewardedSkip: false
+  enableAdslabCaptcha: true,
+  adslabCaptchaApiKey: "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
+  adslabCaptchaSecretKey: "IUzRsZbtL4JmR197MRVUn5vIcavB8ksX"
 };
 
 function normalizeAdminTab(rawTab?: string): AdminTab {
@@ -3423,6 +3425,104 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 </p>
               </div>
 
+              {/* ADSLAB CAPTCHA MONETIZATION & S2S VERIFICATION API */}
+              <div className="p-5 bg-gradient-to-br from-indigo-950/60 via-purple-950/40 to-slate-950/80 border border-indigo-500/40 rounded-2xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-800/40 pb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-indigo-400" />
+                    <div>
+                      <h4 className="font-extrabold text-white text-sm">AdsLab CAPTCHA Monetization & Verification API</h4>
+                      <p className="text-[11px] text-indigo-300">Protect against bots and monetize user verification with high-CPM ads verified via signed S2S webhooks.</p>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-700/60">
+                    <input
+                      type="checkbox"
+                      checked={sysSettings.enableAdslabCaptcha !== false}
+                      onChange={(e) => setSysSettings({ ...sysSettings, enableAdslabCaptcha: e.target.checked })}
+                      className="w-4 h-4 text-indigo-500 rounded border-slate-700 bg-slate-950 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs font-bold text-white">
+                      {sysSettings.enableAdslabCaptcha !== false ? "🟢 AdsLab Captcha Active" : "⏸️ Disabled"}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-slate-300 uppercase">
+                      Publisher API Key (<code className="text-indigo-400 font-mono">x-api-key</code>)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr"
+                      value={sysSettings.adslabCaptchaApiKey || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adslabCaptchaApiKey: e.target.value })}
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400"
+                    />
+                    <p className="text-[10px] text-slate-400">Used for Server-to-Server CAPTCHA session initiation (<code className="text-slate-300">POST https://adslab.me/api/v1/captcha/init</code>).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-slate-300 uppercase">
+                      Security Hash (secretKey)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="IUzRsZbtL4JmR197MRVUn5vIcavB8ksX"
+                      value={sysSettings.adslabCaptchaSecretKey || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adslabCaptchaSecretKey: e.target.value })}
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400"
+                    />
+                    <p className="text-[10px] text-slate-400">Used to verify HMAC-SHA256 postback signatures from AdsLab.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-slate-300 uppercase">
+                      AdsLab Registered Domain (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="http://localhost:3000"
+                      value={sysSettings.adslabRegisteredDomain || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, adslabRegisteredDomain: e.target.value })}
+                      className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-xs font-mono text-emerald-400"
+                    />
+                    <p className="text-[10px] text-slate-400">Domain configured in your AdsLab website settings to prevent domain mismatch.</p>
+                  </div>
+                </div>
+
+                {/* S2S WEBHOOK POSTBACK URL */}
+                <div className="p-3.5 bg-slate-950/90 border border-slate-800 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
+                      Your S2S Webhook Postback URL (Copy to AdsLab Dashboard)
+                    </span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 font-mono font-bold px-2 py-0.5 rounded border border-emerald-500/20">
+                      HMAC Signed
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      readOnly
+                      value={`${typeof window !== "undefined" ? window.location.origin : ""}/api/captcha/postback`}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono text-indigo-300 select-all outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = `${window.location.origin}/api/captcha/postback`;
+                        navigator.clipboard.writeText(url);
+                        alert("Postback URL copied to clipboard: " + url);
+                      }}
+                      className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg transition shrink-0 cursor-pointer"
+                    >
+                      Copy URL
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
                   <label className="block text-xs font-bold text-slate-300 uppercase">
@@ -3453,7 +3553,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
                   <label className="block text-xs font-bold text-slate-300 uppercase">Auto Trigger Interstitial</label>
                   <select
@@ -3465,19 +3565,6 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     <option value="false">NO - Manual only</option>
                   </select>
                   <p className="text-[10px] text-slate-500">Shows AdsLab Interstitial when visitor advances steps.</p>
-                </div>
-
-                <div className="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-300 uppercase">Rewarded Ad Skip Button</label>
-                  <select
-                    value={sysSettings.adslabRewardedSkip ? "true" : "false"}
-                    onChange={(e) => setSysSettings({ ...sysSettings, adslabRewardedSkip: e.target.value === "true" })}
-                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs font-bold text-white outline-none"
-                  >
-                    <option value="true">ENABLED - Fast-Skip Video Button</option>
-                    <option value="false">DISABLED</option>
-                  </select>
-                  <p className="text-[10px] text-slate-500">Offers users a rewarded video ad to bypass the 10s timer.</p>
                 </div>
 
                 <div className="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">

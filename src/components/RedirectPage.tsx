@@ -449,10 +449,26 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [timer, setTimer] = useState(10);
   const [isTimerFinished, setIsTimerFinished] = useState(false);
   const [verifiedHuman, setVerifiedHuman] = useState(false);
-  const [captchaAnswer, setCaptchaAnswer] = useState("");
-  const [captchaPrompt, setCaptchaPrompt] = useState({ q: "", a: 0 });
-  const [captchaError, setCaptchaError] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+
+  // AdsLab CAPTCHA Monetization & S2S Verification State
+  const [captchaSubId] = useState<string>(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const sid = sp.get("sub_id") || sp.get("captcha_sub_id");
+      if (sid) return sid;
+      const stored = sessionStorage.getItem(`adslab_subid_${code}`);
+      if (stored) return stored;
+      const gen = "v_" + Math.random().toString(36).substring(2, 12);
+      sessionStorage.setItem(`adslab_subid_${code}`, gen);
+      return gen;
+    } catch {
+      return "v_" + Math.random().toString(36).substring(2, 12);
+    }
+  });
+  const [captchaLoading, setCaptchaLoading] = useState(false);
+  const [captchaSolving, setCaptchaSolving] = useState(false);
+  const [captchaErrorMsg, setCaptchaErrorMsg] = useState<string | null>(null);
   
   // Sponsored ad click verification state
   const [adClicked, setAdClicked] = useState(false);
@@ -750,14 +766,6 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           }
         }
 
-        // Setup mathematical captcha
-        const num1 = Math.floor(Math.random() * 9) + 2;
-        const num2 = Math.floor(Math.random() * 8) + 2;
-        setCaptchaPrompt({
-          q: `What is ${num1} + ${num2}?`,
-          a: num1 + num2
-        });
-
         // Fast immediate redirection if own ads are disabled AND no security locks triggered
         if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult.isVpnOrProxy && !res.faucetLimitReached) {
           setRedirecting(true);
@@ -993,17 +1001,126 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     };
   }, [currentStep, loading, error, settings, redirecting, popupClosed]);
 
-  const verifyCaptcha = (e: React.FormEvent) => {
-    e.preventDefault();
-    setCaptchaError(false);
-    if (parseInt(captchaAnswer) === captchaPrompt.a) {
-      setVerifiedHuman(true);
+  // Check on load/mount if user returned from AdsLab Captcha solve redirect
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const subIdInUrl = sp.get("sub_id") || sp.get("captcha_sub_id");
+      const tokenInUrl = sp.get("token") || sp.get("captcha_token");
+      const statusInUrl = sp.get("status") || sp.get("captcha_status");
 
-      // Trigger AdsLab's Interstitial Ad immediately upon completing Anti-Bot Verification
-      triggerAdsLabInterstitial(settings);
-    } else {
-      setCaptchaError(true);
-      setCaptchaAnswer("");
+      if (subIdInUrl || tokenInUrl || statusInUrl === "success") {
+        const targetSubId = subIdInUrl || captchaSubId;
+        fetchApi("/captcha/verify-token", {
+          method: "POST",
+          body: JSON.stringify({
+            sub_id: targetSubId,
+            token: tokenInUrl,
+            status: statusInUrl
+          })
+        }).then((res) => {
+          if (res && res.verified) {
+            setVerifiedHuman(true);
+            setCaptchaSolving(false);
+            triggerAdsLabInterstitial(settings);
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  }, [captchaSubId, settings]);
+
+  // Polling check and cross-window events when user is actively solving captcha on AdsLab
+  useEffect(() => {
+    if (verifiedHuman) return;
+
+    // Cross-tab message listener from callback popup/tab
+    const handleMsg = (e: MessageEvent) => {
+      if (e.data?.type === "ADSLAB_CAPTCHA_SOLVED") {
+        setVerifiedHuman(true);
+        setCaptchaSolving(false);
+        triggerAdsLabInterstitial(settings);
+      }
+    };
+    window.addEventListener("message", handleMsg);
+
+    // Cross-tab storage listener
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith("adslab_verified_")) {
+        setVerifiedHuman(true);
+        setCaptchaSolving(false);
+        triggerAdsLabInterstitial(settings);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    let interval: any = null;
+    if (captchaSolving) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetchApi(`/captcha/status?sub_id=${encodeURIComponent(captchaSubId)}`);
+          if (res && res.verified) {
+            setVerifiedHuman(true);
+            setCaptchaSolving(false);
+            triggerAdsLabInterstitial(settings);
+            clearInterval(interval);
+          }
+        } catch (e) {}
+      }, 1500);
+    }
+
+    return () => {
+      window.removeEventListener("message", handleMsg);
+      window.removeEventListener("storage", handleStorage);
+      if (interval) clearInterval(interval);
+    };
+  }, [captchaSolving, captchaSubId, verifiedHuman, settings]);
+
+  const handleSolveCaptcha = async () => {
+    setCaptchaLoading(true);
+    setCaptchaErrorMsg(null);
+    try {
+      const returnUrl = window.location.origin + window.location.pathname + `?sub_id=${encodeURIComponent(captchaSubId)}&status=success`;
+      const initRes = await fetchApi("/captcha/init", {
+        method: "POST",
+        body: JSON.stringify({
+          sub_id: captchaSubId,
+          return_url: returnUrl
+        })
+      });
+
+      if (initRes && initRes.token) {
+        setCaptchaSolving(true);
+        // Option A: Clean URL (HTTP POST Form Submit - Recommended by AdsLab documentation)
+        // Submits the token via POST body so browser address bar shows clean https://adslab.me/captcha
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = "https://adslab.me/captcha";
+        form.target = "_blank"; // Opens in dedicated verification tab while parent polls for instant unlock
+
+        const tokenInput = document.createElement("input");
+        tokenInput.type = "hidden";
+        tokenInput.name = "token";
+        tokenInput.value = initRes.token;
+        form.appendChild(tokenInput);
+
+        document.body.appendChild(form);
+        form.submit();
+        setTimeout(() => {
+          try {
+            document.body.removeChild(form);
+          } catch (e) {}
+        }, 1000);
+      } else if (initRes && initRes.solve_url) {
+        setCaptchaSolving(true);
+        window.open(initRes.solve_url, "_blank");
+      } else {
+        setCaptchaErrorMsg(initRes?.error || "Could not initiate verification session. Please try again.");
+      }
+    } catch (err: any) {
+      console.error("Captcha solve error:", err);
+      setCaptchaErrorMsg("Verification server temporarily busy. Please click again.");
+    } finally {
+      setCaptchaLoading(false);
     }
   };
 
@@ -1113,14 +1230,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
       setCurrentStep(currentStep + 1);
       setVerifiedHuman(false);
       setAdClicked(false); // Reset clicked state for the next step!
-      setCaptchaAnswer("");
-      // Refresh captcha
-      const num1 = Math.floor(Math.random() * 8) + 3;
-      const num2 = Math.floor(Math.random() * 9) + 2;
-      setCaptchaPrompt({
-        q: `What is ${num1} + ${num2}?`,
-        a: num1 + num2
-      });
+      setCaptchaSolving(false);
+      setCaptchaErrorMsg(null);
     } else {
       // Final step: Get Link!
       if (faucetLimitDetected) return;
@@ -1678,72 +1789,106 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                     </div>
                   </div>
 
-                  {/* OPTIONAL ADSLAB REWARDED AD FAST-SKIP */}
-                  {settings?.enableAdsLab && settings?.adslabRewardedSkip && (!isTimerFinished || !verifiedHuman) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerAdsLabRewarded(settings, () => {
-                          setIsTimerFinished(true);
-                          setVerifiedHuman(true);
-                          setAdClicked(true);
-                        });
-                        // Also proactively complete step for user satisfaction
-                        setIsTimerFinished(true);
-                        setVerifiedHuman(true);
-                        setAdClicked(true);
-                      }}
-                      className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
-                    >
-                      <span>🎁</span>
-                      <span>Watch Quick Video Ad to Instantly Skip Timer & Captcha</span>
-                    </button>
-                  )}
-
-                  {/* CAPTCHA CHALLENGE FORM */}
+                  {/* CAPTCHA CHALLENGE BOX */}
                   {!verifiedHuman && (
-                    <form onSubmit={verifyCaptcha} className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 space-y-3 text-left">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                          <span>🔒</span> Anti-Bot Security Challenge
-                        </span>
-                        <span className="text-[10px] text-indigo-400 font-semibold bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-900/50">
-                          Solve To Continue
+                    <div className="p-5 sm:p-6 bg-slate-900/90 rounded-2xl border border-indigo-500/30 space-y-4 text-left shadow-xl relative overflow-hidden">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                            <ShieldCheck className="w-4 h-4" />
+                          </span>
+                          <div>
+                            <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                              Human Verification
+                            </h4>
+                            <p className="text-[11px] text-slate-400">
+                              Verify to proceed to your destination
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-900/50 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                          Required
                         </span>
                       </div>
 
-                      <p className="text-base font-black text-white text-center py-1">{captchaPrompt.q}</p>
-                      
-                      {captchaError && (
-                        <p className="text-xs text-rose-400 font-bold text-center bg-rose-950/40 border border-rose-900/50 p-2 rounded-lg">
-                          ❌ Incorrect answer. Please try again!
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-slate-200 font-medium leading-relaxed">
+                          Solve the captcha to continue.
+                        </p>
+                        <p className="text-[11px] text-indigo-300/90 leading-relaxed bg-indigo-950/30 border border-indigo-900/40 p-2 rounded-lg">
+                          ℹ️ The verification will open in a new page. Please solve it there and this page will automatically unlock.
+                        </p>
+                      </div>
+
+                      {captchaErrorMsg && (
+                        <p className="text-xs text-rose-400 font-semibold bg-rose-950/50 border border-rose-900/60 p-2.5 rounded-xl text-center">
+                          ⚠️ {captchaErrorMsg}
                         </p>
                       )}
 
-                      <div className="flex gap-2 pt-1">
-                        <input
-                          required
-                          type="number"
-                          placeholder="Type answer here..."
-                          value={captchaAnswer}
-                          onChange={(e) => setCaptchaAnswer(e.target.value)}
-                          className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-center font-bold text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-                        />
+                      {captchaSolving ? (
+                        <div className="p-4 bg-indigo-950/40 border border-indigo-500/40 rounded-xl flex flex-col items-center justify-center text-center space-y-2">
+                          <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+                            <Hourglass className="w-4 h-4 animate-spin text-indigo-400" />
+                            <span>Waiting for Captcha Completion...</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400">
+                            The verification opened in a new page. Once completed, this page will automatically unlock!
+                          </p>
+                          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                            <button
+                              type="button"
+                              onClick={handleSolveCaptcha}
+                              className="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-bold rounded-lg border border-indigo-500/30 transition"
+                            >
+                              Re-open Verification Page ➔
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                fetchApi(`/captcha/status?sub_id=${encodeURIComponent(captchaSubId)}`).then(r => {
+                                  if (r?.verified) {
+                                    setVerifiedHuman(true);
+                                    setCaptchaSolving(false);
+                                  }
+                                });
+                              }}
+                              className="px-3 py-1.5 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 text-xs font-bold rounded-lg border border-emerald-500/30 transition"
+                            >
+                              Check Verification Now 🔄
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
                         <button
-                          type="submit"
-                          className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl uppercase tracking-wider transition shadow-lg shadow-indigo-600/20 shrink-0"
+                          type="button"
+                          disabled={captchaLoading}
+                          onClick={handleSolveCaptcha}
+                          className="w-full py-3.5 px-4 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer disabled:opacity-50"
                         >
-                          Verify
+                          {captchaLoading ? (
+                            <>
+                              <Hourglass className="w-4 h-4 animate-spin" />
+                              <span>Loading Verification...</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShieldCheck className="w-4 h-4" />
+                              <span>Solve the Captcha to Continue</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </>
+                          )}
                         </button>
-                      </div>
-                    </form>
+                      )}
+                    </div>
                   )}
 
                   {/* VERIFIED STATUS */}
                   {verifiedHuman && (
-                    <div className="p-3 bg-emerald-950/40 border border-emerald-900/50 text-emerald-400 text-xs font-bold rounded-xl flex items-center justify-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-emerald-500" />
-                      Human Verification Complete!
+                    <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-inner">
+                      <CheckCircle className="w-4 h-4 text-emerald-400" />
+                      <span>Human Verification Complete!</span>
                     </div>
                   )}
 
