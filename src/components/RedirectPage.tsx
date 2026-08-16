@@ -1134,7 +1134,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         setRedirecting(true);
         fetchApi("/links/click", {
           method: "POST",
-          body: JSON.stringify({ code })
+          body: JSON.stringify({ code, vtok: tokenInUrl })
         }).then((clickRes) => {
           if (clickRes.faucetLimitReached) {
             setFaucetLimitDetected(true);
