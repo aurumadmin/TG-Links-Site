@@ -26,7 +26,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const p = window.location.pathname;
-      if (p.startsWith("/go/")) return "go";
+      if (p.startsWith("/go/") || p.startsWith("/p/")) return "go";
       if (p === "/admin" || p.startsWith("/admin/")) return "admin";
       if (
         p === "/dashboard" ||
@@ -46,7 +46,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>("overview"); // tab within page
   const [shortCode, setShortCode] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      const match = window.location.pathname.match(/^\/go\/([a-zA-Z0-9_-]+)$/);
+      const match = window.location.pathname.match(/^\/(?:go|p)\/([a-zA-Z0-9_-]+)$/);
       if (match) return match[1];
     }
     return "";
@@ -116,13 +116,21 @@ export default function App() {
   const parseRouteFromUrl = useCallback((pathName?: string) => {
     const path = pathName || window.location.pathname;
 
-    // Check link redirection route: /go/:code
-    const goMatch = path.match(/^\/go\/([a-zA-Z0-9_-]+)$/);
+    // Check link redirection route: /go/:code or /p/:code
+    const goMatch = path.match(/^\/(?:go|p)\/([a-zA-Z0-9_-]+)$/);
     if (goMatch) {
+      const isReturnRoute = path.startsWith("/p/");
       const hostname = window.location.hostname;
       const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
-      if (isProd && hostname !== "url.thunder-appz.eu.org") {
-        window.location.replace(`https://url.thunder-appz.eu.org/go/${goMatch[1]}`);
+      
+      const registeredDomain = (siteSettings?.adslabRegisteredDomain || "https://thunder-appz.eu.org").replace(/\/+$/, "");
+      let targetHost = "thunder-appz.eu.org";
+      try {
+        targetHost = new URL(registeredDomain).hostname;
+      } catch (e) {}
+
+      if (isProd && !isReturnRoute && hostname !== targetHost) {
+        window.location.replace(`${registeredDomain}/go/${goMatch[1]}${window.location.search}`);
         return;
       }
       setShortCode(goMatch[1]);

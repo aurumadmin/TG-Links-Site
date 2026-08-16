@@ -1116,13 +1116,46 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     };
   }, [currentStep, loading, error, settings, redirecting, popupClosed]);
 
-  // Check on load/mount if user returned from AdsLab Captcha solve redirect
+  // Check on load/mount if user returned from AdsLab Captcha solve redirect or Safelink Blog
   useEffect(() => {
+    if (loading || error || redirecting) return;
     try {
       const sp = new URLSearchParams(window.location.search);
       const subIdInUrl = sp.get("sub_id") || sp.get("captcha_sub_id");
       const tokenInUrl = sp.get("token") || sp.get("captcha_token");
       const statusInUrl = sp.get("status") || sp.get("captcha_status");
+
+      const isReturnFromSafelink =
+        window.location.pathname.startsWith("/p/") ||
+        statusInUrl === "completed" ||
+        statusInUrl === "success";
+
+      if (isReturnFromSafelink && code) {
+        setRedirecting(true);
+        fetchApi("/links/click", {
+          method: "POST",
+          body: JSON.stringify({ code })
+        }).then((clickRes) => {
+          if (clickRes.faucetLimitReached) {
+            setFaucetLimitDetected(true);
+            setRedirecting(false);
+            return;
+          }
+          const targetUrl = clickRes.targetUrl || clickRes.adFlyShortenedUrl || linkData?.adFlyShortenedUrl || clickRes.originalUrl || linkData?.originalUrl;
+          if (targetUrl) {
+            setRedirectTargetUrl(targetUrl);
+            redirectWithoutReferrer(targetUrl);
+          } else {
+            setFaucetLimitDetected(true);
+            setRedirecting(false);
+          }
+        }).catch((err) => {
+          console.error("Failed to auto-unlock link upon returning from safelink:", err);
+          setFaucetLimitDetected(true);
+          setRedirecting(false);
+        });
+        return;
+      }
 
       if (subIdInUrl || tokenInUrl || statusInUrl === "success") {
         const targetSubId = subIdInUrl || captchaSubId;
@@ -1142,7 +1175,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         }).catch(() => {});
       }
     } catch (e) {}
-  }, [captchaSubId, settings]);
+  }, [captchaSubId, settings, loading, error, code, linkData]);
 
   // Polling check and cross-window events when user is actively solving captcha on AdsLab
   useEffect(() => {
