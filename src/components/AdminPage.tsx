@@ -34,6 +34,7 @@ import {
   Send,
   RefreshCw,
   Sparkles,
+  Zap,
   LifeBuoy,
   MessageSquare,
   Upload,
@@ -64,7 +65,7 @@ import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
 import TopLoadingBar from "./TopLoadingBar";
 
-type AdminTab = "overview" | "users" | "links" | "withdrawals" | "deposits" | "tickets" | "settings" | "ad_settings" | "click_ads" | "external" | "views" | "backup";
+type AdminTab = "overview" | "users" | "links" | "withdrawals" | "deposits" | "tickets" | "settings" | "ad_settings" | "click_ads" | "ptc_ads" | "external" | "views" | "backup";
 
 interface AdminPageProps {
   initialTab?: string;
@@ -106,7 +107,40 @@ const DEFAULT_ADMIN_SETTINGS: SystemSettings = {
   adslabAutoInterstitial: true,
   enableAdslabCaptcha: true,
   adslabCaptchaApiKey: "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
-  adslabCaptchaSecretKey: "IUzRsZbtL4JmR197MRVUn5vIcavB8ksX"
+  adslabCaptchaSecretKey: "IUzRsZbtL4JmR197MRVUn5vIcavB8ksX",
+  enablePtcGate: true,
+  ptcRequiredCount: 1,
+  ptcTimerSeconds: 10,
+  ptcWindowFocusCheck: true,
+  ptcCustomAds: [
+    {
+      id: "ptc-1",
+      title: "Free Crypto Faucet & High-Yield Rewards",
+      description: "Claim instant Bitcoin, USDT & Dogecoin faucet earnings with zero minimum withdrawal.",
+      url: "https://url.thunder-appz.eu.org",
+      timer: 10,
+      badge: "HIGH CPM",
+      active: true
+    },
+    {
+      id: "ptc-2",
+      title: "High-Speed NVMe Cloud VPS Hosting - 50% Off",
+      description: "Deploy ultra-fast DDoS protected Linux & Windows VPS servers with instant setup.",
+      url: "https://url.thunder-appz.eu.org",
+      timer: 10,
+      badge: "SPONSORED",
+      active: true
+    },
+    {
+      id: "ptc-3",
+      title: "Top Web3 Trading & Automated Yield Portal",
+      description: "Explore decentralized liquidity pools and high-frequency automated algorithmic trading.",
+      url: "https://url.thunder-appz.eu.org",
+      timer: 10,
+      badge: "PREMIUM",
+      active: true
+    }
+  ]
 };
 
 function normalizeAdminTab(rawTab?: string): AdminTab {
@@ -114,6 +148,7 @@ function normalizeAdminTab(rawTab?: string): AdminTab {
   if (rawTab === "system" || rawTab === "general" || rawTab === "settings") return "settings";
   if (rawTab === "ad-settings" || rawTab === "ad_settings" || rawTab === "ads") return "ad_settings";
   if (rawTab === "click-ads" || rawTab === "click_ads" || rawTab === "clickads") return "click_ads";
+  if (rawTab === "ptc-ads" || rawTab === "ptc_ads" || rawTab === "ptc" || rawTab === "ptcads") return "ptc_ads";
   if (rawTab === "backup" || rawTab === "database") return "backup";
   if (rawTab === "external" || rawTab === "external-apis" || rawTab === "apis") return "external";
   if (rawTab === "views" || rawTab === "reports") return "overview";
@@ -224,6 +259,85 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [apiPriority, setApiPriority] = useState("0");
   const [isFaucetApi, setIsFaucetApi] = useState(false);
   const [editingApiId, setEditingApiId] = useState<string | null>(null);
+
+  // PTC Ads Campaign Management State
+  const [newPtcTitle, setNewPtcTitle] = useState("");
+  const [newPtcDesc, setNewPtcDesc] = useState("");
+  const [newPtcUrl, setNewPtcUrl] = useState("");
+  const [newPtcTimer, setNewPtcTimer] = useState("10");
+  const [newPtcBadge, setNewPtcBadge] = useState("SPONSORED");
+  const [editingPtcId, setEditingPtcId] = useState<string | null>(null);
+
+  const handleAddOrUpdatePtcAd = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newPtcTitle.trim() || !newPtcUrl.trim()) {
+      alert("Title and Destination URL are required for the PTC ad.");
+      return;
+    }
+
+    const currentAds: any[] = sysSettings?.ptcCustomAds ? [...sysSettings.ptcCustomAds] : [];
+    const duration = Math.max(3, parseInt(newPtcTimer) || 10);
+
+    if (editingPtcId) {
+      const idx = currentAds.findIndex((a) => a.id === editingPtcId);
+      if (idx !== -1) {
+        currentAds[idx] = {
+          ...currentAds[idx],
+          title: newPtcTitle.trim(),
+          description: newPtcDesc.trim(),
+          url: newPtcUrl.trim(),
+          timer: duration,
+          badge: newPtcBadge.trim() || "SPONSORED"
+        };
+      }
+    } else {
+      currentAds.push({
+        id: "ptc-" + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+        title: newPtcTitle.trim(),
+        description: newPtcDesc.trim(),
+        url: newPtcUrl.trim(),
+        timer: duration,
+        badge: newPtcBadge.trim() || "SPONSORED",
+        active: true
+      });
+    }
+
+    setSysSettings({ ...sysSettings, ptcCustomAds: currentAds });
+    setNewPtcTitle("");
+    setNewPtcDesc("");
+    setNewPtcUrl("");
+    setNewPtcTimer("10");
+    setNewPtcBadge("SPONSORED");
+    setEditingPtcId(null);
+  };
+
+  const handleEditPtcAd = (ad: any) => {
+    setEditingPtcId(ad.id);
+    setNewPtcTitle(ad.title || "");
+    setNewPtcDesc(ad.description || "");
+    setNewPtcUrl(ad.url || "");
+    setNewPtcTimer(String(ad.timer || 10));
+    setNewPtcBadge(ad.badge || "SPONSORED");
+  };
+
+  const handleDeletePtcAd = (id: string) => {
+    if (!confirm("Are you sure you want to delete this PTC ad campaign?")) return;
+    const currentAds: any[] = sysSettings?.ptcCustomAds ? [...sysSettings.ptcCustomAds] : [];
+    const filtered = currentAds.filter((a) => a.id !== id);
+    setSysSettings({ ...sysSettings, ptcCustomAds: filtered });
+    if (editingPtcId === id) {
+      setEditingPtcId(null);
+      setNewPtcTitle("");
+      setNewPtcDesc("");
+      setNewPtcUrl("");
+    }
+  };
+
+  const handleTogglePtcAd = (id: string) => {
+    const currentAds: any[] = sysSettings?.ptcCustomAds ? [...sysSettings.ptcCustomAds] : [];
+    const updated = currentAds.map((a) => (a.id === id ? { ...a, active: a.active === false ? true : false } : a));
+    setSysSettings({ ...sysSettings, ptcCustomAds: updated });
+  };
 
   // New payment method state
   const [newPaymentMethod, setNewPaymentMethod] = useState("");
@@ -835,6 +949,18 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 >
                   <Settings className="w-3.5 h-3.5 text-indigo-400" />
                   <span>System General Settings</span>
+                </button>
+
+                <button
+                  onClick={() => changeTab("ptc_ads", "/admin/ptc-ads")}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                    activeTab === "ptc_ads"
+                      ? "bg-indigo-600 text-white font-extrabold shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:bg-slate-850 hover:text-white font-semibold"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>PTC Ads Gate (Page 1)</span>
                 </button>
 
                 <button
@@ -3117,6 +3243,76 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </div>
             )}
 
+            {/* PTC (PAID-TO-CLICK) TASK COMPLETION GATE (PAGE 1) */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-cyan-500/30 space-y-4 mt-6 shadow-lg">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
+                      PTC (Paid-To-Click) Task Gate (Page 1)
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                        FIRST STEP GATE
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Forces visitors to view and complete sponsored PTC ads before proceeding to the countdown and destination link.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => changeTab("ptc_ads", "/admin/ptc-ads")}
+                  className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-bold transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Manage PTC Campaigns ({(sysSettings.ptcCustomAds || []).length})
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-1">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">PTC Task Gate Status</label>
+                  <select
+                    value={sysSettings.enablePtcGate !== false ? "true" : "false"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, enablePtcGate: e.target.value === "true" })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none transition text-sm text-white"
+                  >
+                    <option value="true" className="bg-slate-950 text-white">ENABLED: Show PTC tasks on first page</option>
+                    <option value="false" className="bg-slate-950 text-white">DISABLED: Skip PTC tasks</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Required PTC Completions</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={sysSettings.ptcRequiredCount === undefined ? 1 : sysSettings.ptcRequiredCount}
+                    onChange={(e) => setSysSettings({ ...sysSettings, ptcRequiredCount: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none transition text-sm text-cyan-400 font-bold"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">User must complete this number of PTC tasks (e.g. 1) to continue.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Ad View Timer (Seconds)</label>
+                  <input
+                    type="number"
+                    min={3}
+                    max={120}
+                    value={sysSettings.ptcTimerSeconds === undefined ? 10 : sysSettings.ptcTimerSeconds}
+                    onChange={(e) => setSysSettings({ ...sysSettings, ptcTimerSeconds: Math.max(3, parseInt(e.target.value) || 10) })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none transition text-sm text-cyan-400 font-bold"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Duration of timer per viewed ad.</p>
+                </div>
+              </div>
+            </div>
+
             {/* AD CONFIGURATION OPTIONS */}
             <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/80 space-y-4 mt-6">
               <h3 className="font-extrabold text-white text-base border-b border-slate-800 pb-2">Advertising Configuration</h3>
@@ -4481,6 +4677,224 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     placeholder="Paste custom ad snippet from any network..."
                     className="block w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-rose-500/20 focus:border-rose-500 outline-none transition text-xs font-mono text-emerald-400 placeholder-slate-700"
                   />
+                </div>
+              </div>
+            </div>
+          </form>
+        )}
+
+        {/* TAB WORKSPACE: PTC (PAID-TO-CLICK) ADS GATE SETTINGS */}
+        {activeTab === "ptc_ads" && sysSettings && (
+          <form onSubmit={handleSaveSettings} className="space-y-8" id="admin_ptc_ads">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-2xl font-black text-white flex items-center gap-2">
+                  <Sparkles className="w-6 h-6 text-cyan-400" />
+                  PTC (Paid-To-Click) Task Gate Settings
+                </h1>
+                <p className="text-xs text-slate-400">
+                  Configure the mandatory first-page PTC task gate for shortlink visitors. Visitors must complete the specified number of PTC ads to unlock redirection.
+                </p>
+              </div>
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                Save PTC Settings
+              </button>
+            </div>
+
+            {settingsSuccess && (
+              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs font-semibold flex items-start gap-2">
+                <Check className="w-4 h-4 flex-shrink-0 text-emerald-400 mt-0.5" />
+                <span>{settingsSuccess}</span>
+              </div>
+            )}
+
+            {settingsError && (
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs font-semibold flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-400 mt-0.5" />
+                <span>{settingsError}</span>
+              </div>
+            )}
+
+            {/* MAIN GATE CONTROLS */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-cyan-500/30 space-y-5 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                      Page 1 PTC Task Completion Gate
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                        FIRST STEP GATE
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      When enabled, visitors landing on shortened links will be shown the PTC task page first. They must complete the required number of sponsored PTC ads before continuing.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <select
+                    value={sysSettings.enablePtcGate !== false ? "true" : "false"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, enablePtcGate: e.target.value === "true" })}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider outline-none border transition ${
+                      sysSettings.enablePtcGate !== false
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                        : "bg-slate-950 text-slate-400 border-slate-800"
+                    }`}
+                  >
+                    <option value="true" className="bg-slate-950 text-emerald-400">🟢 PTC GATE ENABLED</option>
+                    <option value="false" className="bg-slate-950 text-slate-400">⏸️ PTC GATE DISABLED</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* CORE PARAMETERS */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Required PTC Completions (Number of Ads)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={sysSettings.ptcRequiredCount === undefined ? 1 : sysSettings.ptcRequiredCount}
+                    onChange={(e) => setSysSettings({ ...sysSettings, ptcRequiredCount: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm font-bold text-cyan-400 outline-none focus:border-cyan-500 transition"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Visitor must complete this many PTC ads (e.g. <strong>1</strong>) to unlock the Continue button.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Default Ad View Timer (Seconds)
+                  </label>
+                  <input
+                    type="number"
+                    min={3}
+                    max={120}
+                    value={sysSettings.ptcTimerSeconds === undefined ? 10 : sysSettings.ptcTimerSeconds}
+                    onChange={(e) => setSysSettings({ ...sysSettings, ptcTimerSeconds: Math.max(3, parseInt(e.target.value) || 10) })}
+                    className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm font-bold text-cyan-400 outline-none focus:border-cyan-500 transition"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Duration in seconds that the countdown runs when a visitor views a sponsored PTC ad.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 flex flex-col justify-between space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Anti-Cheat Focus Tracking
+                  </label>
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none bg-slate-900 px-3.5 py-2 rounded-lg border border-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={sysSettings.ptcWindowFocusCheck !== false}
+                      onChange={(e) => setSysSettings({ ...sysSettings, ptcWindowFocusCheck: e.target.checked })}
+                      className="w-4 h-4 rounded text-cyan-500 border-slate-700 bg-slate-950 focus:ring-cyan-500"
+                    />
+                    <span className="text-xs font-bold text-slate-200">
+                      {sysSettings.ptcWindowFocusCheck !== false ? "Active Focus Check Enabled" : "Disabled (Timer Runs Freely)"}
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-500">
+                    Pauses the countdown if the visitor switches away from the ad window, guaranteeing genuine ad impressions.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* ADSLAB LIVE PTC API INTEGRATION */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-cyan-500/30 space-y-6 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-cyan-400" />
+                    AdsLab Live PTC API Integration
+                    <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      AUTOMATIC LIVE TASKS
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    PTC tasks are automatically fetched live from AdsLab API (<code className="text-cyan-300">https://adslab.me/api/tasks-share/...</code>). No manual task entry required.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    AdsLab PTC Task Placement ID
+                  </label>
+                  <input
+                    type="text"
+                    value={sysSettings.adslabPtcPlacement || "task-WdjEOqaZBE5l"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adslabPtcPlacement: e.target.value.trim() })}
+                    placeholder="task-WdjEOqaZBE5l"
+                    className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-cyan-300 outline-none focus:border-cyan-500 transition"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Placement tag created in your AdsLab Publisher Dashboard for PTC task sharing.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    AdsLab API Key / Task Key
+                  </label>
+                  <input
+                    type="text"
+                    value={sysSettings.adslabApiKey || sysSettings.adslabCaptchaApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, adslabApiKey: e.target.value.trim() })}
+                    placeholder="QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr"
+                    className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-cyan-300 outline-none focus:border-cyan-500 transition"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Your unique AdsLab Account API Key used for server-to-server task fetching.
+                  </p>
+                </div>
+              </div>
+
+              {/* API STATUS & TEST TOOL */}
+              <div className="p-5 bg-slate-950/60 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <span className="text-xs font-extrabold text-white flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                      AdsLab Task Share API Endpoint Status
+                    </span>
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      GET https://adslab.me/api/tasks-share/{sysSettings.adslabPtcPlacement || "task-WdjEOqaZBE5l"}/{sysSettings.adslabApiKey || "QAjf..."}/all/user/ip/ptc
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch("/api/ptc/tasks");
+                        const data = await res.json();
+                        if (data && data.success) {
+                          alert(`✅ AdsLab API Connection Successful!\n\nActive live tasks returned: ${data.count || data.tasks?.length || 0}\n\nTasks are live and ready for shortlink visitors.`);
+                        } else {
+                          alert(`⚠️ AdsLab API Warning: ${JSON.stringify(data)}`);
+                        }
+                      } catch (err: any) {
+                        alert(`❌ AdsLab API Test Error: ${err.message}`);
+                      }
+                    }}
+                    className="px-4 py-2 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 self-start sm:self-auto"
+                  >
+                    ⚡ Test Live AdsLab Connection
+                  </button>
                 </div>
               </div>
             </div>

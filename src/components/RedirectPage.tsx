@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { fetchApi } from "../lib/api";
-import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck, Play, Pause, RotateCw } from "lucide-react";
+import { AlertCircle, ShieldAlert, Sparkles, CheckCircle, ArrowRight, Hourglass, ShieldCheck, Play, Pause, RotateCw, RefreshCw, ExternalLink, Lock } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings } from "./SiteLogo";
 import FloatingTelegramButton from "./FloatingTelegramButton";
 
 const ensureAbsoluteUrl = (url: string) => {
   if (!url) return "";
-  if (!/^https?:\/\//i.test(url)) {
-    return "https://" + url;
+  const trimmed = url.trim();
+  if (trimmed.startsWith("/")) {
+    return window.location.origin + trimmed;
   }
-  return url;
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return "https://" + trimmed;
+  }
+  return trimmed;
 };
 
 const redirectWithoutReferrer = (url: string) => {
@@ -33,9 +37,12 @@ const redirectWithoutReferrer = (url: string) => {
   document.body.appendChild(a);
   a.click();
   
+  // Safe fallback if anchor click is blocked by strict browser policy after 1s
   setTimeout(() => {
-    window.location.href = target;
-  }, 100);
+    if (window.location.href !== target) {
+      window.location.replace(target);
+    }
+  }, 1000);
 };
 
 interface AdvertiserAdProp {
@@ -125,19 +132,27 @@ const AdBlock = ({
 
   useEffect(() => {
     if (advertiserAd) return;
-    if (!htmlCode || !containerRef.current) return;
+    if (!containerRef.current) return;
     
-    // Clear old contents
-    containerRef.current.innerHTML = "";
+    if (!htmlCode) {
+      containerRef.current.innerHTML = "";
+      return;
+    }
     
     try {
+      containerRef.current.innerHTML = "";
       const range = document.createRange();
       range.selectNode(containerRef.current);
       const documentFragment = range.createContextualFragment(htmlCode);
       containerRef.current.appendChild(documentFragment);
     } catch (e) {
-      console.error("Failed to parse and execute ad HTML script block", e);
-      containerRef.current.innerHTML = htmlCode;
+      try {
+        if (containerRef.current) {
+          containerRef.current.innerHTML = htmlCode;
+        }
+      } catch (innerErr) {
+        console.warn("Could not inject raw ad HTML", innerErr);
+      }
     }
   }, [htmlCode, advertiserAd]);
 
@@ -450,6 +465,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [isTimerFinished, setIsTimerFinished] = useState(false);
   const [verifiedHuman, setVerifiedHuman] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+  const [redirectTargetUrl, setRedirectTargetUrl] = useState<string | null>(null);
 
   // AdsLab CAPTCHA Monetization & S2S Verification State
   const [captchaSubId] = useState<string>(() => {
@@ -469,6 +485,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [captchaLoading, setCaptchaLoading] = useState(false);
   const [captchaSolving, setCaptchaSolving] = useState(false);
   const [captchaErrorMsg, setCaptchaErrorMsg] = useState<string | null>(null);
+  const [checkingVerification, setCheckingVerification] = useState(false);
+  const [checkFeedbackMsg, setCheckFeedbackMsg] = useState<string | null>(null);
   
   // Sponsored ad click verification state
   const [adClicked, setAdClicked] = useState(false);
@@ -482,6 +500,58 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [popupTimerFinished, setPopupTimerFinished] = useState(false);
   const [popupClosed, setPopupClosed] = useState(false);
   const [popupHasBeenTriggered, setPopupHasBeenTriggered] = useState(false);
+
+  // PTC (Paid-To-Click) Gate State
+  const [adslabPtcTasks, setAdslabPtcTasks] = useState<any[]>([]);
+  const [ptcGatePassed, setPtcGatePassed] = useState<boolean>(false);
+  const [completedPtcAds, setCompletedPtcAds] = useState<Record<string, boolean>>({});
+  const [activePtcId, setActivePtcId] = useState<string | null>(null);
+  const [ptcTimer, setPtcTimer] = useState<number>(10);
+  const [ptcTimerActive, setPtcTimerActive] = useState<boolean>(false);
+  const [ptcFocusActive, setPtcFocusActive] = useState<boolean>(true);
+  const [ptcJustClicked, setPtcJustClicked] = useState<boolean>(false);
+
+  const defaultPtcAds = [
+    {
+      id: "ptc-1",
+      title: "Free Crypto Faucet & High-Yield Rewards",
+      description: "Claim instant Bitcoin, USDT & Dogecoin faucet earnings with zero minimum withdrawal.",
+      url: "https://url.thunder-appz.eu.org",
+      timer: 10,
+      badge: "HIGH CPM",
+      active: true
+    },
+    {
+      id: "ptc-2",
+      title: "High-Speed NVMe Cloud VPS Hosting - 50% Off",
+      description: "Deploy ultra-fast DDoS protected Linux & Windows VPS servers with instant setup.",
+      url: "https://url.thunder-appz.eu.org",
+      timer: 10,
+      badge: "SPONSORED",
+      active: true
+    },
+    {
+      id: "ptc-3",
+      title: "Top Web3 Trading & Automated Yield Portal",
+      description: "Explore decentralized liquidity pools and high-frequency automated algorithmic trading.",
+      url: "https://url.thunder-appz.eu.org",
+      timer: 10,
+      badge: "PREMIUM",
+      active: true
+    }
+  ];
+
+  const ptcAdsToDisplay = (adslabPtcTasks && adslabPtcTasks.length > 0)
+    ? adslabPtcTasks
+    : (Array.isArray(settings?.ptcCustomAds) && settings.ptcCustomAds.length > 0)
+      ? settings.ptcCustomAds.filter((a: any) => a && a.active !== false)
+      : defaultPtcAds;
+
+  const requiredPtcCount = Math.max(1, Number(settings?.ptcRequiredCount || 1));
+  const completedPtcCount = completedPtcAds && typeof completedPtcAds === "object"
+    ? Object.values(completedPtcAds).filter(Boolean).length
+    : 0;
+  const isPtcRequirementMet = completedPtcCount >= requiredPtcCount;
 
   // Offer Wall State
   const [offerCompleted, setOfferCompleted] = useState<boolean[]>([false, false, false, false]);
@@ -535,6 +605,53 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     };
   }, [settings, currentStep, activeOfferIndex, offerCompleted, offerClicked, justClicked]);
 
+  // PTC Timer Countdown
+  useEffect(() => {
+    let interval: any = null;
+    if (ptcTimerActive && activePtcId && ptcTimer > 0) {
+      interval = setInterval(() => {
+        setPtcTimer((prev) => {
+          if (prev <= 1) {
+            setCompletedPtcAds((old) => ({ ...old, [activePtcId]: true }));
+            setPtcTimerActive(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [ptcTimerActive, activePtcId, ptcTimer]);
+
+  // Window Focus/Blur tracking for PTC Timer
+  useEffect(() => {
+    if (settings?.ptcWindowFocusCheck === false || !activePtcId || !ptcTimerActive) return;
+
+    const handleWindowFocus = () => {
+      setPtcFocusActive(true);
+      if (!ptcJustClicked) {
+        setPtcTimerActive(true);
+      }
+    };
+
+    const handleWindowBlur = () => {
+      setPtcFocusActive(false);
+      if (!ptcJustClicked && activePtcId && !completedPtcAds[activePtcId]) {
+        setPtcTimerActive(false);
+      }
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [settings?.ptcWindowFocusCheck, ptcTimerActive, activePtcId, ptcJustClicked, completedPtcAds]);
+
   // Security Checks State
   const [checkingSecurity, setCheckingSecurity] = useState(true);
   const [adBlockerDetected, setAdBlockerDetected] = useState(false);
@@ -542,77 +659,77 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [faucetLimitDetected, setFaucetLimitDetected] = useState(false);
   const [vpsDetails, setVpsDetails] = useState<any>(null);
 
-  // High Security Ad Blocker Detection
+  // High Security Ad Blocker Detection with safe timeout
   const runAdBlockerCheck = async (): Promise<boolean> => {
-    // Method 1: Dynamic element with standard blocked class list
-    const testElement = document.createElement("div");
-    testElement.id = "wrapfabtest";
-    testElement.className = "ad-box adsbox ad-banner ad-placement sponsored-post ad-ad-banner google-ad header-ads pub_300x250";
-    testElement.setAttribute(
-      "style",
-      "position: absolute !important; left: -9999px !important; top: -9999px !important; width: 1px !important; height: 1px !important; display: block !important;"
-    );
-    
-    document.body.appendChild(testElement);
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    
-    const isBlocked = 
-      testElement.offsetHeight === 0 || 
-      testElement.offsetWidth === 0 || 
-      testElement.clientHeight === 0 || 
-      testElement.clientWidth === 0 || 
-      window.getComputedStyle(testElement).display === "none" ||
-      window.getComputedStyle(testElement).visibility === "hidden";
-      
-    document.body.removeChild(testElement);
-    if (isBlocked) return true;
-
-    // Method 2: Attempt standard Google Ads network script connection
     try {
-      await fetch(
-        "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js",
-        { method: "HEAD", mode: "no-cors", cache: "no-store" }
+      // Fast check with test DOM element
+      const testElement = document.createElement("div");
+      testElement.id = "wrapfabtest";
+      testElement.className = "ad-box adsbox ad-banner ad-placement sponsored-post pub_300x250";
+      testElement.setAttribute(
+        "style",
+        "position: absolute !important; left: -9999px !important; top: -9999px !important; width: 1px !important; height: 1px !important; display: block !important;"
       );
+      
+      document.body.appendChild(testElement);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      
+      const isBlocked = 
+        testElement.offsetHeight === 0 || 
+        testElement.offsetWidth === 0 || 
+        window.getComputedStyle(testElement).display === "none" ||
+        window.getComputedStyle(testElement).visibility === "hidden";
+        
+      if (document.body.contains(testElement)) {
+        document.body.removeChild(testElement);
+      }
+      if (isBlocked) return true;
+
+      // Brave Browser shields check
+      if ((navigator as any).brave && typeof (navigator as any).brave.isBrave === "function") {
+        try {
+          const isBrave = await (navigator as any).brave.isBrave();
+          if (isBrave) return true;
+        } catch (e) {}
+      }
     } catch (e) {
-      return true; // Connection blocked or intercepted
+      // Safe fallback
     }
-
-    // Method 3: Brave Browser shields check
-    if ((navigator as any).brave && typeof (navigator as any).brave.isBrave === "function") {
-      try {
-        const isBrave = await (navigator as any).brave.isBrave();
-        if (isBrave) return true;
-      } catch (e) {}
-    }
-
     return false;
   };
 
-  // High Security VPS, VPN, and Proxy Detection
+  // High Security VPS, VPN, and Proxy Detection with fast timeout
   const runVpsVpnCheck = async () => {
-    const hostingKeywords = [
-      "amazon", "aws", "google", "cloud", "digitalocean", "digital ocean", "hetzner", "ovh", "linode", "vultr",
-      "microsoft", "azure", "contabo", "leaseweb", "m247", "zenlayer", "colocation", "datacenter", "data center",
-      "hosting", "server", "vps", "vpn", "proxy", "choopa", "fastly", "cloudflare", "quadranet", "softlayer",
-      "interserver", "liquidweb", "hostgator", "bluehost", "godaddy", "i3d", "scaleway", "cogent",
-      "packet", "equinix", "tatacomm", "akamai", "ipvolume", "colocrossing", "psychz", "ramnode", "buyvm",
-      "frantech", "hostkey", "webazilla", "melbikomas", "ovh sas", "as14061"
-    ];
-
-    let ip = "";
-    let isp = "";
-    let org = "";
-    let isVpnOrProxy = false;
-    let providerInfo = "";
+    const fallback = {
+      isVpnOrProxy: false,
+      ip: "127.0.0.1",
+      isp: "Residential ISP",
+      org: "Residential Network",
+      providerInfo: "Standard Residential"
+    };
 
     try {
-      const res = await fetch("https://ipwho.is/");
-      if (res.ok) {
-        const data = await res.json();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 800);
+
+      const hostingKeywords = [
+        "amazon", "aws", "digitalocean", "digital ocean", "hetzner", "ovh", "linode", "vultr",
+        "contabo", "leaseweb", "m247", "zenlayer", "colocation", "datacenter", "data center",
+        "hosting", "server", "vps", "vpn", "proxy", "choopa", "fastly", "quadranet", "softlayer"
+      ];
+
+      const res = await fetch("https://ipwho.is/", { signal: controller.signal }).catch(() => null);
+      clearTimeout(timeoutId);
+
+      if (res && res.ok) {
+        const data = await res.json().catch(() => null);
         if (data && data.success) {
-          ip = data.ip || "";
-          isp = data.connection?.isp || "";
-          org = data.connection?.org || "";
+          const ip = data.ip || "";
+          const isp = data.connection?.isp || "";
+          const org = data.connection?.org || "";
+          let isVpnOrProxy = false;
+          let providerInfo = "";
+
           if (data.security && (data.security.vpn || data.security.proxy || data.security.tor || data.security.relay)) {
             isVpnOrProxy = true;
             providerInfo = [
@@ -622,36 +739,26 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               data.security.relay ? "Relay" : ""
             ].filter(Boolean).join(", ");
           }
+
+          const testText = `${isp} ${org}`.toLowerCase();
+          const matched = hostingKeywords.find(kw => testText.includes(kw));
+          if (matched) {
+            isVpnOrProxy = true;
+            providerInfo = `Hosting/VPS Provider (${matched.toUpperCase()})`;
+          }
+
+          return {
+            isVpnOrProxy,
+            ip: ip || "Detected IP",
+            isp: isp || "ISP Network",
+            org: org || "Network ASN",
+            providerInfo: providerInfo || "Proxy Tunnel"
+          };
         }
       }
     } catch (e) {}
 
-    if (!ip) {
-      try {
-        const res = await fetch("https://ipapi.co/json/");
-        if (res.ok) {
-          const data = await res.json();
-          ip = data.ip || "";
-          isp = data.org || "";
-          org = data.asn || "";
-        }
-      } catch (e) {}
-    }
-
-    const testText = `${isp} ${org}`.toLowerCase();
-    const matched = hostingKeywords.find(kw => testText.includes(kw));
-    if (matched) {
-      isVpnOrProxy = true;
-      providerInfo = `Hosting/VPS Provider (${matched.toUpperCase()})`;
-    }
-
-    return {
-      isVpnOrProxy,
-      ip: ip || "Unresolved IP",
-      isp: isp || "Private ISP",
-      org: org || "Private ASN",
-      providerInfo: providerInfo || "Proxy Tunnel"
-    };
+    return fallback;
   };
 
   // Helper to execute any javascript tags embedded in HTML ad codes
@@ -682,18 +789,27 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     const initializeAndVerify = async () => {
       setCheckingSecurity(true);
 
-      // Perform parallel scans
-      const [isAdBlockActive, vpnResult] = await Promise.all([
-        runAdBlockerCheck(),
-        runVpsVpnCheck()
-      ]);
+      let isAdBlockActive = false;
+      let vpnResult: any = { isVpnOrProxy: false };
+
+      // Perform parallel scans with fail-safe error handling
+      try {
+        const [adBlockRes, vpnRes] = await Promise.all([
+          runAdBlockerCheck().catch(() => false),
+          runVpsVpnCheck().catch(() => ({ isVpnOrProxy: false }))
+        ]);
+        isAdBlockActive = adBlockRes;
+        vpnResult = vpnRes;
+      } catch (e) {
+        console.warn("Security check non-fatal error:", e);
+      }
 
       if (!active) return;
 
       if (isAdBlockActive) {
         setAdBlockerDetected(true);
       }
-      if (vpnResult.isVpnOrProxy) {
+      if (vpnResult?.isVpnOrProxy) {
         setVpsDetected(true);
         setVpsDetails(vpnResult);
       }
@@ -712,6 +828,17 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         setLinkData(res.link);
         setSettings(res.settings);
         setLoading(false);
+
+        // Fetch live AdsLab PTC tasks directly via S2S API
+        fetchApi(`/ptc/tasks?sub_id=${encodeURIComponent(captchaSubId)}`)
+          .then((ptcRes) => {
+            if (ptcRes && Array.isArray(ptcRes.tasks) && ptcRes.tasks.length > 0) {
+              setAdslabPtcTasks(ptcRes.tasks);
+            }
+          })
+          .catch((err) => {
+            console.warn("Live AdsLab PTC tasks fetch notice:", err);
+          });
 
         // Run popunder & global header scripts
         if (res.settings?.popunderCode) {
@@ -767,7 +894,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         }
 
         // Fast immediate redirection if own ads are disabled AND no security locks triggered
-        if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult.isVpnOrProxy && !res.faucetLimitReached) {
+        if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult?.isVpnOrProxy && !res.faucetLimitReached) {
           setRedirecting(true);
           if (res.link?.adFlyShortenedUrl) {
             redirectWithoutReferrer(res.link.adFlyShortenedUrl);
@@ -793,6 +920,10 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         if (!active) return;
         setError(err.message || "This link could not be resolved. It might be expired, disabled, or suspended.");
         setLoading(false);
+      } finally {
+        if (active) {
+          setCheckingSecurity(false);
+        }
       }
     };
 
@@ -894,6 +1025,22 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         document.title = `⏳ (${popupTimer}s) Sponsored Ad - ${siteName}`;
       } else {
         document.title = `✅ Close Ad Available! - ${siteName}`;
+      }
+      return;
+    }
+
+    // 0.5. PTC Gate Active
+    if (settings?.enablePtcGate !== false && !ptcGatePassed) {
+      if (ptcTimerActive && activePtcId && ptcTimer > 0) {
+        if (ptcFocusActive) {
+          document.title = `⏳ (${ptcTimer}s) Viewing PTC Ad - ${siteName}`;
+        } else {
+          document.title = `⏸️ (${ptcTimer}s) Paused: Return to Ad Window! - ${siteName}`;
+        }
+      } else if (isPtcRequirementMet) {
+        document.title = `✅ PTC Task Done! Click Continue - ${siteName}`;
+      } else {
+        document.title = `🎯 Complete PTC Verification - ${siteName}`;
       }
       return;
     }
@@ -1124,6 +1271,75 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     }
   };
 
+  const handleCheckVerification = async () => {
+    setCheckingVerification(true);
+    setCheckFeedbackMsg(null);
+    try {
+      const localVerified = localStorage.getItem(`adslab_verified_${captchaSubId}`) || sessionStorage.getItem(`adslab_verified_${captchaSubId}`);
+      if (localVerified) {
+        setVerifiedHuman(true);
+        setCaptchaSolving(false);
+        triggerAdsLabInterstitial(settings);
+        setCheckFeedbackMsg("✅ Verification confirmed!");
+        setCheckingVerification(false);
+        return;
+      }
+
+      const res = await fetchApi(`/captcha/status?sub_id=${encodeURIComponent(captchaSubId)}`);
+      if (res && res.verified) {
+        setVerifiedHuman(true);
+        setCaptchaSolving(false);
+        triggerAdsLabInterstitial(settings);
+        setCheckFeedbackMsg("✅ Verification confirmed!");
+        setCheckingVerification(false);
+        return;
+      }
+
+      const verifyRes = await fetchApi("/captcha/verify-token", {
+        method: "POST",
+        body: JSON.stringify({ sub_id: captchaSubId, status: "check_now" })
+      });
+      if (verifyRes && verifyRes.verified) {
+        setVerifiedHuman(true);
+        setCaptchaSolving(false);
+        triggerAdsLabInterstitial(settings);
+        setCheckFeedbackMsg("✅ Verification confirmed!");
+      } else {
+        setCheckFeedbackMsg("⚠️ Captcha completion not detected on AdsLab yet. Please complete the captcha in the open tab and try again.");
+      }
+    } catch {
+      setCheckFeedbackMsg("⚠️ Connection error checking verification. Please try again.");
+    } finally {
+      setCheckingVerification(false);
+    }
+  };
+
+  const handleStartPtcAd = (ad: any) => {
+    if (!ad) return;
+    const adId = String(ad.id || ad._id || "ptc_task");
+    const rawUrl = ad.url || "https://url.thunder-appz.eu.org";
+    const targetUrl = ensureAbsoluteUrl(rawUrl);
+    window.open(targetUrl, "_blank");
+
+    setPtcJustClicked(true);
+    setTimeout(() => {
+      setPtcJustClicked(false);
+    }, 1500);
+
+    setActivePtcId(adId);
+    const duration = Math.max(3, Number(ad.duration || ad.timer || settings?.ptcTimerSeconds || 10));
+    setPtcTimer(duration);
+    setPtcTimerActive(true);
+    setPtcFocusActive(true);
+  };
+
+  const handleCompletePtcGate = () => {
+    setPtcGatePassed(true);
+    if (settings?.enableAdsLab && settings?.adslabAutoInterstitial !== false) {
+      triggerAdsLabInterstitial(settings);
+    }
+  };
+
   const handleViewOffer = (index: number) => {
     let rawUrl = "";
     let campaignIdToTrack = "";
@@ -1259,6 +1475,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           return;
         }
 
+        setRedirectTargetUrl(targetUrl);
         redirectWithoutReferrer(targetUrl);
       } catch (err: any) {
         setFaucetLimitDetected(true);
@@ -1440,13 +1657,25 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
   if (redirecting) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
-        <div className="relative mb-6">
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center space-y-4">
+        <div className="relative">
           <div className="w-16 h-16 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 animate-spin" />
           <CheckCircle className="w-8 h-8 text-emerald-400 absolute inset-0 m-auto" />
         </div>
-        <h2 className="text-2xl font-black text-white">Redirecting to Destination URL...</h2>
-        <p className="text-sm text-emerald-400 font-medium mt-1">Securing connection routing protocols. Do not close this window.</p>
+        <div>
+          <h2 className="text-2xl font-black text-white">Redirecting to Destination URL...</h2>
+          <p className="text-sm text-emerald-400 font-medium mt-1">Securing connection routing protocols. Do not close this window.</p>
+        </div>
+        {redirectTargetUrl && (
+          <a
+            href={ensureAbsoluteUrl(redirectTargetUrl)}
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-xl transition cursor-pointer transform hover:scale-[1.02] mt-2"
+          >
+            <span>Click here if you are not redirected automatically</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        )}
       </div>
     );
   }
@@ -1480,10 +1709,20 @@ export default function RedirectPage({ code }: RedirectPageProps) {
               <div className="flex items-center gap-3">
                 <SiteLogo logoUrl={settings?.logoUrl} isLoaded={!loading} className="w-12 h-12 object-contain rounded-xl shadow-lg" />
                 <div>
-                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest bg-indigo-950/40 border border-indigo-900/50 px-2.5 py-1 rounded-full">
-                    Step {currentStep} of {settings?.adPagesCount || 1} Redirection Gates
+                  <span className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border ${
+                    settings?.enablePtcGate !== false && !ptcGatePassed
+                      ? "text-cyan-400 bg-cyan-950/40 border-cyan-900/50"
+                      : "text-indigo-400 bg-indigo-950/40 border-indigo-900/50"
+                  }`}>
+                    {settings?.enablePtcGate !== false && !ptcGatePassed
+                      ? `Gate 1: PTC Task Completion`
+                      : `Step ${currentStep} of ${settings?.adPagesCount || 1} Redirection Gates`}
                   </span>
-                  <h2 className="text-xl font-black text-white mt-2">Redirection Portal Secured</h2>
+                  <h2 className="text-xl font-black text-white mt-2">
+                    {settings?.enablePtcGate !== false && !ptcGatePassed
+                      ? "Sponsored PTC Task Gateway"
+                      : "Redirection Portal Secured"}
+                  </h2>
                 </div>
               </div>
               
@@ -1497,7 +1736,203 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             </div>
 
             {/* AD PORTAL MAIN INTERFACE */}
-            {settings?.enableOfferWall && currentStep === 1 ? (
+            {settings?.enablePtcGate !== false && !ptcGatePassed ? (
+              <div className="w-full space-y-6" id="ptc_gate_interface">
+                <div className="bg-slate-950 border border-slate-850 rounded-2xl p-6 md:p-8 space-y-6 shadow-xl">
+                  {/* HEADER */}
+                  <div className="text-center pb-4 border-b border-slate-800">
+                    <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 mb-3 shadow-lg shadow-cyan-500/10">
+                      <Sparkles className="w-8 h-8 animate-pulse" />
+                    </div>
+                    <h3 className="text-2xl font-black text-white tracking-tight flex items-center justify-center gap-2">
+                      Sponsored PTC Task Verification
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                      Please complete <span className="text-cyan-400 font-bold">{requiredPtcCount}</span> sponsored PTC ad(s) below to verify your visit and unlock the redirection gateway.
+                    </p>
+                  </div>
+
+                  {/* PROGRESS BAR */}
+                  <div className="bg-slate-900/80 rounded-xl p-4 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                        <CheckCircle className="w-4 h-4 text-cyan-400" />
+                        PTC Tasks Progress
+                      </span>
+                      <span className="font-mono font-bold text-cyan-400 bg-cyan-950/60 border border-cyan-800/40 px-2.5 py-0.5 rounded-full">
+                        {completedPtcCount} / {requiredPtcCount} Completed
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                      <div
+                        className="h-full bg-gradient-to-r from-cyan-500 to-indigo-500 transition-all duration-500"
+                        style={{ width: `${Math.min(100, (completedPtcCount / requiredPtcCount) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500 text-right font-medium">
+                      {isPtcRequirementMet
+                        ? "🎉 All required PTC tasks completed! You can now continue."
+                        : `Complete ${requiredPtcCount - completedPtcCount} more task(s) to unlock the next step.`}
+                    </p>
+                  </div>
+
+                  {/* PTC CAMPAIGNS LIST */}
+                  <div className="space-y-3">
+                    {ptcAdsToDisplay.map((ad: any, idx: number) => {
+                      if (!ad || typeof ad !== "object") return null;
+
+                      const adId = String(ad.id || ad._id || `ptc_ad_${idx}`);
+                      const isCompleted = !!(completedPtcAds && completedPtcAds[adId]);
+                      const isViewing = activePtcId === adId && !isCompleted;
+                      const rawDuration = ad.duration || ad.timer || settings?.ptcTimerSeconds || 10;
+                      const adDuration = Math.max(3, Number(rawDuration) || 10);
+
+                      const titleText = typeof ad.title === "string" ? ad.title : typeof ad.name === "string" ? ad.name : "Sponsored PTC Ad";
+                      const descText = typeof ad.description === "string" ? ad.description : typeof ad.desc === "string" ? ad.desc : "";
+                      const rewardVal = (typeof ad.reward_usd === "number" || typeof ad.reward_usd === "string")
+                        ? String(ad.reward_usd)
+                        : (typeof ad.reward === "number" || typeof ad.reward === "string")
+                        ? String(ad.reward)
+                        : null;
+                      const currencySymbol = typeof ad.vsingular === "string" ? ad.vsingular : "$";
+                      const badgeText = typeof ad.badge === "string" ? ad.badge : "SPONSORED";
+                      const iconUrl = typeof ad.icon === "string" ? ad.icon : null;
+
+                      return (
+                        <div
+                          key={adId}
+                          className={`p-4 rounded-xl border transition-all ${
+                            isCompleted
+                              ? "bg-emerald-950/20 border-emerald-500/30"
+                              : isViewing
+                              ? "bg-cyan-950/30 border-cyan-500/50 shadow-lg shadow-cyan-500/10"
+                              : "bg-slate-900/60 border-slate-800 hover:border-slate-700"
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              {iconUrl ? (
+                                <img
+                                  src={iconUrl}
+                                  alt={titleText}
+                                  className="w-10 h-10 object-contain rounded-lg bg-slate-950 p-1 border border-slate-800 shrink-0 mt-0.5"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = 'none';
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold shrink-0 mt-0.5">
+                                  ⚡
+                                </div>
+                              )}
+                              
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-extrabold text-white">{titleText}</span>
+                                  {rewardVal ? (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                                      +{currencySymbol}{rewardVal}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                                      {badgeText}
+                                    </span>
+                                  )}
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-mono text-cyan-300 bg-cyan-950/60 border border-cyan-800/40">
+                                    ⏱️ {adDuration}s
+                                  </span>
+                                </div>
+                                {descText ? <p className="text-xs text-slate-400">{descText}</p> : null}
+
+                              {isViewing && (
+                                <div className="pt-2 space-y-1">
+                                  <div className="flex items-center gap-2 text-xs font-bold text-cyan-400">
+                                    {ptcFocusActive ? (
+                                      <>
+                                        <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                                        <span>⏳ Viewing sponsored ad... {ptcTimer}s remaining</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <div className="w-2 h-2 rounded-full bg-amber-400" />
+                                        <span className="text-amber-400">⏸️ Timer Paused: Keep advertiser window open to continue</span>
+                                      </>
+                                    )}
+                                  </div>
+                                  <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-cyan-400 transition-all duration-1000"
+                                      style={{
+                                        width: `${Math.max(0, 100 - (ptcTimer / adDuration) * 100)}%`
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 flex items-center">
+                              {isCompleted ? (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="px-4 py-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 opacity-90 cursor-default"
+                                >
+                                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                                  Completed
+                                </button>
+                              ) : isViewing ? (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="px-4 py-2 bg-cyan-600/30 text-cyan-200 border border-cyan-500/40 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-pulse cursor-wait"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  Viewing ({ptcTimer}s)
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartPtcAd(ad)}
+                                  className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-cyan-900/30 flex items-center gap-1.5 transition cursor-pointer"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  View Ad ({adDuration}s)
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* BOTTOM ACTION */}
+                  <div className="pt-4 border-t border-slate-800 flex flex-col items-center gap-3">
+                    {isPtcRequirementMet ? (
+                      <button
+                        type="button"
+                        onClick={handleCompletePtcGate}
+                        className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-sm rounded-xl shadow-xl shadow-emerald-900/30 flex items-center justify-center gap-2 transition cursor-pointer transform hover:scale-[1.02]"
+                      >
+                        <span>Continue to Next Step</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="w-full sm:w-auto px-8 py-3.5 bg-slate-900 border border-slate-800 text-slate-500 font-bold text-sm rounded-xl flex items-center justify-center gap-2 cursor-not-allowed opacity-60"
+                      >
+                        <Lock className="w-4 h-4" />
+                        <span>Complete {requiredPtcCount - completedPtcCount} PTC ad(s) to unlock</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : settings?.enableOfferWall && currentStep === 1 ? (
               <div className="w-full space-y-6" id="offer_wall_interface">
                 {/* OFFER WALL CARD CONTAINER */}
                 <div className="bg-slate-950 border border-slate-850 rounded-2xl p-6 md:p-8 space-y-6 shadow-xl">
@@ -1828,7 +2263,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                       )}
 
                       {captchaSolving ? (
-                        <div className="p-4 bg-indigo-950/40 border border-indigo-500/40 rounded-xl flex flex-col items-center justify-center text-center space-y-2">
+                        <div className="p-4 bg-indigo-950/40 border border-indigo-500/40 rounded-xl flex flex-col items-center justify-center text-center space-y-3">
                           <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
                             <Hourglass className="w-4 h-4 animate-spin text-indigo-400" />
                             <span>Waiting for Captcha Completion...</span>
@@ -1836,27 +2271,42 @@ export default function RedirectPage({ code }: RedirectPageProps) {
                           <p className="text-[11px] text-slate-400">
                             The verification opened in a new page. Once completed, this page will automatically unlock!
                           </p>
-                          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+
+                          {checkFeedbackMsg && (
+                            <p className={`text-xs font-bold p-2.5 rounded-xl border text-center ${
+                              checkFeedbackMsg.includes("✅")
+                                ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-300"
+                                : "bg-amber-950/60 border-amber-500/40 text-amber-300"
+                            }`}>
+                              {checkFeedbackMsg}
+                            </p>
+                          )}
+
+                          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
                             <button
                               type="button"
                               onClick={handleSolveCaptcha}
-                              className="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-bold rounded-lg border border-indigo-500/30 transition"
+                              className="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-bold rounded-lg border border-indigo-500/30 transition cursor-pointer"
                             >
                               Re-open Verification Page ➔
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                fetchApi(`/captcha/status?sub_id=${encodeURIComponent(captchaSubId)}`).then(r => {
-                                  if (r?.verified) {
-                                    setVerifiedHuman(true);
-                                    setCaptchaSolving(false);
-                                  }
-                                });
-                              }}
-                              className="px-3 py-1.5 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 text-xs font-bold rounded-lg border border-emerald-500/30 transition"
+                              disabled={checkingVerification}
+                              onClick={handleCheckVerification}
+                              className="px-3.5 py-1.5 bg-emerald-600/40 hover:bg-emerald-600/60 text-emerald-300 text-xs font-bold rounded-lg border border-emerald-500/40 transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
                             >
-                              Check Verification Now 🔄
+                              {checkingVerification ? (
+                                <>
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Checking Status...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Check Verification Now</span>
+                                </>
+                              )}
                             </button>
                           </div>
                         </div>

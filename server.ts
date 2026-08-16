@@ -122,13 +122,6 @@ function getRequestProtocol(req: express.Request): string {
 }
 
 function getRequestHost(req: express.Request): string {
-  const hostHeader = req.get("host") || "";
-  const isProd = !hostHeader.includes("localhost") && !hostHeader.includes("127.0.0.1") && !hostHeader.includes("ais-dev") && !hostHeader.includes("ais-pre");
-  
-  if (isProd) {
-    return "tglinks.eu.cc";
-  }
-
   const forwardedHost = req.headers["x-forwarded-host"];
   if (forwardedHost) {
     if (Array.isArray(forwardedHost)) {
@@ -136,7 +129,8 @@ function getRequestHost(req: express.Request): string {
     }
     return forwardedHost.split(",")[0].trim();
   }
-  return hostHeader || "tglinks.eu.cc";
+  const hostHeader = req.get("host") || "";
+  return hostHeader || "url.thunder-appz.eu.org";
 }
 
 function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): number {
@@ -278,6 +272,7 @@ interface PendingVerification {
   ip: string;
   createdAt: number;
   used: boolean;
+  usedAt?: number;
 }
 
 const pendingVerificationsMap = new Map<string, PendingVerification>();
@@ -303,11 +298,15 @@ function createVerificationToken(code: string, ip: string): string {
 }
 
 function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: string): boolean {
+  const now = Date.now();
   if (vtok && typeof vtok === "string") {
     const entry = pendingVerificationsMap.get(vtok);
-    if (entry && entry.code === code && !entry.used) {
-      if (Date.now() - entry.createdAt <= 2 * 60 * 60 * 1000) {
+    if (entry && entry.code === code) {
+      const isFresh = now - entry.createdAt <= 2 * 60 * 60 * 1000;
+      const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 60000);
+      if (isFresh && (!entry.used || isWithinGrace)) {
         entry.used = true;
+        entry.usedAt = now;
         return true;
       }
     }
@@ -316,13 +315,15 @@ function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: stri
   // Fallback: Check if there's a recent active pending token for this (code, ip) in case external shortener stripped query params
   if (ip) {
     const cleanIp = String(ip).trim();
-    const now = Date.now();
     for (const [, entry] of pendingVerificationsMap.entries()) {
-      if (entry.code === code && !entry.used) {
+      if (entry.code === code) {
         const entryIp = entry.ip.trim();
         if (entryIp === cleanIp || cleanIp === "127.0.0.1" || entryIp === "127.0.0.1" || !entryIp) {
-          if (now - entry.createdAt <= 2 * 60 * 60 * 1000) {
+          const isFresh = now - entry.createdAt <= 2 * 60 * 60 * 1000;
+          const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 60000);
+          if (isFresh && (!entry.used || isWithinGrace)) {
             entry.used = true;
+            entry.usedAt = now;
             return true;
           }
         }
@@ -736,16 +737,51 @@ function loadDb() {
       clickAd320x50: "",
       clickAdCustom1: "",
       clickAdCustom2: "",
-      enableAdsLab: false,
+      enableAdsLab: true,
       adslabIntPlacement: "int-aK6sT5CbQbdc",
       adslabRewPlacement: "rew-uhPNwWfp0hLN",
+      adslabPtcPlacement: "task-WdjEOqaZBE5l",
+      adslabApiKey: "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
       adslabUserId: "",
       adslabAutoInterstitial: true,
       adslabBannerCode: "",
       enableAdslabCaptcha: true,
       adslabCaptchaApiKey: "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
       adslabCaptchaSecretKey: "IUzRsZbtL4JmR197MRVUn5vIcavB8ksX",
-      adslabRegisteredDomain: "https://url.thunder-appz.eu.org"
+      adslabRegisteredDomain: "https://url.thunder-appz.eu.org",
+      enablePtcGate: true,
+      ptcRequiredCount: 1,
+      ptcTimerSeconds: 10,
+      ptcWindowFocusCheck: true,
+      ptcCustomAds: [
+        {
+          id: "ptc-1",
+          title: "Free Crypto Faucet & High-Yield Rewards",
+          description: "Claim instant Bitcoin, USDT & Dogecoin faucet earnings with zero minimum withdrawal.",
+          url: "https://url.thunder-appz.eu.org",
+          timer: 10,
+          badge: "HIGH CPM",
+          active: true
+        },
+        {
+          id: "ptc-2",
+          title: "High-Speed NVMe Cloud VPS Hosting - 50% Off",
+          description: "Deploy ultra-fast DDoS protected Linux & Windows VPS servers with instant setup.",
+          url: "https://url.thunder-appz.eu.org",
+          timer: 10,
+          badge: "SPONSORED",
+          active: true
+        },
+        {
+          id: "ptc-3",
+          title: "Top Web3 Trading & Automated Yield Portal",
+          description: "Explore decentralized liquidity pools and high-frequency automated algorithmic trading.",
+          url: "https://url.thunder-appz.eu.org",
+          timer: 10,
+          badge: "PREMIUM",
+          active: true
+        }
+      ]
     }
   };
 
@@ -2731,7 +2767,17 @@ Sitemap: ${baseUrl}/sitemap.xml`
       faucetLimitReached: false,
       settings: {
         siteName: db.settings.siteName,
+        siteTitle: db.settings.siteTitle || db.settings.siteName,
+        logoUrl: db.settings.logoUrl,
+        faviconUrl: db.settings.faviconUrl,
+        telegramChannelUrl: db.settings.telegramChannelUrl,
+        instagramUrl: db.settings.instagramUrl,
         enableOwnAds: db.settings.enableOwnAds,
+        enablePtcGate: db.settings.enablePtcGate ?? true,
+        ptcRequiredCount: db.settings.ptcRequiredCount ?? 1,
+        ptcTimerSeconds: db.settings.ptcTimerSeconds ?? 10,
+        ptcWindowFocusCheck: db.settings.ptcWindowFocusCheck ?? true,
+        ptcCustomAds: Array.isArray(db.settings.ptcCustomAds) ? db.settings.ptcCustomAds : [],
         adPagesCount: db.settings.adPagesCount,
         bannerAd728x90: db.settings.bannerAd728x90,
         bannerAd300x250: db.settings.bannerAd300x250,
@@ -2773,6 +2819,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
         enableAdsLab: !!db.settings.enableAdsLab,
         adslabIntPlacement: db.settings.adslabIntPlacement || "int-aK6sT5CbQbdc",
         adslabRewPlacement: db.settings.adslabRewPlacement || "rew-uhPNwWfp0hLN",
+        adslabPtcPlacement: db.settings.adslabPtcPlacement || "task-WdjEOqaZBE5l",
+        adslabApiKey: db.settings.adslabApiKey || db.settings.adslabCaptchaApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
         adslabUserId: db.settings.adslabUserId || "",
         adslabAutoInterstitial: db.settings.adslabAutoInterstitial !== false,
         adslabBannerCode: db.settings.adslabBannerCode || "",
@@ -2781,6 +2829,72 @@ Sitemap: ${baseUrl}/sitemap.xml`
         activeAdvertiserAds: getActiveAdvertiserAds(db, typeof ip === "string" ? ip : Array.isArray(ip) ? ip[0] : String(ip))
       }
     });
+  });
+
+  // --- ADSLAB PTC TASKS API ENDPOINT ---
+  app.get("/api/ptc/tasks", async (req, res) => {
+    try {
+      const db = loadDb();
+      const placement = db.settings?.adslabPtcPlacement || "task-WdjEOqaZBE5l";
+      const apiKey = db.settings?.adslabApiKey || db.settings?.adslabCaptchaApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr";
+      
+      let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+      if (typeof ip === "string" && ip.includes(",")) {
+        ip = ip.split(",")[0].trim();
+      }
+
+      const country = (req.query.country as string) || "all";
+      const userId = (req.query.userId as string) || (req.query.sub_id as string) || "anon_" + Math.random().toString(36).substring(2, 8);
+
+      const safeIp = typeof ip === "string" ? ip : Array.isArray(ip) ? ip[0] : String(ip);
+      const apiUrl = `https://adslab.me/api/tasks-share/${encodeURIComponent(placement)}/${encodeURIComponent(apiKey)}/${encodeURIComponent(country)}/${encodeURIComponent(userId)}/${encodeURIComponent(safeIp)}/ptc`;
+
+      const apiRes = await fetch(apiUrl, {
+        headers: { "User-Agent": "TGLinks-Server/1.0" }
+      });
+
+      if (!apiRes.ok) {
+        throw new Error(`AdsLab API returned HTTP ${apiRes.status}`);
+      }
+
+      const data = await apiRes.json();
+      return res.json(data);
+    } catch (err: any) {
+      console.error("[AdsLab PTC API] Error fetching live PTC tasks:", err.message);
+      // Fallback AdsLab PTC tasks if API is temporarily unreachable
+      return res.json({
+        success: true,
+        count: 3,
+        tasks: [
+          {
+            id: "adslab-ptc-fallback-1",
+            type: "PTC",
+            title: "Free Crypto Faucet & Rewards",
+            description: "View site for 10 seconds to unlock your redirection link.",
+            reward: 0.001,
+            reward_usd: 0.001,
+            vsingular: "$",
+            vplural: "$",
+            url: "https://adslab.me",
+            duration: 10,
+            icon: ""
+          },
+          {
+            id: "adslab-ptc-fallback-2",
+            type: "PTC",
+            title: "High-Speed NVMe VPS Hosting",
+            description: "View cloud infrastructure details for 10 seconds.",
+            reward: 0.001,
+            reward_usd: 0.001,
+            vsingular: "$",
+            vplural: "$",
+            url: "https://adslab.me",
+            duration: 10,
+            icon: ""
+          }
+        ]
+      });
+    }
   });
 
   app.post("/api/links/click", async (req, res) => {
@@ -3392,7 +3506,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return res.json({ verified: true });
     }
 
-    if (status === "success" || (token && typeof token === "string" && token.length >= 6)) {
+    if (status === "success" || status === "check_now" || (token && typeof token === "string" && token.length >= 6)) {
       solvedCaptchas.set(subIdStr, { verified: true, timestamp: Date.now() });
       return res.json({ verified: true });
     }

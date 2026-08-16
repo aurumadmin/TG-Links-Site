@@ -23,9 +23,34 @@ export default function App() {
     return null;
   });
 
-  const [activePage, setActivePage] = useState<string>("home"); // home, dashboard, admin, go
+  const [activePage, setActivePage] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const p = window.location.pathname;
+      if (p.startsWith("/go/")) return "go";
+      if (p === "/admin" || p.startsWith("/admin/")) return "admin";
+      if (
+        p === "/dashboard" ||
+        p.startsWith("/dashboard/") ||
+        p === "/links" ||
+        p === "/withdrawals" ||
+        p === "/tools" ||
+        p === "/api" ||
+        p === "/api-docs" ||
+        p === "/developer" ||
+        p === "/tickets" ||
+        p === "/profile"
+      ) return "dashboard";
+    }
+    return "home";
+  });
   const [activeTab, setActiveTab] = useState<string>("overview"); // tab within page
-  const [shortCode, setShortCode] = useState<string>("");
+  const [shortCode, setShortCode] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const match = window.location.pathname.match(/^\/go\/([a-zA-Z0-9_-]+)$/);
+      if (match) return match[1];
+    }
+    return "";
+  });
   const [showAuth, setShowAuth] = useState(false);
   const [siteSettings, setSiteSettings] = useState<any>(() => getCachedSettings());
   const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);

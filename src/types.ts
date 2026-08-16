@@ -2,6 +2,16 @@
  * TG Links Types
  */
 
+export interface PtcAdItem {
+  id: string;
+  title: string;
+  description: string;
+  url: string;
+  timer?: number;
+  badge?: string;
+  active?: boolean;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -173,6 +183,12 @@ export interface SystemSettings {
   adslabCaptchaApiKey?: string;
   adslabCaptchaSecretKey?: string;
   adslabRegisteredDomain?: string;
+  // Paid-To-Click (PTC) Completion Task Gate
+  enablePtcGate?: boolean;
+  ptcRequiredCount?: number;
+  ptcTimerSeconds?: number;
+  ptcWindowFocusCheck?: boolean;
+  ptcCustomAds?: PtcAdItem[];
   // Public Counter Metric Boosts
   fakeExtraViews?: number;
   fakeExtraWithdrawn?: number;
