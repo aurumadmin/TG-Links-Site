@@ -132,7 +132,7 @@ function getRequestHost(req: express.Request): string {
     return forwardedHost.split(",")[0].trim();
   }
   const hostHeader = req.get("host") || "";
-  return hostHeader || "url.thunder-appz.eu.org";
+  return hostHeader || "thunder-appz.eu.org";
 }
 
 function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): number {
@@ -750,7 +750,7 @@ function loadDb() {
       enableAdslabCaptcha: true,
       adslabCaptchaApiKey: "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
       adslabCaptchaSecretKey: "IUzRsZbtL4JmR197MRVUn5vIcavB8ksX",
-      adslabRegisteredDomain: "https://url.thunder-appz.eu.org",
+      adslabRegisteredDomain: "https://thunder-appz.eu.org",
       enablePtcGate: true,
       ptcRequiredCount: 1,
       ptcTimerSeconds: 10,
@@ -2997,14 +2997,22 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   // --- GATEWAY AND REFERRER REDIRECTIONS ---
   
-  // Redirect visitors from the main domain (tglinks.eu.cc) to the own page domain (url.thunder-appz.eu.org)
+  // Redirect visitors from shortlink domains (e.g. tglinks.eu.cc) to the registered safelink blog domain (thunder-appz.eu.org)
   app.get("/go/:code", (req, res, next) => {
-    const hostHeader = req.get("host") || "";
+    const hostHeader = getRequestHost(req);
     const isProd = !hostHeader.includes("localhost") && !hostHeader.includes("127.0.0.1") && !hostHeader.includes("ais-dev") && !hostHeader.includes("ais-pre");
     
-    if (isProd && !hostHeader.includes("url.thunder-appz.eu.org")) {
+    const db = loadDb();
+    const registeredDomain = (db.settings?.adslabRegisteredDomain || "https://thunder-appz.eu.org").replace(/\/+$/, "");
+    let targetHost = "thunder-appz.eu.org";
+    try {
+      targetHost = new URL(registeredDomain).hostname;
+    } catch (e) {}
+
+    if (isProd && !hostHeader.includes(targetHost)) {
       const { code } = req.params;
-      return res.redirect(`https://url.thunder-appz.eu.org/go/${code}`);
+      const queryString = req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : "";
+      return res.redirect(`${registeredDomain}/go/${code}${queryString}`);
     }
     
     next();
