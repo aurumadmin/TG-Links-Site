@@ -184,7 +184,6 @@ export default function App() {
       else if (path.includes("withdraw")) tab = "withdraw";
       else if (path.includes("tools") || path === "/api" || path === "/api-docs" || path === "/developer") tab = "tools";
       else if (path.includes("ticket")) tab = "contact";
-      else if (path.includes("advertiser")) tab = "advertiser";
       else if (path.includes("setting") || path === "/profile") tab = "settings";
 
       setActivePage("dashboard");

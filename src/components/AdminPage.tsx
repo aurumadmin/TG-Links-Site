@@ -4,7 +4,6 @@ import {
   User, 
   Link, 
   Withdrawal, 
-  DepositRequest,
   SystemSettings, 
   AdFlyShortener,
   SupportTicket 
@@ -65,7 +64,7 @@ import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
 import TopLoadingBar from "./TopLoadingBar";
 
-type AdminTab = "overview" | "users" | "links" | "withdrawals" | "deposits" | "tickets" | "settings" | "ad_settings" | "click_ads" | "ptc_ads" | "external" | "views" | "backup";
+type AdminTab = "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "ad_settings" | "click_ads" | "ptc_ads" | "external" | "views" | "backup";
 
 interface AdminPageProps {
   initialTab?: string;
@@ -152,7 +151,7 @@ function normalizeAdminTab(rawTab?: string): AdminTab {
   if (rawTab === "backup" || rawTab === "database") return "backup";
   if (rawTab === "external" || rawTab === "external-apis" || rawTab === "apis") return "external";
   if (rawTab === "views" || rawTab === "reports") return "overview";
-  if (["overview", "users", "links", "withdrawals", "deposits", "tickets"].includes(rawTab)) {
+  if (["overview", "users", "links", "withdrawals", "tickets"].includes(rawTab)) {
     return rawTab as AdminTab;
   }
   return "overview";
@@ -166,7 +165,9 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [usersList, setUsersList] = useState<User[]>([]);
   const [linksList, setLinksList] = useState<Link[]>([]);
   const [withdrawalsList, setWithdrawalsList] = useState<Withdrawal[]>([]);
-  const [depositsList, setDepositsList] = useState<DepositRequest[]>([]);
+  const [withdrawalFilter, setWithdrawalFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [withdrawalSortOrder, setWithdrawalSortOrder] = useState<"newest" | "oldest">("newest");
+  const [withdrawalSearch, setWithdrawalSearch] = useState("");
   const [ticketsList, setTicketsList] = useState<SupportTicket[]>([]);
   const [sysSettings, setSysSettings] = useState<SystemSettings>(() => getCachedSettings() || DEFAULT_ADMIN_SETTINGS);
   const [isAdminLoading, setIsAdminLoading] = useState(true);
@@ -481,31 +482,14 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     }
   };
 
-  const handleUpdateDepositStatus = async (id: string, status: "approved" | "rejected", note?: string) => {
-    try {
-      const res = await fetchApi(`/admin/deposits/${id}/status`, {
-        method: "POST",
-        body: JSON.stringify({ status, adminNote: note || "" })
-      });
-      if (res.success) {
-        loadAdminData();
-      } else {
-        alert(res.error || "Failed to update deposit status.");
-      }
-    } catch (err: any) {
-      alert("Error: " + err.message);
-    }
-  };
-
   const loadAdminData = async () => {
     setIsAdminLoading(true);
     try {
-      const [stats, users, links, withdrawals, deposits, tickets, settings, apis, viewsReport] = await Promise.all([
+      const [stats, users, links, withdrawals, tickets, settings, apis, viewsReport] = await Promise.all([
         fetchApi("/admin/stats"),
         fetchApi("/admin/users"),
         fetchApi("/admin/links"),
         fetchApi("/admin/withdrawals"),
-        fetchApi("/admin/deposits"),
         fetchApi("/admin/tickets"),
         fetchApi("/admin/settings"),
         fetchApi("/admin/external-shorteners"),
@@ -516,7 +500,6 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       if (users?.users) setUsersList(users.users);
       if (links?.links) setLinksList(links.links);
       if (withdrawals?.withdrawals) setWithdrawalsList(withdrawals.withdrawals);
-      if (deposits?.deposits) setDepositsList(deposits.deposits);
       if (tickets?.tickets) {
         setTicketsList(tickets.tickets);
       }
@@ -876,19 +859,11 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "withdrawals" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
           >
             <DollarSign className="w-4 h-4" />
-            Pending Withdrawals
-          </button>
-
-          <button
-            onClick={() => changeTab("deposits", "/admin/deposits")}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition ${activeTab === "deposits" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "hover:bg-slate-850 hover:text-white"}`}
-          >
-            <CreditCard className="w-4 h-4 text-emerald-400" />
             <div className="flex-grow text-left flex items-center justify-between">
-              <span>Deposit Requests</span>
-              {depositsList.filter(d => d.status === "pending").length > 0 && (
-                <span className="px-2 py-0.5 text-[10px] font-extrabold bg-emerald-500 text-slate-950 rounded-full animate-pulse">
-                  {depositsList.filter(d => d.status === "pending").length}
+              <span>Withdrawals</span>
+              {withdrawalsList.filter(w => w.status === "pending").length > 0 && (
+                <span className="px-2 py-0.5 text-[10px] font-extrabold bg-amber-500 text-slate-950 rounded-full animate-pulse">
+                  {withdrawalsList.filter(w => w.status === "pending").length}
                 </span>
               )}
             </div>
@@ -1830,238 +1805,320 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         )}
 
         {/* TAB WORKSPACE: WITHDRAWALS */}
-        {activeTab === "withdrawals" && (
-          <div className="bg-slate-900/40 rounded-xl border border-slate-800/80 overflow-hidden" id="admin_withdrawals">
-            <div className="p-6 border-b border-slate-800/60 bg-slate-900/20">
-              <h2 className="text-lg font-extrabold text-white">Fund Withdrawal Payout Requests</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Review, approve, or reject withdrawal submissions from publishers. Verify traffic referrers and Faucet Mode status before approving.</p>
-            </div>
+        {activeTab === "withdrawals" && (() => {
+          const pendingCount = withdrawalsList.filter(w => w.status === "pending").length;
+          const approvedCount = withdrawalsList.filter(w => w.status === "approved").length;
+          const rejectedCount = withdrawalsList.filter(w => w.status === "rejected").length;
+          const totalPendingAmount = withdrawalsList.filter(w => w.status === "pending").reduce((sum, w) => sum + (w.amount || 0), 0);
+          const totalApprovedAmount = withdrawalsList.filter(w => w.status === "approved").reduce((sum, w) => sum + (w.amount || 0), 0);
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase border-b border-slate-800/60">
-                    <th className="py-4 px-6">Publisher & Faucet Mode</th>
-                    <th className="py-4 px-6">Method & Account</th>
-                    <th className="py-4 px-6 text-right">Requested Amount</th>
-                    <th className="py-4 px-6">Traffic Sources (Referrers)</th>
-                    <th className="py-4 px-6 text-center">Status</th>
-                    <th className="py-4 px-6 text-center">Process Request</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 text-slate-300 font-medium">
-                  {withdrawalsList.map((w) => (
-                    <tr key={w.id} className="hover:bg-slate-900/20 transition">
-                      <td className="py-4 px-6">
-                        <span className="font-bold text-white block">{w.userEmail}</span>
-                        <span className="text-[10px] text-slate-500 block font-mono">Req ID: {w.id}</span>
-                        <span className="text-[10px] text-slate-500 block">Date: {new Date(w.createdAt).toLocaleString()}</span>
-                        
-                        <div className="flex items-center gap-1.5 mt-1.5">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${w.userFaucetMode ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-800 text-slate-400 border-slate-700"}`}>
-                            {w.userFaucetMode ? "🚰 FAUCET MODE ON" : "🌐 ORGANIC TRAFFIC"}
-                          </span>
-                          <button
-                            onClick={() => handleToggleUserFaucetMode(w.userId, !!w.userFaucetMode)}
-                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition cursor-pointer"
-                            title={w.userFaucetMode ? "Disable Faucet Mode for user" : "Enable Faucet Mode for user"}
-                          >
-                            {w.userFaucetMode ? <ToggleRight className="w-4 h-4 text-amber-400" /> : <ToggleLeft className="w-4 h-4 text-slate-500" />}
-                          </button>
-                        </div>
-                      </td>
-                      <td className="py-4 px-6">
-                        <span className="font-bold text-slate-200 block text-xs">{w.method}</span>
-                        <span className="font-mono text-slate-400 block break-all whitespace-pre-line text-[10px] mt-1 bg-slate-950 p-2 rounded-lg border border-slate-850">{w.account}</span>
-                      </td>
-                      <td className="py-4 px-6 text-right font-black text-white text-sm">
-                        ${w.amount.toFixed(2)}
-                      </td>
-                      <td className="py-4 px-6">
-                        <div className="space-y-1.5">
-                          {w.trafficSources && w.trafficSources.length > 0 ? (
-                            <div className="text-[11px] font-medium text-slate-300">
-                              <span className="font-bold text-white font-mono block truncate max-w-[180px]">
-                                Top: {w.trafficSources[0].source}
-                              </span>
-                              <span className="text-[10px] text-slate-400">
-                                {w.trafficSources[0].clicks} views (${w.trafficSources[0].earnings.toFixed(4)})
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-slate-500 block italic">No click logs recorded yet</span>
-                          )}
+          const displayedWithdrawals = [...withdrawalsList]
+            .filter((w) => {
+              if (withdrawalFilter !== "all" && w.status !== withdrawalFilter) return false;
+              if (withdrawalSearch.trim()) {
+                const q = withdrawalSearch.toLowerCase().trim();
+                return (
+                  (w.userEmail || "").toLowerCase().includes(q) ||
+                  (w.id || "").toLowerCase().includes(q) ||
+                  (w.method || "").toLowerCase().includes(q) ||
+                  (w.account || "").toLowerCase().includes(q)
+                );
+              }
+              return true;
+            })
+            .sort((a, b) => {
+              const timeA = new Date(a.createdAt).getTime() || 0;
+              const timeB = new Date(b.createdAt).getTime() || 0;
+              return withdrawalSortOrder === "newest" ? timeB - timeA : timeA - timeB;
+            });
 
-                          <button
-                            onClick={() => handleOpenTrafficModal(w.userId, w.userEmail, w.userFaucetMode)}
-                            className="px-2.5 py-1 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 border border-indigo-500/20 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition cursor-pointer"
-                          >
-                            <Globe className="w-3 h-3 text-indigo-400" />
-                            Inspect All Sources ({w.trafficSources?.length || 0})
-                          </button>
-                        </div>
-                      </td>
-                      <td className="py-4 px-6 text-center">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase border ${w.status === "approved" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : w.status === "rejected" ? "bg-rose-500/10 border-rose-500/20 text-rose-400" : "bg-amber-500/10 border-amber-500/20 text-amber-400"}`}>
-                          {w.status}
-                        </span>
-                      </td>
-                      <td className="py-4 px-6 text-center">
-                        {w.status === "pending" ? (
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              onClick={() => handleProcessWithdrawal(w.id, "approved")}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] rounded shadow-sm flex items-center gap-1 uppercase transition"
-                            >
-                              <Check className="w-3 h-3" />
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => handleProcessWithdrawal(w.id, "rejected")}
-                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] rounded shadow-sm flex items-center gap-1 uppercase transition"
-                            >
-                              <X className="w-3 h-3" />
-                              Reject
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-slate-500 font-semibold text-xs">Processed</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+          return (
+            <div className="space-y-6" id="admin_withdrawals">
+              {/* TOP HEADER & METRICS */}
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/60 pb-5">
+                  <div>
+                    <h2 className="text-xl font-black text-white flex items-center gap-2.5">
+                      <DollarSign className="w-6 h-6 text-emerald-400" />
+                      <span>Fund Withdrawal Payout Requests</span>
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Review, verify, and approve publisher withdrawals. New requests appear at the top by default.
+                    </p>
+                  </div>
 
-        {/* TAB WORKSPACE: DEPOSIT REQUESTS */}
-        {activeTab === "deposits" && (
-          <div className="space-y-6" id="admin_deposits">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <h1 className="text-2xl font-black text-white flex items-center gap-2">
-                  <CreditCard className="w-6 h-6 text-emerald-400" />
-                  <span>Advertiser Deposit Requests</span>
-                </h1>
-                <p className="text-xs text-slate-400 mt-1">
-                  Review manual UPI screenshot proofs and view automatic FaucetPay / OxaPay deposit transactions. Approving a request instantly credits the user's Advertiser Balance.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("settings")}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer border border-slate-700"
-                >
-                  <QrCode className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Configure UPI QR</span>
-                </button>
-                <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold rounded-lg">
-                  Pending: {depositsList.filter(d => d.status === "pending").length}
-                </span>
-                <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold rounded-lg">
-                  Approved: {depositsList.filter(d => d.status === "approved").length}
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-              {depositsList.length === 0 ? (
-                <div className="p-12 text-center text-slate-500 text-xs space-y-2">
-                  <CreditCard className="w-8 h-8 text-slate-600 mx-auto" />
-                  <p>No deposit requests submitted yet.</p>
+                  <button
+                    onClick={loadAdminData}
+                    className="self-start md:self-auto px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-2 transition cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Refresh Requests
+                  </button>
                 </div>
-              ) : (
+
+                {/* QUICK STATS CARDS */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
+                  <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider block">Pending Requests</span>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-2xl font-black text-white">{pendingCount}</span>
+                      <span className="text-xs font-bold text-amber-300">(${totalPendingAmount.toFixed(2)})</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider block">Approved / Paid</span>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-2xl font-black text-white">{approvedCount}</span>
+                      <span className="text-xs font-bold text-emerald-300">(${totalApprovedAmount.toFixed(2)})</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-rose-400 tracking-wider block">Rejected</span>
+                    <span className="text-2xl font-black text-white block mt-1">{rejectedCount}</span>
+                  </div>
+
+                  <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Total Submissions</span>
+                    <span className="text-2xl font-black text-white block mt-1">{withdrawalsList.length}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* CONTROLS: FILTER TABS, SEARCH, AND SORT */}
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                {/* FILTER TABS */}
+                <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  <button
+                    onClick={() => setWithdrawalFilter("all")}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      withdrawalFilter === "all"
+                        ? "bg-indigo-600 text-white shadow"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    All ({withdrawalsList.length})
+                  </button>
+
+                  <button
+                    onClick={() => setWithdrawalFilter("pending")}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      withdrawalFilter === "pending"
+                        ? "bg-amber-500 text-slate-950 shadow"
+                        : "text-amber-400 hover:text-amber-300"
+                    }`}
+                  >
+                    <span>Pending ({pendingCount})</span>
+                    {pendingCount > 0 && (
+                      <span className={`w-2 h-2 rounded-full ${withdrawalFilter === "pending" ? "bg-slate-950" : "bg-amber-400"} animate-ping`} />
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setWithdrawalFilter("approved")}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      withdrawalFilter === "approved"
+                        ? "bg-emerald-600 text-white shadow"
+                        : "text-emerald-400 hover:text-emerald-300"
+                    }`}
+                  >
+                    Approved ({approvedCount})
+                  </button>
+
+                  <button
+                    onClick={() => setWithdrawalFilter("rejected")}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      withdrawalFilter === "rejected"
+                        ? "bg-rose-600 text-white shadow"
+                        : "text-rose-400 hover:text-rose-300"
+                    }`}
+                  >
+                    Rejected ({rejectedCount})
+                  </button>
+                </div>
+
+                {/* SEARCH & SORT CONTROLS */}
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                  <div className="relative flex-grow md:w-64">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Search email, ID, method..."
+                      value={withdrawalSearch}
+                      onChange={(e) => setWithdrawalSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                    {withdrawalSearch && (
+                      <button
+                        onClick={() => setWithdrawalSearch("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800 shrink-0">
+                    <span className="text-[11px] text-slate-400 font-bold">Sort:</span>
+                    <button
+                      onClick={() => setWithdrawalSortOrder(withdrawalSortOrder === "newest" ? "oldest" : "newest")}
+                      className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer"
+                      title="Toggle Sort Order"
+                    >
+                      {withdrawalSortOrder === "newest" ? (
+                        <>
+                          <ArrowDown className="w-3 h-3 text-emerald-400" />
+                          <span>Newest First</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowUp className="w-3 h-3 text-indigo-400" />
+                          <span>Oldest First</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* WITHDRAWALS TABLE */}
+              <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 overflow-hidden shadow-xl">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs text-slate-300">
-                    <thead className="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
-                      <tr>
-                        <th className="p-3.5">Deposit ID</th>
-                        <th className="p-3.5">User Email</th>
-                        <th className="p-3.5">Method</th>
-                        <th className="p-3.5">Amount</th>
-                        <th className="p-3.5">Proof / Txn ID</th>
-                        <th className="p-3.5">Date</th>
-                        <th className="p-3.5">Status</th>
-                        <th className="p-3.5 text-right">Actions</th>
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-950/80 text-slate-400 font-extrabold uppercase border-b border-slate-800/60">
+                        <th className="py-4 px-6">Publisher & Submission Date</th>
+                        <th className="py-4 px-6">Method & Account</th>
+                        <th className="py-4 px-6 text-right">Requested Amount</th>
+                        <th className="py-4 px-6">Traffic Sources (Referrers)</th>
+                        <th className="py-4 px-6 text-center">Status</th>
+                        <th className="py-4 px-6 text-center">Process Request</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800">
-                      {depositsList.map((dep) => (
-                        <tr key={dep.id} className="hover:bg-slate-900/60">
-                          <td className="p-3.5 font-mono font-bold text-white">{dep.id}</td>
-                          <td className="p-3.5 font-bold text-indigo-300">{dep.userEmail}</td>
-                          <td className="p-3.5 uppercase font-mono text-[11px] text-amber-400">{dep.method}</td>
-                          <td className="p-3.5 font-mono font-bold text-emerald-400 text-sm">${dep.amount.toFixed(2)}</td>
-                          <td className="p-3.5">
-                            {dep.screenshotUrl ? (
-                              <a
-                                href={dep.screenshotUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg transition inline-flex items-center gap-1 text-[11px] font-bold"
-                              >
-                                <ExternalLink className="w-3 h-3" /> View Screenshot Proof
-                              </a>
-                            ) : (
-                              <span className="font-mono text-slate-400">{dep.gatewayTxnId || dep.txnId || "N/A"}</span>
-                            )}
-                            {dep.txnId && dep.screenshotUrl && (
-                              <div className="text-[10px] text-slate-400 font-mono mt-1">Txn: {dep.txnId}</div>
-                            )}
-                          </td>
-                          <td className="p-3.5 text-slate-400 text-[11px]">{new Date(dep.createdAt).toLocaleString()}</td>
-                          <td className="p-3.5">
-                            {dep.status === "approved" && (
-                              <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase rounded-lg">
-                                Approved
-                              </span>
-                            )}
-                            {dep.status === "pending" && (
-                              <span className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase rounded-lg animate-pulse">
-                                Pending
-                              </span>
-                            )}
-                            {dep.status === "rejected" && (
-                              <span className="px-2.5 py-1 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold uppercase rounded-lg">
-                                Rejected
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3.5 text-right">
-                            {dep.status === "pending" ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => handleUpdateDepositStatus(dep.id, "approved")}
-                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
-                                  title="Approve & Credit Balance"
-                                >
-                                  <Check className="w-3 h-3" /> Approve
-                                </button>
-                                <button
-                                  onClick={() => handleUpdateDepositStatus(dep.id, "rejected")}
-                                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] uppercase rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer"
-                                  title="Reject Request"
-                                >
-                                  <X className="w-3 h-3" /> Reject
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-slate-500 text-xs font-medium">Processed</span>
-                            )}
+                    <tbody className="divide-y divide-slate-800/60 text-slate-300 font-medium">
+                      {displayedWithdrawals.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-12 text-center text-slate-500">
+                            <DollarSign className="w-10 h-10 mx-auto text-slate-700 mb-2" />
+                            <p className="font-bold text-sm text-slate-400">No withdrawal requests found</p>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {withdrawalFilter !== "all"
+                                ? `There are no requests matching the "${withdrawalFilter}" filter.`
+                                : "No payout requests have been submitted yet."}
+                            </p>
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        displayedWithdrawals.map((w, idx) => (
+                          <tr key={w.id} className="hover:bg-slate-900/30 transition">
+                            <td className="py-4 px-6">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white block text-sm">{w.userEmail}</span>
+                                {idx === 0 && withdrawalSortOrder === "newest" && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                    LATEST
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-slate-500 block font-mono mt-0.5">Req ID: {w.id}</span>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">
+                                Submitted: {new Date(w.createdAt).toLocaleString(undefined, {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </span>
+                              
+                              <div className="flex items-center gap-1.5 mt-2">
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${w.userFaucetMode ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-800 text-slate-400 border-slate-700"}`}>
+                                  {w.userFaucetMode ? "🚰 FAUCET MODE ON" : "🌐 ORGANIC TRAFFIC"}
+                                </span>
+                                <button
+                                  onClick={() => handleToggleUserFaucetMode(w.userId, !!w.userFaucetMode)}
+                                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition cursor-pointer"
+                                  title={w.userFaucetMode ? "Disable Faucet Mode for user" : "Enable Faucet Mode for user"}
+                                >
+                                  {w.userFaucetMode ? <ToggleRight className="w-4 h-4 text-amber-400" /> : <ToggleLeft className="w-4 h-4 text-slate-500" />}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="py-4 px-6">
+                              <span className="font-bold text-slate-200 block text-xs">{w.method}</span>
+                              <span className="font-mono text-slate-400 block break-all whitespace-pre-line text-[10px] mt-1 bg-slate-950 p-2.5 rounded-xl border border-slate-850 max-w-xs">{w.account}</span>
+                            </td>
+                            <td className="py-4 px-6 text-right font-black text-white text-base">
+                              ${w.amount.toFixed(2)}
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="space-y-1.5">
+                                {w.trafficSources && w.trafficSources.length > 0 ? (
+                                  <div className="text-[11px] font-medium text-slate-300">
+                                    <span className="font-bold text-white font-mono block truncate max-w-[180px]">
+                                      Top: {w.trafficSources[0].source}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">
+                                      {w.trafficSources[0].clicks} views (${w.trafficSources[0].earnings.toFixed(4)})
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 block italic">No click logs recorded yet</span>
+                                )}
+
+                                <button
+                                  onClick={() => handleOpenTrafficModal(w.userId, w.userEmail, w.userFaucetMode)}
+                                  className="px-2.5 py-1 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 border border-indigo-500/20 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition cursor-pointer"
+                                >
+                                  <Globe className="w-3 h-3 text-indigo-400" />
+                                  Inspect All Sources ({w.trafficSources?.length || 0})
+                                </button>
+                              </div>
+                            </td>
+                            <td className="py-4 px-6 text-center">
+                              <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${
+                                w.status === "approved"
+                                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                                  : w.status === "rejected"
+                                  ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                  : "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
+                              }`}>
+                                {w.status}
+                              </span>
+                            </td>
+                            <td className="py-4 px-6 text-center">
+                              {w.status === "pending" ? (
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => handleProcessWithdrawal(w.id, "approved")}
+                                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-900/30 flex items-center gap-1.5 uppercase transition cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleProcessWithdrawal(w.id, "rejected")}
+                                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-900/30 flex items-center gap-1.5 uppercase transition cursor-pointer"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    Reject
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 font-semibold text-xs">Processed</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
-              )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* TAB WORKSPACE: SUPPORT TICKETS */}
         {activeTab === "tickets" && (
@@ -4061,338 +4118,6 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               </div>
             </div>
 
-            {/* ADVERTISER CPM RATES & DEPOSIT GATEWAYS */}
-            <div className="bg-slate-900/40 p-6 rounded-xl border border-amber-500/30 space-y-4 mt-6">
-              <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
-                <Target className="w-5 h-5 text-amber-400" />
-                <h3 className="font-extrabold text-white text-base">Advertiser CPM Rates & Deposit Gateways</h3>
-              </div>
-              <p className="text-xs text-slate-400">Configure prices charged to advertisers per 1000 views across all campaign ad formats and manage deposit payment gateway settings (FaucetPay, OxaPay, and UPI ID).</p>
-
-              {/* CPM Rates */}
-              <div className="space-y-2 pt-2">
-                <h4 className="text-xs font-black uppercase text-amber-400 tracking-wider">Ad Format CPM Rates ($ per 1,000 views)</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Offerwall Task CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmOfferWall ?? 3.0}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmOfferWall: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Sponsored Popup CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmSponsoredPopup ?? 4.0}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmSponsoredPopup: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">728x90 Banner CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmBanner728x90 ?? 1.5}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner728x90: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">300x250 Banner CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmBanner300x250 ?? 2.0}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner300x250: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">468x60 Banner CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmBanner468x60 ?? 1.2}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner468x60: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">320x50 Banner CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmBanner320x50 ?? 1.0}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner320x50: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">300x600 Banner CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmBanner300x600 ?? 2.5}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBanner300x600: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Banner Left CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmBannerLeft ?? 1.5}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBannerLeft: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Banner Right CPM ($)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={sysSettings.advCpmBannerRight ?? 1.5}
-                      onChange={(e) => setSysSettings({ ...sysSettings, advCpmBannerRight: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-amber-500 outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Deposit Gateways Configuration */}
-              <div className="space-y-4 pt-4 border-t border-slate-800">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-emerald-400" />
-                    Deposit Gateways & API Credentials
-                  </h4>
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={sysSettings.enableFaucetPayDeposit === true}
-                        onChange={(e) => setSysSettings({ ...sysSettings, enableFaucetPayDeposit: e.target.checked })}
-                        className="w-4 h-4 text-amber-500 rounded border-slate-700 bg-slate-900 focus:ring-amber-500"
-                      />
-                      <span className="text-xs font-bold text-slate-300">
-                        {sysSettings.enableFaucetPayDeposit ? "🟢 FaucetPay Active" : "⏸️ FaucetPay Paused"}
-                      </span>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">FaucetPay Merchant Username</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. MyFaucetPayUsername"
-                      value={sysSettings.faucetPayMerchant || ""}
-                      onChange={(e) => setSysSettings({ ...sysSettings, faucetPayMerchant: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">Your registered FaucetPay merchant name.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">FaucetPay Merchant API Key (Secret)</label>
-                    <input
-                      type="password"
-                      placeholder="e.g. fp_api_key_xxxxxxxx"
-                      value={sysSettings.faucetPaySecret || ""}
-                      onChange={(e) => setSysSettings({ ...sysSettings, faucetPaySecret: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">Found in FaucetPay &rarr; Merchant &rarr; API Keys. Enables instant auto-verification.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">OxaPay API Key</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. OXAPAY-API-KEY-XXX"
-                      value={sysSettings.oxaPayApiKey || ""}
-                      onChange={(e) => setSysSettings({ ...sysSettings, oxaPayApiKey: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">Merchant key from OxaPay dashboard.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">UPI ID for Manual Payments</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. yourname@okaxis, 9876543210@paytm"
-                      value={sysSettings.upiId || ""}
-                      onChange={(e) => setSysSettings({ ...sysSettings, upiId: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono font-bold"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">UPI VPA address for user scan & pay.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">UPI Payee / Account Name</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. TG Links, My Business"
-                      value={sysSettings.upiAccountHolderName || ""}
-                      onChange={(e) => setSysSettings({ ...sysSettings, upiAccountHolderName: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">Payee title shown in UPI payment apps.</p>
-                  </div>
-                </div>
-
-                {/* UPLOAD CUSTOM UPI QR CODE */}
-                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <div>
-                      <h5 className="text-xs font-extrabold text-white flex items-center gap-1.5 uppercase tracking-wider">
-                        <QrCode className="w-4 h-4 text-emerald-400" />
-                        Deposit UPI QR Code Image
-                      </h5>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Upload a custom QR Code image or paste an image URL to show users when depositing funds.
-                      </p>
-                    </div>
-                    {sysSettings.upiQrUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setSysSettings({ ...sysSettings, upiQrUrl: "" })}
-                        className="text-xs text-rose-400 hover:text-rose-300 font-bold transition flex items-center gap-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Reset to Generated QR
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-                    <div className="md:col-span-8 space-y-3">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
-                          Upload QR Code Image File
-                        </label>
-                        <div className="flex items-center gap-3">
-                          <label className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer transition flex items-center gap-2 shadow-md shadow-emerald-600/20">
-                            <Upload className="w-4 h-4" />
-                            <span>Select QR Code Image...</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                if (file.size > 5 * 1024 * 1024) {
-                                  alert("Please select an image file smaller than 5MB.");
-                                  return;
-                                }
-                                const reader = new FileReader();
-                                reader.onload = (event) => {
-                                  const base64 = event.target?.result as string;
-                                  if (base64) {
-                                    setSysSettings((prev) => prev ? { ...prev, upiQrUrl: base64 } : prev);
-                                  }
-                                };
-                                reader.readAsDataURL(file);
-                              }}
-                            />
-                          </label>
-                          <span className="text-[11px] text-slate-500">PNG, JPG, WEBP, SVG (Max 5MB)</span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
-                          Or Direct Deposit QR Image URL
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="e.g. https://example.com/qr.png or data:image/png;base64,..."
-                          value={sysSettings.upiQrUrl || ""}
-                          onChange={(e) => setSysSettings({ ...sysSettings, upiQrUrl: e.target.value })}
-                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 outline-none font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Live Deposit QR Code Preview */}
-                    <div className="md:col-span-4 p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col items-center justify-center text-center">
-                      <span className="text-[10px] font-bold uppercase text-emerald-400 tracking-wider mb-2">Deposit QR Preview</span>
-                      <div className="p-2 bg-white rounded-xl shadow-md mb-1 flex items-center justify-center">
-                        <img
-                          src={
-                            sysSettings.upiQrUrl
-                              ? sysSettings.upiQrUrl
-                              : `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
-                                  `upi://pay?pa=${sysSettings.upiId || "pay@upi"}&pn=${encodeURIComponent(sysSettings.upiAccountHolderName || "TG Links Ads")}`
-                                )}`
-                          }
-                          alt="Deposit QR Code Preview"
-                          className="w-28 h-28 object-contain mx-auto"
-                        />
-                      </div>
-                      <span className="text-[10px] font-bold text-slate-400 font-mono mt-1">
-                        {sysSettings.upiQrUrl ? "Custom Uploaded QR Image" : `UPI: ${sysSettings.upiId || "pay@upi"}`}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-6">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      id="enableUpiDeposit"
-                      checked={sysSettings.enableUpiDeposit !== false}
-                      onChange={(e) => setSysSettings({ ...sysSettings, enableUpiDeposit: e.target.checked })}
-                      className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 cursor-pointer"
-                    />
-                    <span className="text-xs font-bold text-slate-300">
-                      Enable Manual UPI QR Code Deposits
-                    </span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      id="enableOxaPayDeposit"
-                      checked={sysSettings.enableOxaPayDeposit !== false}
-                      onChange={(e) => setSysSettings({ ...sysSettings, enableOxaPayDeposit: e.target.checked })}
-                      className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 cursor-pointer"
-                    />
-                    <span className="text-xs font-bold text-slate-300">
-                      Enable OxaPay Crypto Deposits
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </div>
           </form>
         )}
 
