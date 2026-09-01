@@ -1827,9 +1827,16 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               return true;
             })
             .sort((a, b) => {
+              if (withdrawalSortOrder === "newest") {
+                if (a.status === "pending" && b.status !== "pending") return -1;
+                if (a.status !== "pending" && b.status === "pending") return 1;
+                const timeA = new Date(a.createdAt).getTime() || 0;
+                const timeB = new Date(b.createdAt).getTime() || 0;
+                return timeB - timeA;
+              }
               const timeA = new Date(a.createdAt).getTime() || 0;
               const timeB = new Date(b.createdAt).getTime() || 0;
-              return withdrawalSortOrder === "newest" ? timeB - timeA : timeA - timeB;
+              return timeA - timeB;
             });
 
           return (

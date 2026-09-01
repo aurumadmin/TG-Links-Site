@@ -280,9 +280,10 @@ interface PendingVerification {
 const pendingVerificationsMap = new Map<string, PendingVerification>();
 
 function createVerificationToken(code: string, ip: string): string {
-  const vtok = "vtok_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
+  const cleanCode = (code || "").trim();
+  const vtok = "vtok_" + cleanCode + "_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
   pendingVerificationsMap.set(vtok, {
-    code,
+    code: cleanCode,
     ip: String(ip || ""),
     createdAt: Date.now(),
     used: false
@@ -300,42 +301,35 @@ function createVerificationToken(code: string, ip: string): string {
 }
 
 function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: string): boolean {
+  if (!vtok || typeof vtok !== "string" || !vtok.trim()) {
+    return false;
+  }
+
   const now = Date.now();
+  const cleanVtok = vtok.trim();
+  const cleanCode = (code || "").trim();
 
   // 1. Direct vtok match from pending map
-  if (vtok && typeof vtok === "string" && vtok.trim()) {
-    const cleanVtok = vtok.trim();
-    const entry = pendingVerificationsMap.get(cleanVtok);
-    if (entry && entry.code === code) {
-      const isFresh = now - entry.createdAt <= 2 * 60 * 60 * 1000;
-      const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 300000); // 5-minute grace period
-      if (isFresh && (!entry.used || isWithinGrace)) {
-        entry.used = true;
-        entry.usedAt = now;
-        return true;
-      }
-    }
-
-    // 2. Format validation: Server-issued token starting with "vtok_" created within last 2 hours
-    if (cleanVtok.startsWith("vtok_")) {
-      const parts = cleanVtok.split("_");
-      const tsStr = parts[parts.length - 1];
-      const ts = parseInt(tsStr, 10);
-      if (!isNaN(ts) && now - ts <= 2 * 60 * 60 * 1000) {
-        return true;
-      }
+  const entry = pendingVerificationsMap.get(cleanVtok);
+  if (entry && entry.code === cleanCode) {
+    const isFresh = now - entry.createdAt <= 2 * 60 * 60 * 1000;
+    const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 300000); // 5-minute grace period for page reloads
+    if (isFresh && (!entry.used || isWithinGrace)) {
+      entry.used = true;
+      entry.usedAt = now;
+      return true;
     }
   }
 
-  // 3. Fallback: If query parameter was stripped by an external shortener (e.g., ShortFly, EasySky, SoftURL),
-  // check for ANY recent pending verification token for this code created in the last 2 hours
-  for (const [, entry] of pendingVerificationsMap.entries()) {
-    if (entry.code === code) {
-      const isFresh = now - entry.createdAt <= 2 * 60 * 60 * 1000;
-      const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 300000);
-      if (isFresh && (!entry.used || isWithinGrace)) {
-        entry.used = true;
-        entry.usedAt = now;
+  // 2. Token format validation fallback (if server restarted while token was in flight)
+  // Format: vtok_<code_without_dashes>_<random>_<timestamp>
+  if (cleanVtok.startsWith("vtok_")) {
+    const parts = cleanVtok.split("_");
+    if (parts.length >= 4) {
+      const tokenCode = parts[1];
+      const tsStr = parts[parts.length - 1];
+      const ts = parseInt(tsStr, 10);
+      if (tokenCode === cleanCode && !isNaN(ts) && now - ts <= 2 * 60 * 60 * 1000) {
         return true;
       }
     }
@@ -3502,8 +3496,12 @@ ${ticket.message}
       };
     });
 
-    // Sort newest withdrawals at the top, older downwards
-    withdrawalsWithDetails.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    // Sort pending withdrawals at the top (newest first), followed by processed withdrawals (newest first)
+    withdrawalsWithDetails.sort((a: any, b: any) => {
+      if (a.status === "pending" && b.status !== "pending") return -1;
+      if (a.status !== "pending" && b.status === "pending") return 1;
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
 
     res.json({ withdrawals: withdrawalsWithDetails });
   });
