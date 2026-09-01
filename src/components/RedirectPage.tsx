@@ -864,24 +864,21 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         // Fast immediate redirection if own ads are disabled AND no security locks triggered
         if (!res.settings?.enableOwnAds && !isAdBlockActive && !vpnResult?.isVpnOrProxy && !res.faucetLimitReached) {
           setRedirecting(true);
-          if (res.link?.adFlyShortenedUrl) {
-            redirectWithoutReferrer(res.link.adFlyShortenedUrl);
-          } else {
-            try {
-              const clickRes = await fetchApi("/links/click", {
-                method: "POST",
-                body: JSON.stringify({ code })
-              });
-              if (clickRes.faucetLimitReached) {
-                setFaucetLimitDetected(true);
-                setRedirecting(false);
-              } else {
-                redirectWithoutReferrer(clickRes.adFlyShortenedUrl || clickRes.originalUrl);
-              }
-            } catch {
+          try {
+            const clickRes = await fetchApi("/links/click", {
+              method: "POST",
+              body: JSON.stringify({ code })
+            });
+            if (clickRes.faucetLimitReached) {
               setFaucetLimitDetected(true);
               setRedirecting(false);
+            } else {
+              const targetUrl = clickRes.targetUrl || clickRes.adFlyShortenedUrl || `${window.location.origin}/go-final/${code}?vtok=${clickRes.vtok || ""}`;
+              redirectWithoutReferrer(targetUrl);
             }
+          } catch {
+            setFaucetLimitDetected(true);
+            setRedirecting(false);
           }
         }
       } catch (err: any) {

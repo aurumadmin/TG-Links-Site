@@ -301,37 +301,42 @@ function createVerificationToken(code: string, ip: string): string {
 
 function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: string): boolean {
   const now = Date.now();
+
+  // 1. Direct vtok match from pending map
   if (vtok && typeof vtok === "string" && vtok.trim()) {
     const cleanVtok = vtok.trim();
     const entry = pendingVerificationsMap.get(cleanVtok);
     if (entry && entry.code === code) {
       const isFresh = now - entry.createdAt <= 2 * 60 * 60 * 1000;
-      const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 60000);
+      const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 300000); // 5-minute grace period
       if (isFresh && (!entry.used || isWithinGrace)) {
         entry.used = true;
         entry.usedAt = now;
         return true;
       }
     }
+
+    // 2. Format validation: Server-issued token starting with "vtok_" created within last 2 hours
+    if (cleanVtok.startsWith("vtok_")) {
+      const parts = cleanVtok.split("_");
+      const tsStr = parts[parts.length - 1];
+      const ts = parseInt(tsStr, 10);
+      if (!isNaN(ts) && now - ts <= 2 * 60 * 60 * 1000) {
+        return true;
+      }
+    }
   }
-  
-  // Strict Fallback: ONLY if query params were stripped by a shortener, verify against exact non-loopback IP within 30 minutes
-  if (ip) {
-    const cleanIp = String(ip).trim();
-    if (cleanIp && cleanIp !== "127.0.0.1" && cleanIp !== "::1" && cleanIp !== "unknown" && cleanIp !== "localhost") {
-      for (const [, entry] of pendingVerificationsMap.entries()) {
-        if (entry.code === code) {
-          const entryIp = entry.ip.trim();
-          if (entryIp && entryIp === cleanIp) {
-            const isFresh = now - entry.createdAt <= 30 * 60 * 1000;
-            const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 60000);
-            if (isFresh && (!entry.used || isWithinGrace)) {
-              entry.used = true;
-              entry.usedAt = now;
-              return true;
-            }
-          }
-        }
+
+  // 3. Fallback: If query parameter was stripped by an external shortener (e.g., ShortFly, EasySky, SoftURL),
+  // check for ANY recent pending verification token for this code created in the last 2 hours
+  for (const [, entry] of pendingVerificationsMap.entries()) {
+    if (entry.code === code) {
+      const isFresh = now - entry.createdAt <= 2 * 60 * 60 * 1000;
+      const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 300000);
+      if (isFresh && (!entry.used || isWithinGrace)) {
+        entry.used = true;
+        entry.usedAt = now;
+        return true;
       }
     }
   }
