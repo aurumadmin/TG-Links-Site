@@ -15,21 +15,8 @@ export function getApiBase() {
     return `${clean}/api`;
   }
 
-  // Auto-detect environment
-  const currentOrigin = typeof window !== "undefined" ? window.location.origin : "";
-  
-  // If running directly on local Node server or on Google Cloud Run container
-  if (
-    currentOrigin.includes("localhost") || 
-    currentOrigin.includes("127.0.0.1") || 
-    currentOrigin.includes("run.app")
-  ) {
-    return "/api";
-  }
-  
-  // For custom domains (e.g., tglinks.eu.cc, thunder-appz.eu.org), Cloudflare Pages, Vercel, Netlify:
-  // Connect directly to the active, live Cloud Run Node.js API backend!
-  return `${CLOUD_RUN_BACKEND_URL}/api`;
+  // All modern deployments (Vercel, Cloud Run, custom domain, localhost) route /api seamlessly
+  return "/api";
 }
 
 export function setApiBaseUrl(url: string) {
@@ -66,61 +53,18 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const primaryBase = getApiBase();
   const url = `${primaryBase}${cleanEndpoint}`;
 
-  try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...getHeaders(),
-        ...options.headers,
-      },
-    });
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...getHeaders(),
+      ...options.headers,
+    },
+  });
 
-    const contentType = response.headers.get("content-type") || "";
-    
-    // Check if the response returned an HTML document instead of JSON (e.g. static CDN 404/SPA fallback)
-    if (contentType.includes("text/html") && !primaryBase.includes("run.app")) {
-      console.warn(`[fetchApi] Received HTML from ${url}, falling back to Cloud Run backend...`);
-      const fallbackUrl = `${CLOUD_RUN_BACKEND_URL}/api${cleanEndpoint}`;
-      const fallbackRes = await fetch(fallbackUrl, {
-        ...options,
-        headers: {
-          ...getHeaders(),
-          ...options.headers,
-        },
-      });
-
-      if (!fallbackRes.ok) {
-        const errorData = await fallbackRes.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error ${fallbackRes.status}`);
-      }
-      return fallbackRes.json();
-    }
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error ${response.status}`);
-    }
-
-    return response.json();
-  } catch (err: any) {
-    // If network error occurred with relative or custom endpoint, attempt fallback to Cloud Run
-    if (!primaryBase.includes("run.app")) {
-      try {
-        const fallbackUrl = `${CLOUD_RUN_BACKEND_URL}/api${cleanEndpoint}`;
-        const fallbackRes = await fetch(fallbackUrl, {
-          ...options,
-          headers: {
-            ...getHeaders(),
-            ...options.headers,
-          },
-        });
-        if (fallbackRes.ok) {
-          return fallbackRes.json();
-        }
-      } catch (fallbackErr) {
-        // Ignore fallback error and throw original error
-      }
-    }
-    throw err;
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `HTTP error ${response.status}`);
   }
+
+  return response.json();
 }

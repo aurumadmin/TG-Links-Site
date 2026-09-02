@@ -8,14 +8,14 @@ import zlib from "zlib";
 // Universal native fetch helper safe for CJS/ESM bundles
 const safeFetch = (...args: Parameters<typeof globalThis.fetch>): Promise<Response> => globalThis.fetch(...args);
 
-import { 
+import type { 
   User, 
   Link, 
   AdFlyShortener, 
   ClickLog, 
   Withdrawal, 
   SystemSettings 
-} from "./src/types";
+} from "./src/types.ts";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isVercel = !!process.env.VERCEL;
@@ -121,6 +121,24 @@ function getRequestProtocol(req: express.Request): string {
     return forwardedProto.split(",")[0].trim();
   }
   return req.secure ? "https" : "http";
+}
+
+function getClientIp(req: express.Request): string {
+  const cfIp = req.headers["cf-connecting-ip"];
+  if (cfIp) {
+    const raw = Array.isArray(cfIp) ? cfIp[0] : cfIp;
+    return raw.split(",")[0].trim();
+  }
+  const fwd = req.headers["x-forwarded-for"];
+  if (fwd) {
+    const raw = Array.isArray(fwd) ? fwd[0] : fwd;
+    return raw.split(",")[0].trim();
+  }
+  const sockIp = req.socket?.remoteAddress || (req as any).connection?.remoteAddress;
+  if (sockIp) {
+    return String(sockIp).split(",")[0].trim();
+  }
+  return "127.0.0.1";
 }
 
 function getRequestHost(req: express.Request): string {
@@ -1911,10 +1929,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
   
   app.get("/api/links/resolve/:code", (req, res) => {
     const { code } = req.params;
-    let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-    if (typeof ip === "string" && ip.includes(",")) {
-      ip = ip.split(",")[0].trim();
-    }
+    const ip = getClientIp(req);
     const db = loadDb();
     const link = db.links.find((l: any) => l.code === code && l.status === "active");
 
@@ -2026,10 +2041,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       const placement = (typeof rawPlacement === "string" && rawPlacement.trim()) ? rawPlacement.trim() : "task-WdjEOqaZBE5l";
       const apiKey = (typeof rawApiKey === "string" && rawApiKey.trim()) ? rawApiKey.trim() : "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr";
       
-      let ip = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-      if (typeof ip === "string" && ip.includes(",")) {
-        ip = ip.split(",")[0].trim();
-      }
+      const ip = getClientIp(req);
 
       const country = (req.query.country as string) || "all";
       const userId = (req.query.userId as string) || (req.query.sub_id as string) || "anon_" + Math.random().toString(36).substring(2, 8);
@@ -2100,10 +2112,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   app.post("/api/links/click", async (req, res) => {
     const { code } = req.body;
-    let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-    if (typeof ip === "string" && ip.includes(",")) {
-      ip = ip.split(",")[0].trim();
-    }
+    const ip = getClientIp(req);
     const db = loadDb();
 
     const link = db.links.find((l: any) => l.code === code);
@@ -2234,10 +2243,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
   app.get("/go-final/:code", async (req, res) => {
     const { code } = req.params;
     const vtok = req.query.vtok as string;
-    let ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-    if (typeof ip === "string" && ip.includes(",")) {
-      ip = ip.split(",")[0].trim();
-    }
+    const ip = getClientIp(req);
     const db = loadDb();
 
     const link = db.links.find((l: any) => l.code === code);
@@ -3741,11 +3747,7 @@ ${ticket.adminReply}
 
   // Public site settings endpoint
   app.get("/api/settings", (req, res) => {
-    let rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-    let ipStr = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
-    if (ipStr.includes(",")) {
-      ipStr = ipStr.split(",")[0].trim();
-    }
+    const ipStr = getClientIp(req);
     const db = loadDb();
     const s = db.settings || {};
     const activeAds = getActiveAdvertiserAds(db, ipStr);
@@ -4463,7 +4465,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
 
   // --- VITE MIDDLEWARE HANDLING ---
   
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !isVercel) {
     import("vite").then(({ createServer: createViteServer }) => {
       createViteServer({
         server: { middlewareMode: true },
@@ -4476,7 +4478,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     }).catch(err => {
       console.error("Failed to dynamically import Vite:", err);
     });
-  } else if (process.env.VERCEL !== "1") {
+  } else if (!isVercel) {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
@@ -4484,7 +4486,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     });
   }
 
-  if (process.env.VERCEL !== "1") {
+  if (!isVercel) {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`[TG Links] Server booting up on http://0.0.0.0:${PORT}`);
       startEmailBackupScheduler();

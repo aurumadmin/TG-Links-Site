@@ -196,11 +196,26 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
     setIsDashboardLoading(true);
     try {
       const [statsRes, linksRes, withdrawsRes, settingsRes, depositSettingsRes] = await Promise.all([
-        fetchApi(`/dashboard/stats/${user.id}`),
-        fetchApi(`/links/user/${user.id}`),
-        fetchApi(`/withdrawals/user/${user.id}`),
-        fetchApi("/settings"),
-        fetchApi("/deposits/settings")
+        fetchApi(`/dashboard/stats/${user.id}`).catch((e) => {
+          console.error("Failed to load stats:", e);
+          return null;
+        }),
+        fetchApi(`/links/user/${user.id}`).catch((e) => {
+          console.error("Failed to load links:", e);
+          return null;
+        }),
+        fetchApi(`/withdrawals/user/${user.id}`).catch((e) => {
+          console.error("Failed to load withdrawals:", e);
+          return null;
+        }),
+        fetchApi("/settings").catch((e) => {
+          console.error("Failed to load settings:", e);
+          return null;
+        }),
+        fetchApi("/deposits/settings").catch((e) => {
+          console.error("Failed to load deposit settings:", e);
+          return null;
+        })
       ]);
 
       if (statsRes) setStats(statsRes);
@@ -218,16 +233,20 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
       }
       
       // Update local profile states with fresh DB values if any
-      const freshUser = await fetchApi("/auth/me");
-      if (freshUser && freshUser.user) {
-        setCurrentUser(freshUser.user);
-        try {
-          localStorage.setItem("tglinks_user", JSON.stringify(freshUser.user));
-        } catch (e) {}
-        setUserMethod(freshUser.user.withdrawalMethod || "");
-        setUserAccount(freshUser.user.withdrawalAccount || "");
-        setFaucetModeEnabled(!!freshUser.user.enableFaucetMode);
-        setShowFaucetModal(false);
+      try {
+        const freshUser = await fetchApi("/auth/me");
+        if (freshUser && freshUser.user) {
+          setCurrentUser(freshUser.user);
+          try {
+            localStorage.setItem("tglinks_user", JSON.stringify(freshUser.user));
+          } catch (e) {}
+          setUserMethod(freshUser.user.withdrawalMethod || "");
+          setUserAccount(freshUser.user.withdrawalAccount || "");
+          setFaucetModeEnabled(!!freshUser.user.enableFaucetMode);
+          setShowFaucetModal(false);
+        }
+      } catch (userErr) {
+        console.error("Failed to refresh user profile data:", userErr);
       }
     } catch (err) {
       console.error("Failed to load dashboard statistics:", err);
