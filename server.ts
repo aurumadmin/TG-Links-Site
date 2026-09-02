@@ -1380,9 +1380,10 @@ function setupRoutes() {
   const getAuthUser = (req: express.Request): User | null => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-    const userId = authHeader.substring(7);
+    const rawUserId = authHeader.substring(7);
     const db = loadDb();
-    return db.users.find((u: any) => u.id === userId && !u.banned) || null;
+    const { user } = getUserIdentifiers(db, rawUserId);
+    return (user && !user.banned) ? user : null;
   };
 
   // --- DIAGNOSTICS ENDPOINT ---
@@ -2373,11 +2374,11 @@ Sitemap: ${baseUrl}/sitemap.xml`
     link.earnings += earningAmount;
 
     // Update User Wallet balance & earnings
-    if (link.userId !== "guest") {
-      const user = db.users.find((u: any) => u.id === link.userId);
+    if (link.userId && link.userId !== "guest") {
+      const { user } = getUserIdentifiers(db, link.userId);
       if (user && !user.banned) {
-        user.balance = Number((user.balance + earningAmount).toFixed(6));
-        user.totalEarned = Number((user.totalEarned + earningAmount).toFixed(6));
+        user.balance = Number(((user.balance || 0) + earningAmount).toFixed(6));
+        user.totalEarned = Number(((user.totalEarned || 0) + earningAmount).toFixed(6));
       }
     }
 
@@ -2906,8 +2907,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const db = loadDb();
-    const user = db.users.find((u: any) => u.id === userId && !u.banned);
-    if (!user) return res.status(404).json({ error: "User not found or banned" });
+    const { user } = getUserIdentifiers(db, userId);
+    if (!user || user.banned) return res.status(404).json({ error: "User not found or banned" });
 
     const reqAmount = Number(amount);
     if (isNaN(reqAmount) || reqAmount <= 0) {
@@ -2988,8 +2989,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const db = loadDb();
-    const user = db.users.find((u: any) => u.id === userId && !u.banned);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const { user } = getUserIdentifiers(db, userId);
+    if (!user || user.banned) return res.status(404).json({ error: "User not found" });
 
     user.withdrawalMethod = method;
     user.withdrawalAccount = account;
@@ -3026,8 +3027,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const db = loadDb();
-    const user = db.users.find((u: any) => u.id === userId && !u.banned);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const { user } = getUserIdentifiers(db, userId);
+    if (!user || user.banned) return res.status(404).json({ error: "User not found" });
 
     if (user.password !== oldPassword) {
       return res.status(400).json({ error: "Current password is incorrect" });
@@ -3059,8 +3060,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const db = loadDb();
-    const user = db.users.find((u: any) => u.id === userId && !u.banned);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const { user } = getUserIdentifiers(db, userId);
+    if (!user || user.banned) return res.status(404).json({ error: "User not found" });
 
     if (enableFaucetMode !== undefined) {
       user.enableFaucetMode = !!enableFaucetMode;
@@ -3082,8 +3083,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const db = loadDb();
-    const user = db.users.find((u: any) => u.id === userId && !u.banned);
-    if (!user) {
+    const { user } = getUserIdentifiers(db, userId);
+    if (!user || user.banned) {
       return res.status(404).json({ error: "User account not found" });
     }
 
