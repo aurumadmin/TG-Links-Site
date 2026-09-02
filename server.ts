@@ -361,7 +361,7 @@ function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: stri
   return false;
 }
 
-// Helper to resolve all identifier aliases (id, email, username) for a given user ID/email/username
+// Helper to resolve all identifier aliases (id, email, username, emailPrefix) for a given user ID/email/username
 function getUserIdentifiers(db: any, rawUserId: string): { user: any; idsSet: Set<string> } {
   const idsSet = new Set<string>();
   if (!rawUserId) return { user: null, idsSet };
@@ -372,17 +372,25 @@ function getUserIdentifiers(db: any, rawUserId: string): { user: any; idsSet: Se
   const users = db.users || [];
   const user = users.find((u: any) => {
     if (!u) return false;
-    return (
-      (u.id && String(u.id).toLowerCase() === clean) ||
-      (u.email && String(u.email).toLowerCase() === clean) ||
-      (u.username && String(u.username).toLowerCase() === clean)
-    );
+    const id = u.id ? String(u.id).toLowerCase() : "";
+    const email = u.email ? String(u.email).toLowerCase() : "";
+    const emailPrefix = email.includes("@") ? email.split("@")[0] : "";
+    const username = u.username ? String(u.username).toLowerCase() : "";
+    return clean === id || clean === email || clean === emailPrefix || clean === username;
   });
 
   if (user) {
     if (user.id) idsSet.add(String(user.id).toLowerCase());
-    if (user.email) idsSet.add(String(user.email).toLowerCase());
+    if (user.email) {
+      const e = String(user.email).toLowerCase();
+      idsSet.add(e);
+      if (e.includes("@")) idsSet.add(e.split("@")[0]);
+    }
     if (user.username) idsSet.add(String(user.username).toLowerCase());
+  } else {
+    if (clean.includes("@")) {
+      idsSet.add(clean.split("@")[0]);
+    }
   }
 
   return { user, idsSet };
@@ -1765,7 +1773,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
     if (!originalUrl) return res.status(400).json({ error: "Original URL is required" });
 
     const db = loadDb();
-    const user = db.users.find((u: any) => u.id === userId);
+    const authUser = getAuthUser(req);
+    const targetUserId = (authUser && authUser.id) ? authUser.id : userId;
+    const { user: targetUser } = getUserIdentifiers(db, targetUserId);
+    const user = targetUser || authUser;
     
     // Generate or validate short code
     let code = "";
@@ -1828,7 +1839,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       id: "l-" + Math.random().toString(36).substring(2, 9),
       code,
       originalUrl,
-      userId: userId || "guest",
+      userId: user ? user.id : (userId || "guest"),
       userEmail: user ? user.email : "guest",
       cpm: linkCpm,
       clicks: 0,
@@ -1851,10 +1862,19 @@ Sitemap: ${baseUrl}/sitemap.xml`
   app.get("/api/links/user/:userId", (req, res) => {
     const { userId } = req.params;
     const db = loadDb();
-    const { idsSet } = getUserIdentifiers(db, userId);
+    const authUser = getAuthUser(req);
+    const targetUserId = (authUser && authUser.id) ? authUser.id : userId;
+
+    const { idsSet } = getUserIdentifiers(db, targetUserId);
 
     const userLinks = db.links
-      .filter((l: any) => l && l.userId && idsSet.has(String(l.userId).toLowerCase()))
+      .filter((l: any) => {
+        if (!l) return false;
+        if (l.userId && idsSet.has(String(l.userId).toLowerCase())) return true;
+        if (l.userEmail && idsSet.has(String(l.userEmail).toLowerCase())) return true;
+        if (l.userEmail && l.userEmail.includes("@") && idsSet.has(l.userEmail.split("@")[0].toLowerCase())) return true;
+        return false;
+      })
       .map((l: any) => ({
         ...l,
         cpm: getCurrentCpmForLink(l, db)
