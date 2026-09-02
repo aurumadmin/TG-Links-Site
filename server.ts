@@ -278,14 +278,21 @@ interface PendingVerification {
 }
 
 const pendingVerificationsMap = new Map<string, PendingVerification>();
+const consumedTokensSet = new Set<string>();
+const VTOK_SECRET = process.env.VTOK_SECRET || "tglinks_vtok_sec_982374829374";
 
 function createVerificationToken(code: string, ip: string): string {
   const cleanCode = (code || "").trim();
-  const vtok = "vtok_" + cleanCode + "_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
+  const ts = Date.now();
+  const nonce = Math.random().toString(36).substring(2, 10);
+  const rawPayload = `${cleanCode}:${ip || ""}:${ts}:${nonce}`;
+  const sig = crypto.createHmac("sha256", VTOK_SECRET).update(rawPayload).digest("hex").substring(0, 16);
+  const vtok = `vtok_${cleanCode}_${ts}_${nonce}_${sig}`;
+
   pendingVerificationsMap.set(vtok, {
     code: cleanCode,
     ip: String(ip || ""),
-    createdAt: Date.now(),
+    createdAt: ts,
     used: false
   });
   
@@ -309,33 +316,76 @@ function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: stri
   const cleanVtok = vtok.trim();
   const cleanCode = (code || "").trim();
 
-  // 1. Direct vtok match from pending map
-  const entry = pendingVerificationsMap.get(cleanVtok);
-  if (entry && entry.code === cleanCode) {
-    const isFresh = now - entry.createdAt <= 2 * 60 * 60 * 1000;
-    const isWithinGrace = entry.usedAt && (now - entry.usedAt <= 300000); // 5-minute grace period for page reloads
-    if (isFresh && (!entry.used || isWithinGrace)) {
-      entry.used = true;
-      entry.usedAt = now;
-      return true;
-    }
+  // 1. Check if token was already consumed (strictly single-use view counting!)
+  if (consumedTokensSet.has(cleanVtok)) {
+    return false;
   }
 
-  // 2. Token format validation fallback (if server restarted while token was in flight)
-  // Format: vtok_<code_without_dashes>_<random>_<timestamp>
+  // 2. Direct vtok match from pending map
+  const entry = pendingVerificationsMap.get(cleanVtok);
+  if (entry) {
+    if (entry.code !== cleanCode) return false;
+    if (entry.used) return false; // Strictly single-use! Once consumed, view is counted and token cannot be reused
+    if (now - entry.createdAt > 2 * 60 * 60 * 1000) return false;
+
+    entry.used = true;
+    entry.usedAt = now;
+    consumedTokensSet.add(cleanVtok);
+    return true;
+  }
+
+  // 3. Fallback verification using cryptographic HMAC signature (for server restarts during active sessions)
   if (cleanVtok.startsWith("vtok_")) {
     const parts = cleanVtok.split("_");
-    if (parts.length >= 4) {
-      const tokenCode = parts[1];
-      const tsStr = parts[parts.length - 1];
+    if (parts.length === 5) {
+      const [, tokenCode, tsStr, nonce, sig] = parts;
+      if (tokenCode !== cleanCode) return false;
+
       const ts = parseInt(tsStr, 10);
-      if (tokenCode === cleanCode && !isNaN(ts) && now - ts <= 2 * 60 * 60 * 1000) {
+      if (isNaN(ts) || now - ts > 2 * 60 * 60 * 1000) return false;
+
+      // Check signature with or without IP
+      const rawWithIp = `${cleanCode}:${ip || ""}:${ts}:${nonce}`;
+      const sigWithIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawWithIp).digest("hex").substring(0, 16);
+      
+      const rawNoIp = `${cleanCode}::${ts}:${nonce}`;
+      const sigNoIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawNoIp).digest("hex").substring(0, 16);
+
+      if (sig === sigWithIp || sig === sigNoIp) {
+        consumedTokensSet.add(cleanVtok);
         return true;
       }
     }
   }
 
   return false;
+}
+
+// Helper to resolve all identifier aliases (id, email, username) for a given user ID/email/username
+function getUserIdentifiers(db: any, rawUserId: string): { user: any; idsSet: Set<string> } {
+  const idsSet = new Set<string>();
+  if (!rawUserId) return { user: null, idsSet };
+
+  const clean = String(rawUserId).trim().toLowerCase();
+  idsSet.add(clean);
+
+  const users = db.users || [];
+  const user = users.find((u: any) => {
+    if (!u) return false;
+    return (
+      (u.id && String(u.id).toLowerCase() === clean) ||
+      (u.email && String(u.email).toLowerCase() === clean) ||
+      (u.username && String(u.username).toLowerCase() === clean)
+    );
+  });
+
+  if (user) {
+    if (user.id) idsSet.add(String(user.id).toLowerCase());
+    if (user.email) idsSet.add(String(user.email).toLowerCase());
+    if (user.username) idsSet.add(String(user.username).toLowerCase());
+  }
+
+  return { user, idsSet };
 }
 
 // --- GOOGLE DRIVE DATABASE SYNC INTEGRATION ---
@@ -1801,8 +1851,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
   app.get("/api/links/user/:userId", (req, res) => {
     const { userId } = req.params;
     const db = loadDb();
+    const { idsSet } = getUserIdentifiers(db, userId);
+
     const userLinks = db.links
-      .filter((l: any) => l.userId === userId)
+      .filter((l: any) => l && l.userId && idsSet.has(String(l.userId).toLowerCase()))
       .map((l: any) => ({
         ...l,
         cpm: getCurrentCpmForLink(l, db)
@@ -2654,15 +2706,24 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const { userId } = req.params;
     const db = loadDb();
 
-    const userLinks = db.links.filter((l: any) => l.userId === userId);
-    const userLinkIds = new Set(userLinks.map((l: any) => l.id));
-    const userClicks = db.clicksLog.filter((c: any) => c.userId === userId || userLinkIds.has(c.linkId));
-    const user = db.users.find((u: any) => u.id === userId);
-
+    const { user, idsSet } = getUserIdentifiers(db, userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    const userLinks = (db.links || []).filter((l: any) => l && l.userId && idsSet.has(String(l.userId).toLowerCase()));
+    const userLinkIds = new Set(userLinks.map((l: any) => l.id));
+    const userClicks = (db.clicksLog || []).filter((c: any) => {
+      if (!c) return false;
+      if (c.userId && idsSet.has(String(c.userId).toLowerCase())) return true;
+      if (c.linkId && userLinkIds.has(c.linkId)) return true;
+      return false;
+    });
+
     const totalViews = userClicks.length;
-    const totalEarnings = user.totalEarned;
+    
+    // Total earnings based on clicks or user record
+    const calculatedEarnings = userClicks.reduce((acc: number, c: any) => acc + (Number(c.earning) || 0), 0);
+    const totalEarnings = Number(Math.max(user.totalEarned || 0, calculatedEarnings).toFixed(4));
+
     const avgCpm = totalViews > 0 ? Number(((totalEarnings / totalViews) * 1000).toFixed(2)) : db.settings.globalCpm;
 
     const now = new Date();
@@ -2677,16 +2738,17 @@ Sitemap: ${baseUrl}/sitemap.xml`
     let monthEarnings = 0;
 
     userClicks.forEach((c: any) => {
-      const clickDate = getISTDateString(c.timestamp);
-      const clickMonth = getISTMonthString(c.timestamp);
+      const clickDate = c.timestamp ? getISTDateString(c.timestamp) : todayStr;
+      const clickMonth = c.timestamp ? getISTMonthString(c.timestamp) : currentMonthStr;
+      const earning = Number(c.earning || 0);
 
       if (clickDate === todayStr) {
         todayViews += 1;
-        todayEarnings += c.earning;
+        todayEarnings += earning;
       }
       if (clickMonth === currentMonthStr) {
         monthViews += 1;
-        monthEarnings += c.earning;
+        monthEarnings += earning;
       }
     });
 
@@ -2699,16 +2761,16 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     userClicks.forEach((c: any) => {
-      const dateString = getISTDateString(c.timestamp);
+      const dateString = c.timestamp ? getISTDateString(c.timestamp) : todayStr;
+      const earning = Number(c.earning || 0);
       if (dailyReportsMap.has(dateString)) {
         const current = dailyReportsMap.get(dateString)!;
         dailyReportsMap.set(dateString, {
           views: current.views + 1,
-          earnings: current.earnings + c.earning
+          earnings: current.earnings + earning
         });
       } else {
-        // If older but belongs to user, let's keep it dynamically
-        dailyReportsMap.set(dateString, { views: 1, earnings: c.earning });
+        dailyReportsMap.set(dateString, { views: 1, earnings: earning });
       }
     });
 
@@ -2735,15 +2797,16 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     userClicks.forEach((c: any) => {
-      const monthString = getISTMonthString(c.timestamp);
+      const monthString = c.timestamp ? getISTMonthString(c.timestamp) : currentMonthStr;
+      const earning = Number(c.earning || 0);
       if (monthlyReportsMap.has(monthString)) {
         const current = monthlyReportsMap.get(monthString)!;
         monthlyReportsMap.set(monthString, {
           views: current.views + 1,
-          earnings: current.earnings + c.earning
+          earnings: current.earnings + earning
         });
       } else {
-        monthlyReportsMap.set(monthString, { views: 1, earnings: c.earning });
+        monthlyReportsMap.set(monthString, { views: 1, earnings: earning });
       }
     });
 
@@ -2769,12 +2832,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     userClicks.forEach((c: any) => {
-      const dateString = getISTDateString(c.timestamp);
+      const dateString = c.timestamp ? getISTDateString(c.timestamp) : todayStr;
+      const earning = Number(c.earning || 0);
       if (dailyStatsMap.has(dateString)) {
         const current = dailyStatsMap.get(dateString)!;
         dailyStatsMap.set(dateString, {
           views: current.views + 1,
-          earnings: Number((current.earnings + c.earning).toFixed(6))
+          earnings: Number((current.earnings + earning).toFixed(6))
         });
       }
     });
@@ -2785,6 +2849,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
       earnings: Number(data.earnings.toFixed(4))
     }));
 
+    const currentBalance = Number((user.balance || 0).toFixed(4));
+
     res.json({
       totalViews,
       totalEarnings,
@@ -2792,7 +2858,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       todayEarnings: Number(todayEarnings.toFixed(4)),
       monthViews,
       monthEarnings: Number(monthEarnings.toFixed(4)),
-      balance: user.balance,
+      balance: currentBalance,
       averageCpm: avgCpm,
       dailyStats,
       dailyReports,
@@ -2805,8 +2871,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
   app.get("/api/withdrawals/user/:userId", (req, res) => {
     const { userId } = req.params;
     const db = loadDb();
-    const userWithdrawals = db.withdrawals
-      .filter((w: any) => w.userId === userId)
+    const { idsSet } = getUserIdentifiers(db, userId);
+
+    const userWithdrawals = (db.withdrawals || [])
+      .filter((w: any) => w && w.userId && idsSet.has(String(w.userId).toLowerCase()))
       .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     res.json({ withdrawals: userWithdrawals });
   });
