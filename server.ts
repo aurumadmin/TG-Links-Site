@@ -1895,7 +1895,9 @@ Sitemap: ${baseUrl}/sitemap.xml`
     if (linkIdx === -1) return res.status(404).json({ error: "Link not found" });
 
     const link = db.links[linkIdx];
-    if (link.userId !== authUser.id && authUser.role !== "admin") {
+    const { idsSet } = getUserIdentifiers(db, authUser.id);
+    const isOwner = link.userId && idsSet.has(String(link.userId).toLowerCase());
+    if (!isOwner && authUser.role !== "admin") {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -2730,7 +2732,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const { user, idsSet } = getUserIdentifiers(db, userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const userLinks = (db.links || []).filter((l: any) => l && l.userId && idsSet.has(String(l.userId).toLowerCase()));
+    const userLinks = (db.links || []).filter((l: any) => {
+      if (!l) return false;
+      if (l.userId && idsSet.has(String(l.userId).toLowerCase())) return true;
+      if (l.userEmail && idsSet.has(String(l.userEmail).toLowerCase())) return true;
+      if (l.userEmail && l.userEmail.includes("@") && idsSet.has(l.userEmail.split("@")[0].toLowerCase())) return true;
+      return false;
+    });
     const userLinkIds = new Set(userLinks.map((l: any) => l.id));
     const userClicks = (db.clicksLog || []).filter((c: any) => {
       if (!c) return false;
@@ -3145,7 +3153,8 @@ ${ticket.message}
   app.get("/api/tickets/user/:userId", (req, res) => {
     const { userId } = req.params;
     const db = loadDb();
-    const userTickets = (db.tickets || []).filter((t: any) => t && t.userId === userId);
+    const { idsSet } = getUserIdentifiers(db, userId);
+    const userTickets = (db.tickets || []).filter((t: any) => t && t.userId && idsSet.has(String(t.userId).toLowerCase()));
     res.json({ tickets: userTickets });
   });
 
