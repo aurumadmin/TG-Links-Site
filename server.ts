@@ -286,6 +286,29 @@ async function getExternalShortenedUrl(
   return null;
 }
 
+// Helper to parse cookies from request headers
+function parseCookies(req: any): Record<string, string> {
+  const list: Record<string, string> = {};
+  const cookieHeader = req?.headers?.cookie;
+  if (!cookieHeader || typeof cookieHeader !== "string") return list;
+
+  cookieHeader.split(";").forEach((cookie: string) => {
+    const parts = cookie.split("=");
+    if (parts.length >= 2) {
+      const name = parts[0]?.trim();
+      const value = parts.slice(1).join("=").trim();
+      if (name) {
+        try {
+          list[name] = decodeURIComponent(value);
+        } catch {
+          list[name] = value;
+        }
+      }
+    }
+  });
+  return list;
+}
+
 // Verification Token Store for strictly counting views only when shortener chain is fully completed
 interface PendingVerification {
   code: string;
@@ -299,11 +322,12 @@ const pendingVerificationsMap = new Map<string, PendingVerification>();
 const consumedTokensSet = new Set<string>();
 const VTOK_SECRET = process.env.VTOK_SECRET || "tglinks_vtok_sec_982374829374";
 
-function createVerificationToken(code: string, ip: string): string {
+function createVerificationToken(code: string, ip?: string): string {
   const cleanCode = (code || "").trim();
   const ts = Date.now();
-  const nonce = Math.random().toString(36).substring(2, 10);
-  const rawPayload = `${cleanCode}:${ip || ""}:${ts}:${nonce}`;
+  const nonce = crypto.randomBytes(6).toString("hex");
+  // Resilient cryptographic signature based on code, timestamp, and unique nonce
+  const rawPayload = `${cleanCode}:${ts}:${nonce}`;
   const sig = crypto.createHmac("sha256", VTOK_SECRET).update(rawPayload).digest("hex").substring(0, 16);
   const vtok = `vtok_${cleanCode}_${ts}_${nonce}_${sig}`;
 
@@ -325,22 +349,46 @@ function createVerificationToken(code: string, ip: string): string {
   return vtok;
 }
 
-function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: string): boolean {
-  if (!vtok || typeof vtok !== "string" || !vtok.trim()) {
-    return false;
-  }
-
-  const now = Date.now();
-  const cleanVtok = vtok.trim();
+function verifyAndConsumeToken(
+  vtok: string | undefined, 
+  code: string, 
+  ip?: string,
+  req?: any
+): boolean {
   const cleanCode = (code || "").trim();
+  const now = Date.now();
 
-  // 1. Check if token was already consumed (strictly single-use view counting!)
-  if (consumedTokensSet.has(cleanVtok)) {
+  let tokenToVerify = (vtok || "").trim();
+
+  // 1. If vtok query param was missing/stripped by external shortener, check cookies as fallback
+  if (!tokenToVerify && req) {
+    const cookies = parseCookies(req);
+    const cookieTok = cookies["tg_vtok_" + cleanCode] || cookies["tg_vtok"];
+    if (cookieTok && typeof cookieTok === "string") {
+      tokenToVerify = cookieTok.trim();
+    }
+  }
+
+  // 2. If still no token, check if there is an unconsumed pending verification session for this code created recently
+  if (!tokenToVerify) {
+    for (const [key, entry] of pendingVerificationsMap.entries()) {
+      if (entry && entry.code === cleanCode && !entry.used && (now - entry.createdAt <= 45 * 60 * 1000)) {
+        entry.used = true;
+        entry.usedAt = now;
+        consumedTokensSet.add(key);
+        return true;
+      }
+    }
     return false;
   }
 
-  // 2. Direct vtok match from pending map
-  const entry = pendingVerificationsMap.get(cleanVtok);
+  // 3. Check if token was already consumed (strictly single-use view counting!)
+  if (consumedTokensSet.has(tokenToVerify)) {
+    return false;
+  }
+
+  // 4. Direct match from pending map
+  const entry = pendingVerificationsMap.get(tokenToVerify);
   if (entry) {
     if (entry.code !== cleanCode) return false;
     if (entry.used) return false; // Strictly single-use! Once consumed, view is counted and token cannot be reused
@@ -348,13 +396,13 @@ function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: stri
 
     entry.used = true;
     entry.usedAt = now;
-    consumedTokensSet.add(cleanVtok);
+    consumedTokensSet.add(tokenToVerify);
     return true;
   }
 
-  // 3. Fallback verification using cryptographic HMAC signature (for server restarts during active sessions)
-  if (cleanVtok.startsWith("vtok_")) {
-    const parts = cleanVtok.split("_");
+  // 5. Cryptographic HMAC signature verification (for multi-instance Cloud Run containers and restarts)
+  if (tokenToVerify.startsWith("vtok_")) {
+    const parts = tokenToVerify.split("_");
     if (parts.length === 5) {
       const [, tokenCode, tsStr, nonce, sig] = parts;
       if (tokenCode !== cleanCode) return false;
@@ -362,15 +410,19 @@ function verifyAndConsumeToken(vtok: string | undefined, code: string, ip?: stri
       const ts = parseInt(tsStr, 10);
       if (isNaN(ts) || now - ts > 2 * 60 * 60 * 1000) return false;
 
-      // Check signature with or without IP
+      // Standard resilient signature (code + ts + nonce)
+      const rawStandard = `${cleanCode}:${ts}:${nonce}`;
+      const sigStandard = crypto.createHmac("sha256", VTOK_SECRET).update(rawStandard).digest("hex").substring(0, 16);
+
+      // Check legacy signatures (with IP or empty IP) for backward compatibility
       const rawWithIp = `${cleanCode}:${ip || ""}:${ts}:${nonce}`;
       const sigWithIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawWithIp).digest("hex").substring(0, 16);
       
       const rawNoIp = `${cleanCode}::${ts}:${nonce}`;
       const sigNoIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawNoIp).digest("hex").substring(0, 16);
 
-      if (sig === sigWithIp || sig === sigNoIp) {
-        consumedTokensSet.add(cleanVtok);
+      if (sig === sigStandard || sig === sigWithIp || sig === sigNoIp) {
+        consumedTokensSet.add(tokenToVerify);
         return true;
       }
     }
@@ -2173,6 +2225,9 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     const targetUrl = adFlyShortenedUrl || finalLandingUrl;
 
+    res.cookie("tg_vtok_" + link.code, vtok, { maxAge: 2 * 60 * 60 * 1000, httpOnly: false, sameSite: "lax", path: "/" });
+    res.cookie("tg_vtok", vtok, { maxAge: 2 * 60 * 60 * 1000, httpOnly: false, sameSite: "lax", path: "/" });
+
     res.json({ 
       success: true, 
       targetUrl: targetUrl,
@@ -2269,7 +2324,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const hasActiveShorteners = (db.adFlyShorteners || []).some((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
 
     // Strictly enforce verification token check: view is only counted once user completes steps and reaches final destination
-    const isTokenValid = verifyAndConsumeToken(vtok, code, String(ip));
+    const isTokenValid = verifyAndConsumeToken(vtok, code, String(ip), req);
 
     if (!isTokenValid) {
       // IN FAUCET MODE OR WHEN EXTERNAL SHORTENERS ARE CONFIGURED: BLOCK DIRECT BYPASS COMPLETELY!
