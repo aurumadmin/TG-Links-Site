@@ -352,42 +352,22 @@ function createVerificationToken(code: string, ip?: string): string {
 function verifyAndConsumeToken(
   vtok: string | undefined, 
   code: string, 
-  ip?: string,
-  req?: any
+  ip?: string
 ): boolean {
+  if (!vtok || typeof vtok !== "string" || !vtok.trim()) {
+    return false; // Strictly require valid vtok parameter in query!
+  }
+
   const cleanCode = (code || "").trim();
+  const tokenToVerify = vtok.trim();
   const now = Date.now();
 
-  let tokenToVerify = (vtok || "").trim();
-
-  // 1. If vtok query param was missing/stripped by external shortener, check cookies as fallback
-  if (!tokenToVerify && req) {
-    const cookies = parseCookies(req);
-    const cookieTok = cookies["tg_vtok_" + cleanCode] || cookies["tg_vtok"];
-    if (cookieTok && typeof cookieTok === "string") {
-      tokenToVerify = cookieTok.trim();
-    }
-  }
-
-  // 2. If still no token, check if there is an unconsumed pending verification session for this code created recently
-  if (!tokenToVerify) {
-    for (const [key, entry] of pendingVerificationsMap.entries()) {
-      if (entry && entry.code === cleanCode && !entry.used && (now - entry.createdAt <= 45 * 60 * 1000)) {
-        entry.used = true;
-        entry.usedAt = now;
-        consumedTokensSet.add(key);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  // 3. Check if token was already consumed (strictly single-use view counting!)
+  // 1. Check if token was already consumed (strictly single-use view counting!)
   if (consumedTokensSet.has(tokenToVerify)) {
     return false;
   }
 
-  // 4. Direct match from pending map
+  // 2. Direct match from pending verifications map
   const entry = pendingVerificationsMap.get(tokenToVerify);
   if (entry) {
     if (entry.code !== cleanCode) return false;
@@ -400,7 +380,7 @@ function verifyAndConsumeToken(
     return true;
   }
 
-  // 5. Cryptographic HMAC signature verification (for multi-instance Cloud Run containers and restarts)
+  // 3. Cryptographic HMAC signature verification (for multi-instance Cloud Run containers and restarts)
   if (tokenToVerify.startsWith("vtok_")) {
     const parts = tokenToVerify.split("_");
     if (parts.length === 5) {
@@ -414,7 +394,7 @@ function verifyAndConsumeToken(
       const rawStandard = `${cleanCode}:${ts}:${nonce}`;
       const sigStandard = crypto.createHmac("sha256", VTOK_SECRET).update(rawStandard).digest("hex").substring(0, 16);
 
-      // Check legacy signatures (with IP or empty IP) for backward compatibility
+      // Legacy signatures (with IP or empty IP)
       const rawWithIp = `${cleanCode}:${ip || ""}:${ts}:${nonce}`;
       const sigWithIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawWithIp).digest("hex").substring(0, 16);
       
@@ -2225,9 +2205,6 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     const targetUrl = adFlyShortenedUrl || finalLandingUrl;
 
-    res.cookie("tg_vtok_" + link.code, vtok, { maxAge: 2 * 60 * 60 * 1000, httpOnly: false, sameSite: "lax", path: "/" });
-    res.cookie("tg_vtok", vtok, { maxAge: 2 * 60 * 60 * 1000, httpOnly: false, sameSite: "lax", path: "/" });
-
     res.json({ 
       success: true, 
       targetUrl: targetUrl,
@@ -2324,7 +2301,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const hasActiveShorteners = (db.adFlyShorteners || []).some((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
 
     // Strictly enforce verification token check: view is only counted once user completes steps and reaches final destination
-    const isTokenValid = verifyAndConsumeToken(vtok, code, String(ip), req);
+    const isTokenValid = verifyAndConsumeToken(vtok, code, String(ip));
 
     if (!isTokenValid) {
       // IN FAUCET MODE OR WHEN EXTERNAL SHORTENERS ARE CONFIGURED: BLOCK DIRECT BYPASS COMPLETELY!
