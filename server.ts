@@ -843,7 +843,7 @@ function loadDb() {
     withdrawals: [],
     settings: {
       siteName: "TG LINKS",
-      siteTitle: "Shorten Links and Earn Money",
+      siteTitle: "TG Links - Shorten Links & Earn $10 CPM",
       siteDescription: "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
       globalCpm: 10.0, // $10 per 1000 clicks
       minWithdrawal: 0.25, // $0.25 minimum withdrawal for all gateways
@@ -3878,7 +3878,7 @@ ${ticket.adminReply}
     const activeAds = getActiveAdvertiserAds(db, ipStr);
     res.json({
       siteName: s.siteName || "TG LINKS",
-      siteTitle: s.siteTitle || "Shorten Links and Earn Money",
+      siteTitle: s.siteTitle || "TG Links - Shorten Links & Earn $10 CPM",
       siteDescription: s.siteDescription || "",
       globalCpm: s.globalCpm !== undefined ? s.globalCpm : 10.0,
       minWithdrawal: s.minWithdrawal !== undefined ? s.minWithdrawal : 0.25,
@@ -4342,7 +4342,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
   // 10. Normalize SETTINGS
   const normalizedSettings = {
     siteName: rawSettings.siteName || rawSettings.site_name || rawSettings.title || "TG LINKS",
-    siteTitle: rawSettings.siteTitle || rawSettings.site_title || "Shorten Links and Earn Money",
+    siteTitle: rawSettings.siteTitle || rawSettings.site_title || "TG Links - Shorten Links & Earn $10 CPM",
     siteDescription: rawSettings.siteDescription || rawSettings.site_description || "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
     globalCpm: cleanNumber(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 10, 10),
     minWithdrawal: cleanNumber(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 0.25, 0.25),
