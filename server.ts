@@ -845,9 +845,9 @@ function loadDb() {
       siteName: "TG LINKS",
       siteTitle: "Shorten Links and Earn Money",
       siteDescription: "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
-      globalCpm: 7.0, // $7 per 1000 clicks
-      minWithdrawal: 0.5, // $0.5 minimum withdrawal
-      withdrawalMethods: ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
+      globalCpm: 10.0, // $10 per 1000 clicks
+      minWithdrawal: 0.25, // $0.25 minimum withdrawal for all gateways
+      withdrawalMethods: ["UPI", "PayTM", "PhonePe", "FaucetPay", "Litecoin", "PayPal", "Bank Transfer", "USDT", "Payeer", "Bitcoin"],
       adPagesCount: 1,
       bannerAd728x90: `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center">
   <span class="text-xs uppercase tracking-widest font-bold opacity-75">Sponsor Banner (728x90)</span>
@@ -1463,6 +1463,36 @@ function setupRoutes() {
     return res.status(404).type("text/plain").send("ads.txt not found");
   });
 
+  // Explicit route handler for /robots.txt
+  app.get("/robots.txt", (req, res) => {
+    const filePath = path.join(process.cwd(), "public", "robots.txt");
+    if (fs.existsSync(filePath)) {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.sendFile(filePath);
+    }
+    return res.status(404).type("text/plain").send("robots.txt not found");
+  });
+
+  // Explicit route handler for /llms.txt
+  app.get("/llms.txt", (req, res) => {
+    const filePath = path.join(process.cwd(), "public", "llms.txt");
+    if (fs.existsSync(filePath)) {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.sendFile(filePath);
+    }
+    return res.status(404).type("text/plain").send("llms.txt not found");
+  });
+
+  // Explicit route handler for /sitemap.xml
+  app.get("/sitemap.xml", (req, res) => {
+    const filePath = path.join(process.cwd(), "public", "sitemap.xml");
+    if (fs.existsSync(filePath)) {
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      return res.sendFile(filePath);
+    }
+    return res.status(404).type("application/xml").send("<error>sitemap.xml not found</error>");
+  });
+
   // API Middleware to retrieve and log requests
   app.use((req, res, next) => {
     // Basic API request logging
@@ -1766,8 +1796,8 @@ function setupRoutes() {
       totalLinks: realLinks + fakeLinks,
       totalClicks: realClicks + fakeViews,
       totalWithdrawn: Number((realWithdrawn + fakeWithdrawn).toFixed(2)),
-      globalCpm: db.settings.globalCpm !== undefined ? db.settings.globalCpm : 7.0,
-      minWithdrawal: db.settings.minWithdrawal !== undefined ? db.settings.minWithdrawal : 0.5
+      globalCpm: db.settings.globalCpm !== undefined ? db.settings.globalCpm : 10.0,
+      minWithdrawal: db.settings.minWithdrawal !== undefined ? db.settings.minWithdrawal : 0.25
     });
   });
 
@@ -3022,9 +3052,11 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return res.status(400).json({ error: "Invalid withdrawal amount" });
     }
 
-    if (reqAmount < db.settings.minWithdrawal) {
+    const minThreshold = db.settings.minWithdrawal !== undefined ? db.settings.minWithdrawal : 0.25;
+
+    if (reqAmount < minThreshold) {
       return res.status(400).json({ 
-        error: `Minimum withdrawal limit is $${db.settings.minWithdrawal.toFixed(2)}` 
+        error: `Minimum withdrawal limit is $${minThreshold.toFixed(2)}` 
       });
     }
 
@@ -3848,8 +3880,8 @@ ${ticket.adminReply}
       siteName: s.siteName || "TG LINKS",
       siteTitle: s.siteTitle || "Shorten Links and Earn Money",
       siteDescription: s.siteDescription || "",
-      globalCpm: s.globalCpm !== undefined ? s.globalCpm : 7.0,
-      minWithdrawal: s.minWithdrawal !== undefined ? s.minWithdrawal : 0.5,
+      globalCpm: s.globalCpm !== undefined ? s.globalCpm : 10.0,
+      minWithdrawal: s.minWithdrawal !== undefined ? s.minWithdrawal : 0.25,
       withdrawalMethods: s.withdrawalMethods || ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
       adPagesCount: s.adPagesCount || 1,
       bannerAd728x90: s.bannerAd728x90 || "",
@@ -4312,8 +4344,8 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     siteName: rawSettings.siteName || rawSettings.site_name || rawSettings.title || "TG LINKS",
     siteTitle: rawSettings.siteTitle || rawSettings.site_title || "Shorten Links and Earn Money",
     siteDescription: rawSettings.siteDescription || rawSettings.site_description || "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
-    globalCpm: cleanNumber(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 7, 7),
-    minWithdrawal: cleanNumber(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 0.5, 0.5),
+    globalCpm: cleanNumber(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 10, 10),
+    minWithdrawal: cleanNumber(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 0.25, 0.25),
     withdrawalMethods: Array.isArray(rawSettings.withdrawalMethods) ? rawSettings.withdrawalMethods : ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
     adPagesCount: cleanNumber(rawSettings.adPagesCount ?? rawSettings.ad_pages_count ?? 1, 1),
     bannerAd728x90: rawSettings.bannerAd728x90 || rawSettings.banner_728x90 || `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center"><span class="text-xs uppercase tracking-widest font-bold opacity-75">Sponsor Banner (728x90)</span></div>`,

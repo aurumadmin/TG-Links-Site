@@ -333,8 +333,10 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
       return;
     }
 
-    if (settings && amountNum < settings.minWithdrawal) {
-      setWithdrawError(`The minimum withdrawal threshold is $${settings.minWithdrawal.toFixed(2)}`);
+    const minReq = settings?.minWithdrawal !== undefined ? Number(settings.minWithdrawal) : 0.25;
+
+    if (amountNum < minReq) {
+      setWithdrawError(`The minimum payout threshold is $${minReq.toFixed(2)}`);
       return;
     }
 
@@ -1301,6 +1303,22 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                   </div>
                 )}
 
+                {/* Daily Payments & Legit Trust Banner */}
+                <div className="mb-4 p-3.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-emerald-400 flex items-center gap-1.5">
+                      <Check className="w-4 h-4 text-emerald-400" />
+                      100% Fully Legit & Verified Platform
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      ⚡ DAILY PAYMENTS
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-normal">
+                    Withdrawal requests are processed <strong>DAILY</strong> (within 24 hours). Minimum cashout threshold is <strong>$0.25</strong> for all supported payment methods!
+                  </p>
+                </div>
+
                 <form onSubmit={handleWithdrawRequest} className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Withdrawal Amount ($)</label>
@@ -1313,9 +1331,9 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                       onChange={(e) => setWithdrawAmount(e.target.value)}
                       className="block w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white placeholder-slate-600"
                     />
-                    <div className="flex justify-between mt-1.5 text-[10px] text-slate-500 font-semibold">
-                      <span>Available: ${stats?.balance ? stats.balance.toFixed(4) : "0.00"}</span>
-                      <span>Min Threshold: ${settings?.minWithdrawal !== undefined ? Number(settings.minWithdrawal).toFixed(2) : "0.50"}</span>
+                    <div className="flex flex-col sm:flex-row justify-between mt-2 text-[10px] text-slate-400 font-semibold gap-1">
+                      <span>Available Balance: <strong className="text-emerald-400">${stats?.balance ? stats.balance.toFixed(4) : "0.00"}</strong></span>
+                      <span className="text-indigo-300">Minimum Threshold: <strong>$0.25</strong> (All Gateways)</span>
                     </div>
                   </div>
 

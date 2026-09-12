@@ -38,8 +38,8 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
     totalClicks: 0,
     totalUsers: 0,
     totalWithdrawn: 0,
-    globalCpm: initialSettings?.globalCpm !== undefined ? Number(initialSettings.globalCpm) : 7.0,
-    minWithdrawal: initialSettings?.minWithdrawal !== undefined ? Number(initialSettings.minWithdrawal) : 0.5
+    globalCpm: initialSettings?.globalCpm !== undefined ? Number(initialSettings.globalCpm) : 10.0,
+    minWithdrawal: initialSettings?.minWithdrawal !== undefined ? Number(initialSettings.minWithdrawal) : 0.25
   }));
   const [activeTab, setActiveTab] = useState(initialTab || "home"); // home, rates, contact, privacy, dmca, terms
 
@@ -64,8 +64,8 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
           totalClicks: res.totalClicks !== undefined ? res.totalClicks : 0,
           totalUsers: res.totalUsers !== undefined ? res.totalUsers : 0,
           totalWithdrawn: res.totalWithdrawn !== undefined ? res.totalWithdrawn : 0,
-          globalCpm: res.globalCpm !== undefined ? res.globalCpm : (initialSettings?.globalCpm || 7.0),
-          minWithdrawal: res.minWithdrawal !== undefined ? res.minWithdrawal : (initialSettings?.minWithdrawal || 0.5)
+          globalCpm: res.globalCpm !== undefined ? res.globalCpm : (initialSettings?.globalCpm || 10.0),
+          minWithdrawal: res.minWithdrawal !== undefined ? res.minWithdrawal : (initialSettings?.minWithdrawal || 0.25)
         });
       })
       .catch((err) => console.error("Error loading public stats:", err));
@@ -95,13 +95,13 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
 
   const currentCpm = siteSettings?.globalCpm !== undefined 
     ? Number(siteSettings.globalCpm) 
-    : (stats.globalCpm !== undefined ? Number(stats.globalCpm) : 7.0);
+    : (stats.globalCpm !== undefined ? Number(stats.globalCpm) : 10.0);
 
   const minWithdrawal = siteSettings?.minWithdrawal !== undefined
     ? Number(siteSettings.minWithdrawal)
-    : (stats.minWithdrawal !== undefined ? Number(stats.minWithdrawal) : 0.5);
+    : (stats.minWithdrawal !== undefined ? Number(stats.minWithdrawal) : 0.25);
 
-  const formattedMinPayout = minWithdrawal === 0.5 ? "$0.5" : `$${minWithdrawal.toFixed(2)}`;
+  const formattedMinPayout = `$${minWithdrawal.toFixed(2)}`;
 
   const changeTab = (tab: string, path: string) => {
     setActiveTab(tab);
@@ -224,9 +224,9 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
               <div className="lg:col-span-7 flex flex-col space-y-6">
                 {/* Payout Badge */}
                 <div className="inline-flex">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-950/40 text-xs font-bold text-indigo-400 border border-indigo-900/50">
-                    <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] uppercase font-black">Top Rated</span>
-                    Universal URL Shortener & Monetization Network
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-950/40 text-xs font-bold text-emerald-400 border border-emerald-900/50">
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] uppercase font-black">100% LEGIT</span>
+                    ⚡ Daily Payments • $10.00 CPM Rate • $0.25 Min Payout (All Gateways)
                     <ArrowRight className="w-3.5 h-3.5" />
                   </span>
                 </div>
@@ -525,11 +525,11 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
                   </div>
 
                   <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-                    <div className="w-12 h-12 rounded-xl bg-rose-950/60 border border-rose-900/30 text-rose-400 flex items-center justify-center mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-emerald-950/60 border border-emerald-900/30 text-emerald-400 flex items-center justify-center mb-4">
                       <Mail className="w-6 h-6" />
                     </div>
-                    <h3 className="font-extrabold text-white text-lg mb-2">Instant Cashouts & Support</h3>
-                    <p className="text-sm text-slate-400 leading-relaxed">Low {formattedMinPayout} minimum threshold with fast payouts via UPI, Crypto, FaucetPay, and Bank Transfer.</p>
+                    <h3 className="font-extrabold text-white text-lg mb-2">Daily Payments & Instant Cashouts</h3>
+                    <p className="text-sm text-slate-400 leading-relaxed">Low <strong>$0.25 minimum payout</strong> for all supported payment gateways (UPI, PayTM, PhonePe, FaucetPay, Litecoin, PayPal, Bank Transfer, USDT, Bitcoin) processed <strong>DAILY</strong>.</p>
                   </div>
                 </div>
               </div>
@@ -611,11 +611,21 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
 
                     <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
                       <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
-                        <span>What is the minimum withdrawal amount and payment methods?</span>
+                        <span>Is TG Links a 100% legit and verified platform?</span>
+                        <span className="ml-2 font-mono text-emerald-400 transition group-open:rotate-45">+</span>
+                      </summary>
+                      <p className="mt-3 text-sm text-slate-300 leading-relaxed border-t border-slate-900 pt-3">
+                        <strong>Yes, 100% fully legit!</strong> TG Links is a transparent, trusted link monetization platform. We guarantee real-time click tracking, daily payment dispatches, anti-scam protection, and dedicated support.
+                      </p>
+                    </details>
+
+                    <details className="group bg-slate-950 border border-slate-800 rounded-xl p-4 [&_summary::-webkit-details-marker]:none">
+                      <summary className="flex items-center justify-between font-bold text-white cursor-pointer hover:text-indigo-400 transition">
+                        <span>What is the minimum withdrawal amount and payment schedule?</span>
                         <span className="ml-2 font-mono text-indigo-400 transition group-open:rotate-45">+</span>
                       </summary>
                       <p className="mt-3 text-sm text-slate-400 leading-relaxed border-t border-slate-900 pt-3">
-                        The minimum payout threshold is only {formattedMinPayout}! We support fast withdrawals via UPI, Crypto USDT / TRX / BTC, FaucetPay, PayTM, PhonePe, Bank Transfer, PayPal, and WebMoney.
+                        We offer a flat low <strong>$0.25 minimum payout</strong> for all supported payment methods including UPI, PayTM, PhonePe, FaucetPay, Litecoin, Payeer, PayPal, Bank Transfer, USDT, and Bitcoin. All payments are processed <strong>DAILY within 24 hours</strong>!
                       </p>
                     </details>
 
