@@ -183,7 +183,7 @@ async function getExternalShortenedUrl(
   db: any, 
   user?: any,
   isFaucetModeOverride?: boolean
-): Promise<{ id: string; url: string } | null> {
+): Promise<{ id: string; url: string; fullChainSuccess: boolean; chainedCount: number; requiredCount: number } | null> {
   // Determine if this request is for Faucet traffic
   const isFaucetUser = isFaucetModeOverride !== undefined 
     ? !!isFaucetModeOverride 
@@ -197,6 +197,8 @@ async function getExternalShortenedUrl(
   });
 
   if (enabledApis.length === 0) return null;
+
+  const requiredCount = enabledApis.length;
 
   // Sort by priority/rank order (highest priority first). If equal, maintain set order (Rank #1, Rank #2, etc.)
   const sortedApis = [...enabledApis].sort((a: any, b: any) => {
@@ -215,75 +217,92 @@ async function getExternalShortenedUrl(
         return (f as any)(...args);
       };
 
-  // Chain active shorteners in sequence from Rank #1 down to the last Rank so visitor completes:
+  // Chain active shorteners in sequence from Rank #1 down to the last Rank so visitor completes EVERY enabled shortener:
   // Rank #1 -> Rank #2 -> Rank #3 ... -> finalDestinationUrl (/go-final/{code})
   // To achieve this, we wrap starting from the last rank towards the first rank.
   let currentTargetUrl = finalDestinationUrl;
   let topSuccessfulApiId = "";
-  let hasChainedAny = false;
+  let chainedCount = 0;
 
   const reversedApis = [...sortedApis].reverse();
 
   for (const selectedApi of reversedApis) {
-    try {
-      let cleanApiUrl = selectedApi.apiUrl.trim();
-      if (!cleanApiUrl.startsWith("http://") && !cleanApiUrl.startsWith("https://")) {
-        cleanApiUrl = "https://" + cleanApiUrl;
-      }
-      if (cleanApiUrl.endsWith("/")) {
-        cleanApiUrl = cleanApiUrl.slice(0, -1);
-      }
-      if (!cleanApiUrl.includes("/api") && !cleanApiUrl.endsWith("/api")) {
-        cleanApiUrl += "/api";
-      }
-      const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(currentTargetUrl)}`;
+    let apiSuccess = false;
+    let shortenedUrl = "";
 
-      // Use AbortController for an 8 seconds timeout per shortener API
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+    let cleanApiUrl = selectedApi.apiUrl.trim();
+    if (!cleanApiUrl.startsWith("http://") && !cleanApiUrl.startsWith("https://")) {
+      cleanApiUrl = "https://" + cleanApiUrl;
+    }
+    if (cleanApiUrl.endsWith("/")) {
+      cleanApiUrl = cleanApiUrl.slice(0, -1);
+    }
+    if (!cleanApiUrl.includes("/api") && !cleanApiUrl.endsWith("/api")) {
+      cleanApiUrl += "/api";
+    }
 
-      const response = await fetchFn(apiRequestUrl, { signal: controller.signal });
-      clearTimeout(timeoutId);
-
-      const text = await response.text();
-      let shortenedUrl = "";
-
+    // Retry up to 3 times per shortener API to handle transient timeouts
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const json = JSON.parse(text);
-        if (json && json.status !== "error") {
-          if (json.status === "success" || json.shortenedUrl || json.url) {
-            shortenedUrl = json.shortenedUrl || json.url || "";
+        const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(currentTargetUrl)}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        const response = await fetchFn(apiRequestUrl, { 
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*"
+          }
+        });
+        clearTimeout(timeoutId);
+
+        const text = await response.text();
+
+        try {
+          const json = JSON.parse(text);
+          if (json && json.status !== "error") {
+            if (json.status === "success" || json.shortenedUrl || json.url) {
+              shortenedUrl = json.shortenedUrl || json.url || "";
+            }
+          }
+        } catch (e) {
+          const trimmedText = text.trim();
+          if (/^https?:\/\//i.test(trimmedText)) {
+            shortenedUrl = trimmedText;
           }
         }
-      } catch (e) {
-        // Not valid JSON, check if plain-text URL
-        const trimmedText = text.trim();
-        if (/^https?:\/\//i.test(trimmedText)) {
-          shortenedUrl = trimmedText;
+
+        if (shortenedUrl && /^https?:\/\//i.test(shortenedUrl)) {
+          apiSuccess = true;
+          break; // API successfully shortened!
+        }
+      } catch (err: any) {
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, 600));
         }
       }
+    }
 
-      if (shortenedUrl && /^https?:\/\//i.test(shortenedUrl)) {
-        currentTargetUrl = shortenedUrl;
-        topSuccessfulApiId = selectedApi.id;
-        hasChainedAny = true;
-      } else {
-        console.warn(`External shortener API ${selectedApi.name} returned an invalid or empty response:`, text);
-      }
-    } catch (err: any) {
-      if (err.name === "AbortError") {
-        console.error(`Failed to syndicate with external shortener API ${selectedApi.name} (Request Timeout)`);
-      } else {
-        console.error(`Failed to syndicate with external shortener API ${selectedApi.name}:`, err);
-      }
+    if (apiSuccess && shortenedUrl) {
+      currentTargetUrl = shortenedUrl;
+      topSuccessfulApiId = selectedApi.id;
+      chainedCount++;
+    } else {
+      console.warn(`[CHAIN STRICT ENFORCEMENT] External shortener API ${selectedApi.name} failed after 3 retries. Full chain requirement (${requiredCount} shorteners) broken.`);
+      // STRICT REQUIREMENT: If ANY shortener API fails, DO NOT allow partial chain!
+      return { id: "", url: "", fullChainSuccess: false, chainedCount, requiredCount };
     }
   }
 
-  if (hasChainedAny) {
-    return { id: topSuccessfulApiId, url: currentTargetUrl };
-  }
-
-  return null;
+  const fullChainSuccess = chainedCount === requiredCount;
+  return { 
+    id: topSuccessfulApiId, 
+    url: currentTargetUrl, 
+    fullChainSuccess, 
+    chainedCount, 
+    requiredCount 
+  };
 }
 
 // Helper to parse cookies from request headers
@@ -316,26 +335,28 @@ interface PendingVerification {
   createdAt: number;
   used: boolean;
   usedAt?: number;
+  requiredSteps: number;
 }
 
 const pendingVerificationsMap = new Map<string, PendingVerification>();
 const consumedTokensSet = new Set<string>();
 const VTOK_SECRET = process.env.VTOK_SECRET || "tglinks_vtok_sec_982374829374";
 
-function createVerificationToken(code: string, ip?: string): string {
+function createVerificationToken(code: string, ip?: string, requiredSteps: number = 0): string {
   const cleanCode = (code || "").trim();
   const ts = Date.now();
   const nonce = crypto.randomBytes(6).toString("hex");
-  // Resilient cryptographic signature based on code, timestamp, and unique nonce
-  const rawPayload = `${cleanCode}:${ts}:${nonce}`;
+  // Resilient cryptographic signature based on code, requiredSteps, timestamp, and unique nonce
+  const rawPayload = `${cleanCode}:${requiredSteps}:${ts}:${nonce}`;
   const sig = crypto.createHmac("sha256", VTOK_SECRET).update(rawPayload).digest("hex").substring(0, 16);
-  const vtok = `vtok_${cleanCode}_${ts}_${nonce}_${sig}`;
+  const vtok = `vtok_${cleanCode}_s${requiredSteps}_${ts}_${nonce}_${sig}`;
 
   pendingVerificationsMap.set(vtok, {
     code: cleanCode,
     ip: String(ip || ""),
     createdAt: ts,
-    used: false
+    used: false,
+    requiredSteps: requiredSteps
   });
   
   // Clean up tokens older than 2 hours
@@ -352,7 +373,8 @@ function createVerificationToken(code: string, ip?: string): string {
 function verifyAndConsumeToken(
   vtok: string | undefined, 
   code: string, 
-  ip?: string
+  ip?: string,
+  expectedMinSteps: number = 0
 ): boolean {
   if (!vtok || typeof vtok !== "string" || !vtok.trim()) {
     return false; // Strictly require valid vtok parameter in query!
@@ -371,8 +393,12 @@ function verifyAndConsumeToken(
   const entry = pendingVerificationsMap.get(tokenToVerify);
   if (entry) {
     if (entry.code !== cleanCode) return false;
-    if (entry.used) return false; // Strictly single-use! Once consumed, view is counted and token cannot be reused
+    if (entry.used) return false; // Strictly single-use!
     if (now - entry.createdAt > 2 * 60 * 60 * 1000) return false;
+    if (expectedMinSteps > 0 && (entry.requiredSteps || 0) < expectedMinSteps) {
+      console.warn(`[TOKEN REJECTED] Token requiredSteps (${entry.requiredSteps}) is less than active shortener steps (${expectedMinSteps})`);
+      return false; // Rejects tokens from partial or incomplete chains!
+    }
 
     entry.used = true;
     entry.usedAt = now;
@@ -383,28 +409,45 @@ function verifyAndConsumeToken(
   // 3. Cryptographic HMAC signature verification (for multi-instance Cloud Run containers and restarts)
   if (tokenToVerify.startsWith("vtok_")) {
     const parts = tokenToVerify.split("_");
-    if (parts.length === 5) {
-      const [, tokenCode, tsStr, nonce, sig] = parts;
-      if (tokenCode !== cleanCode) return false;
+    let tokenCode = "";
+    let tokenSteps = 0;
+    let tsStr = "";
+    let nonce = "";
+    let sig = "";
 
-      const ts = parseInt(tsStr, 10);
-      if (isNaN(ts) || now - ts > 2 * 60 * 60 * 1000) return false;
+    if (parts.length === 6 && parts[2].startsWith("s")) {
+      // Format: vtok_CODE_sSTEPS_TS_NONCE_SIG
+      [, tokenCode, , tsStr, nonce, sig] = parts;
+      tokenSteps = parseInt(parts[2].replace("s", ""), 10) || 0;
+    } else if (parts.length === 5) {
+      // Format: vtok_CODE_TS_NONCE_SIG
+      [, tokenCode, tsStr, nonce, sig] = parts;
+      tokenSteps = 0;
+    } else {
+      return false;
+    }
 
-      // Standard resilient signature (code + ts + nonce)
-      const rawStandard = `${cleanCode}:${ts}:${nonce}`;
-      const sigStandard = crypto.createHmac("sha256", VTOK_SECRET).update(rawStandard).digest("hex").substring(0, 16);
+    if (tokenCode !== cleanCode) return false;
+    if (expectedMinSteps > 0 && tokenSteps < expectedMinSteps) {
+      return false; // Rejects tokens from incomplete chains
+    }
 
-      // Legacy signatures (with IP or empty IP)
-      const rawWithIp = `${cleanCode}:${ip || ""}:${ts}:${nonce}`;
-      const sigWithIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawWithIp).digest("hex").substring(0, 16);
-      
-      const rawNoIp = `${cleanCode}::${ts}:${nonce}`;
-      const sigNoIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawNoIp).digest("hex").substring(0, 16);
+    const ts = parseInt(tsStr, 10);
+    if (isNaN(ts) || now - ts > 2 * 60 * 60 * 1000) return false;
 
-      if (sig === sigStandard || sig === sigWithIp || sig === sigNoIp) {
-        consumedTokensSet.add(tokenToVerify);
-        return true;
-      }
+    // Resilient signature checks
+    const rawStandardWithSteps = `${cleanCode}:${tokenSteps}:${ts}:${nonce}`;
+    const sigStandardWithSteps = crypto.createHmac("sha256", VTOK_SECRET).update(rawStandardWithSteps).digest("hex").substring(0, 16);
+
+    const rawStandard = `${cleanCode}:${ts}:${nonce}`;
+    const sigStandard = crypto.createHmac("sha256", VTOK_SECRET).update(rawStandard).digest("hex").substring(0, 16);
+
+    const rawWithIp = `${cleanCode}:${ip || ""}:${ts}:${nonce}`;
+    const sigWithIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawWithIp).digest("hex").substring(0, 16);
+
+    if (sig === sigStandardWithSteps || sig === sigStandard || sig === sigWithIp) {
+      consumedTokensSet.add(tokenToVerify);
+      return true;
     }
   }
 
@@ -2185,16 +2228,32 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const user = link.userId !== "guest" ? db.users.find((u: any) => u.id === link.userId) : null;
     const protocol = getRequestProtocol(req);
     const host = getRequestHost(req);
-    const vtok = createVerificationToken(link.code, String(ip));
+
+    const enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
+      if (!api.enabled) return false;
+      return !!api.isFaucetApi === isFaucetMode;
+    });
+
+    const requiredSteps = enabledApis.length;
+    const vtok = createVerificationToken(link.code, String(ip), requiredSteps);
     const finalLandingUrl = `${protocol}://${host}/go-final/${link.code}?vtok=${vtok}`;
 
     // Dynamically retrieve or re-evaluate the external shortened URL wrapping finalLandingUrl
     let adFlyShortenedUrl: string | undefined = undefined;
-    const external = await getExternalShortenedUrl(finalLandingUrl, db, user, isFaucetMode);
-    if (external) {
-      adFlyShortenedUrl = external.url;
-      link.adFlyShortenedUrl = external.url;
-      link.adFlyShortenerId = external.id;
+
+    if (requiredSteps > 0) {
+      const external = await getExternalShortenedUrl(finalLandingUrl, db, user, isFaucetMode);
+      if (external && external.fullChainSuccess && external.url) {
+        adFlyShortenedUrl = external.url;
+        link.adFlyShortenedUrl = external.url;
+        link.adFlyShortenerId = external.id;
+      } else {
+        saveDb(db);
+        return res.status(503).json({ 
+          error: `Shortener Network Incomplete: All ${requiredSteps} integrated ad shorteners must be active to proceed. Please try again in a moment.`,
+          networkIncomplete: true 
+        });
+      }
     } else {
       adFlyShortenedUrl = undefined;
       link.adFlyShortenedUrl = undefined;
@@ -2210,7 +2269,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
       targetUrl: targetUrl,
       originalUrl: link.originalUrl,
       adFlyShortenedUrl: adFlyShortenedUrl,
-      vtok: vtok
+      vtok: vtok,
+      requiredSteps: requiredSteps
     });
   });
 
@@ -2298,14 +2358,15 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
     const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
-    const hasActiveShorteners = (db.adFlyShorteners || []).some((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
+    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
+    const requiredSteps = enabledApis.length;
 
-    // Strictly enforce verification token check: view is only counted once user completes steps and reaches final destination
-    const isTokenValid = verifyAndConsumeToken(vtok, code, String(ip));
+    // Strictly enforce verification token check and required shortener step count
+    const isTokenValid = verifyAndConsumeToken(vtok, code, String(ip), requiredSteps);
 
     if (!isTokenValid) {
       // IN FAUCET MODE OR WHEN EXTERNAL SHORTENERS ARE CONFIGURED: BLOCK DIRECT BYPASS COMPLETELY!
-      if (isFaucetMode || hasActiveShorteners) {
+      if (isFaucetMode || requiredSteps > 0) {
         return res.status(403).send(`
           <!DOCTYPE html>
           <html>

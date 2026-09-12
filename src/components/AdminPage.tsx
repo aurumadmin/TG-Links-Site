@@ -4852,7 +4852,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     <strong>Faucet vs Normal Separation:</strong> APIs flagged as <code>FAUCET ONLY</code> are used strictly for users running in Faucet Mode. Standard (unflagged) APIs are used strictly for normal organic traffic. Normal shorteners never appear for faucet traffic, and faucet shorteners never appear for normal traffic.
                   </p>
                   <p>
-                    <strong>Rank Sequence Order & Sequential Chaining:</strong> Active shorteners within their respective category (Faucet or Normal) are chained sequentially in Rank order (Rank #1 → Rank #2 → Rank #3 ... → Final Page). Visitors complete every active shortener in sequence before reaching the final 2-second redirect page where the view and payout are recorded. If an individual API fails or times out, the system gracefully skips it so the chain remains intact!
+                    <strong>Rank Sequence Order & Strict Sequential Chaining:</strong> Active shorteners within their respective category (Faucet or Normal) are chained sequentially in Rank order (Rank #1 → Rank #2 → Rank #3 ... → Final Page). Visitors must complete EVERY integrated active shortener in sequence before reaching the final page where the view and payout are recorded. Partial completion or skipping shorteners is strictly prevented.
                   </p>
                 </div>
               </div>

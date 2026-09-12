@@ -872,8 +872,11 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             if (clickRes.faucetLimitReached) {
               setFaucetLimitDetected(true);
               setRedirecting(false);
+            } else if (clickRes.error || !clickRes.targetUrl) {
+              setError(clickRes.error || "Unable to initiate shortener network sequence. Please refresh and try again.");
+              setRedirecting(false);
             } else {
-              const targetUrl = clickRes.targetUrl || clickRes.adFlyShortenedUrl || `${window.location.origin}/go-final/${code}?vtok=${clickRes.vtok || ""}`;
+              const targetUrl = clickRes.targetUrl;
               redirectWithoutReferrer(targetUrl);
             }
           } catch {
@@ -1138,14 +1141,14 @@ export default function RedirectPage({ code }: RedirectPageProps) {
             setRedirecting(false);
             return;
           }
-          const targetUrl = clickRes.targetUrl || clickRes.adFlyShortenedUrl || linkData?.adFlyShortenedUrl || clickRes.originalUrl || linkData?.originalUrl;
-          if (targetUrl) {
-            setRedirectTargetUrl(targetUrl);
-            redirectWithoutReferrer(targetUrl);
-          } else {
-            setFaucetLimitDetected(true);
+          if (clickRes.error || !clickRes.targetUrl) {
+            setError(clickRes.error || "Unable to initiate shortener network sequence. Please try again.");
             setRedirecting(false);
+            return;
           }
+          const targetUrl = clickRes.targetUrl;
+          setRedirectTargetUrl(targetUrl);
+          redirectWithoutReferrer(targetUrl);
         }).catch((err) => {
           console.error("Failed to auto-unlock link upon returning from safelink:", err);
           setFaucetLimitDetected(true);
@@ -1466,13 +1469,13 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           return;
         }
 
-        const targetUrl = clickRes.targetUrl || clickRes.adFlyShortenedUrl || linkData?.adFlyShortenedUrl || clickRes.originalUrl || linkData?.originalUrl;
-        if (!targetUrl) {
-          setFaucetLimitDetected(true);
+        if (clickRes.error || !clickRes.targetUrl) {
+          setError(clickRes.error || "Unable to initiate shortener network sequence. Please try again.");
           setRedirecting(false);
           return;
         }
 
+        const targetUrl = clickRes.targetUrl;
         setRedirectTargetUrl(targetUrl);
         redirectWithoutReferrer(targetUrl);
       } catch (err: any) {
