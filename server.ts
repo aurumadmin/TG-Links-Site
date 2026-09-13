@@ -338,8 +338,14 @@ interface PendingVerification {
   requiredSteps: number;
 }
 
+interface ConsumedTokenInfo {
+  code: string;
+  ip: string;
+  consumedAt: number;
+}
+
 const pendingVerificationsMap = new Map<string, PendingVerification>();
-const consumedTokensSet = new Set<string>();
+const consumedTokensMap = new Map<string, ConsumedTokenInfo>();
 const VTOK_SECRET = process.env.VTOK_SECRET || "tglinks_vtok_sec_982374829374";
 
 function createVerificationToken(code: string, ip?: string, requiredSteps: number = 0): string {
@@ -370,40 +376,51 @@ function createVerificationToken(code: string, ip?: string, requiredSteps: numbe
   return vtok;
 }
 
-function verifyAndConsumeToken(
+function verifyAndConsumeTokenResult(
   vtok: string | undefined, 
   code: string, 
   ip?: string,
   expectedMinSteps: number = 0
-): boolean {
+): { valid: boolean; isAlreadyConsumed: boolean } {
   if (!vtok || typeof vtok !== "string" || !vtok.trim()) {
-    return false; // Strictly require valid vtok parameter in query!
+    return { valid: false, isAlreadyConsumed: false };
   }
 
   const cleanCode = (code || "").trim();
   const tokenToVerify = vtok.trim();
   const now = Date.now();
 
-  // 1. Check if token was already consumed (strictly single-use view counting!)
-  if (consumedTokensSet.has(tokenToVerify)) {
-    return false;
+  // Clean up consumed map entries older than 10 minutes
+  for (const [key, val] of consumedTokensMap.entries()) {
+    if (now - val.consumedAt > 10 * 60 * 1000) {
+      consumedTokensMap.delete(key);
+    }
+  }
+
+  // 1. Check if token was already consumed recently
+  const existingConsumed = consumedTokensMap.get(tokenToVerify);
+  if (existingConsumed) {
+    if (existingConsumed.code === cleanCode && now - existingConsumed.consumedAt < 10 * 60 * 1000) {
+      return { valid: true, isAlreadyConsumed: true };
+    }
+    return { valid: false, isAlreadyConsumed: true };
   }
 
   // 2. Direct match from pending verifications map
   const entry = pendingVerificationsMap.get(tokenToVerify);
   if (entry) {
-    if (entry.code !== cleanCode) return false;
-    if (entry.used) return false; // Strictly single-use!
-    if (now - entry.createdAt > 2 * 60 * 60 * 1000) return false;
+    if (entry.code !== cleanCode) return { valid: false, isAlreadyConsumed: false };
+    if (entry.used) return { valid: false, isAlreadyConsumed: true };
+    if (now - entry.createdAt > 2 * 60 * 60 * 1000) return { valid: false, isAlreadyConsumed: false };
     if (expectedMinSteps > 0 && (entry.requiredSteps || 0) < expectedMinSteps) {
       console.warn(`[TOKEN REJECTED] Token requiredSteps (${entry.requiredSteps}) is less than active shortener steps (${expectedMinSteps})`);
-      return false; // Rejects tokens from partial or incomplete chains!
+      return { valid: false, isAlreadyConsumed: false };
     }
 
     entry.used = true;
     entry.usedAt = now;
-    consumedTokensSet.add(tokenToVerify);
-    return true;
+    consumedTokensMap.set(tokenToVerify, { code: cleanCode, ip: String(ip || ""), consumedAt: now });
+    return { valid: true, isAlreadyConsumed: false };
   }
 
   // 3. Cryptographic HMAC signature verification (for multi-instance Cloud Run containers and restarts)
@@ -424,16 +441,16 @@ function verifyAndConsumeToken(
       [, tokenCode, tsStr, nonce, sig] = parts;
       tokenSteps = 0;
     } else {
-      return false;
+      return { valid: false, isAlreadyConsumed: false };
     }
 
-    if (tokenCode !== cleanCode) return false;
+    if (tokenCode !== cleanCode) return { valid: false, isAlreadyConsumed: false };
     if (expectedMinSteps > 0 && tokenSteps < expectedMinSteps) {
-      return false; // Rejects tokens from incomplete chains
+      return { valid: false, isAlreadyConsumed: false };
     }
 
     const ts = parseInt(tsStr, 10);
-    if (isNaN(ts) || now - ts > 2 * 60 * 60 * 1000) return false;
+    if (isNaN(ts) || now - ts > 2 * 60 * 60 * 1000) return { valid: false, isAlreadyConsumed: false };
 
     // Resilient signature checks
     const rawStandardWithSteps = `${cleanCode}:${tokenSteps}:${ts}:${nonce}`;
@@ -446,12 +463,12 @@ function verifyAndConsumeToken(
     const sigWithIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawWithIp).digest("hex").substring(0, 16);
 
     if (sig === sigStandardWithSteps || sig === sigStandard || sig === sigWithIp) {
-      consumedTokensSet.add(tokenToVerify);
-      return true;
+      consumedTokensMap.set(tokenToVerify, { code: cleanCode, ip: String(ip || ""), consumedAt: now });
+      return { valid: true, isAlreadyConsumed: false };
     }
   }
 
-  return false;
+  return { valid: false, isAlreadyConsumed: false };
 }
 
 // Helper to resolve all identifier aliases (id, email, username, emailPrefix) for a given user ID/email/username
@@ -2392,45 +2409,39 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const requiredSteps = enabledApis.length;
 
     // Strictly enforce verification token check and required shortener step count
-    const isTokenValid = verifyAndConsumeToken(vtok, code, String(ip), requiredSteps);
+    const tokenResult = verifyAndConsumeTokenResult(vtok, code, String(ip), requiredSteps);
 
-    if (!isTokenValid) {
-      // IN FAUCET MODE OR WHEN EXTERNAL SHORTENERS ARE CONFIGURED: BLOCK DIRECT BYPASS COMPLETELY!
-      if (isFaucetMode || requiredSteps > 0) {
-        return res.status(403).send(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Verification Required - Step Incomplete</title>
-            <style>
-              * { box-sizing: border-box; }
-              body { background-color: #020617; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
-              .card { background: #0f172a; border: 1px solid #1e293b; padding: 36px; border-radius: 20px; max-width: 460px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
-              .icon { width: 64px; height: 64px; margin: 0 auto 16px; background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.3); color: #f43f5e; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; }
-              h2 { color: #f43f5e; margin: 0 0 10px; font-size: 20px; font-weight: 800; }
-              p { color: #94a3b8; font-size: 13px; line-height: 1.6; margin: 0 0 20px; }
-              .badge { background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.3); color: #fda4af; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: bold; margin-bottom: 16px; display: inline-block; }
-              .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 14px 20px; background: #6366f1; color: white; border-radius: 12px; text-decoration: none; font-weight: bold; font-size: 14px; transition: all 0.2s; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4); }
-              .btn:hover { background: #4f46e5; transform: translateY(-1px); }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="icon">⚠️</div>
-              <div class="badge">Shortener Verification Required</div>
-              <h2>Access Verification Incomplete</h2>
-              <p>You cannot access this destination without completing the required API shortener steps. Please visit the short link again to complete verification.</p>
-              <a href="/go/${code}" class="btn">Start Shortener Verification →</a>
-            </div>
-          </body>
-          </html>
-        `);
-      }
-
-      // If no external shorteners and not faucet mode, return to start
-      return res.redirect(`/go/${code}`);
+    if (!tokenResult.valid) {
+      return res.status(403).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Verification Required - Step Incomplete</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { background-color: #020617; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+            .card { background: #0f172a; border: 1px solid #1e293b; padding: 36px; border-radius: 20px; max-width: 460px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
+            .icon { width: 64px; height: 64px; margin: 0 auto 16px; background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.3); color: #f43f5e; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; }
+            h2 { color: #f43f5e; margin: 0 0 10px; font-size: 20px; font-weight: 800; }
+            p { color: #94a3b8; font-size: 13px; line-height: 1.6; margin: 0 0 20px; }
+            .badge { background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.3); color: #fda4af; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: bold; margin-bottom: 16px; display: inline-block; }
+            .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 14px 20px; background: #6366f1; color: white; border-radius: 12px; text-decoration: none; font-weight: bold; font-size: 14px; transition: all 0.2s; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4); }
+            .btn:hover { background: #4f46e5; transform: translateY(-1px); }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">⚠️</div>
+            <div class="badge">Shortener Verification Required</div>
+            <h2>Access Verification Incomplete</h2>
+            <p>You cannot access this destination without completing all required API shortener steps. Please visit the short link again to complete verification.</p>
+            <a href="/go/${code}" class="btn">Start Shortener Verification →</a>
+          </div>
+        </body>
+        </html>
+      `);
     }
 
     const todayIST = getISTDateString();
@@ -2444,6 +2455,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       }
     );
 
+    // ONLY BLOCK ACCESS IF FAUCET MODE IS ENABLED AND USER HAS ALREADY COMPLETED A VIEW TODAY
     if (isFaucetMode && hasCompletedToday) {
       return res.status(429).send(`
         <!DOCTYPE html>
@@ -2471,104 +2483,56 @@ Sitemap: ${baseUrl}/sitemap.xml`
       `);
     }
 
-    const hasPaidClickToday = db.clicksLog.some(
-      (c: any) => {
-        let loggedIp = c.ip;
-        if (typeof loggedIp === "string" && loggedIp.includes(",")) {
-          loggedIp = loggedIp.split(",")[0].trim();
-        }
-        return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
-      }
-    );
-
-    const currentCpm = getCurrentCpmForLink(link, db);
-    const earningAmount = hasPaidClickToday ? 0 : (currentCpm / 1000);
-
-    const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || req.query.referrer || "Direct / Unknown") as string;
-
-    // Save click log
-    const clickId = "c-" + Math.random().toString(36).substring(2, 9);
-    const click: ClickLog = {
-      id: clickId,
-      linkId: link.id,
-      userId: link.userId,
-      timestamp: new Date().toISOString(),
-      ip: String(ip),
-      earning: earningAmount,
-      country: "Global",
-      referrer: rawReferrer
-    };
-    db.clicksLog.push(click);
-
-    // Update Link stats
-    link.clicks += 1;
-    link.earnings += earningAmount;
-
-    // Update User Wallet balance & earnings
-    if (link.userId && link.userId !== "guest") {
-      const { user } = getUserIdentifiers(db, link.userId);
-      if (user && !user.banned) {
-        user.balance = Number(((user.balance || 0) + earningAmount).toFixed(6));
-        user.totalEarned = Number(((user.totalEarned || 0) + earningAmount).toFixed(6));
-      }
-    }
-
-    saveDb(db);
-
-    // Re-verify URL has protocol
-    targetUrl = link.originalUrl;
-    if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-      targetUrl = "https://" + targetUrl;
-    }
-
-    res.setHeader("Referrer-Policy", "no-referrer");
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="referrer" content="no-referrer">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>View Completed - Redirecting...</title>
-        <style>
-          * { box-sizing: border-box; }
-          body { background-color: #020617; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
-          .card { background: #0f172a; border: 1px solid #1e293b; padding: 40px; border-radius: 24px; max-width: 480px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
-          .icon-wrap { width: 72px; height: 72px; margin: 0 auto 20px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); color: #10b981; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: bold; }
-          h2 { color: #f8fafc; font-size: 22px; font-weight: 800; margin: 0 0 10px; }
-          p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin: 0 0 24px; }
-          .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 15px 24px; background: #6366f1; color: white; border-radius: 14px; text-decoration: none; font-weight: bold; font-size: 15px; transition: all 0.2s; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4); }
-          .btn:hover { background-color: #4f46e5; transform: translateY(-1px); }
-          .badge { display: inline-block; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); color: #a5b4fc; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
-        </style>
-        <script>
-          let seconds = 2;
-          function tick() {
-            seconds--;
-            if (seconds <= 0) {
-              window.location.replace("${targetUrl.replace(/"/g, '&quot;').trim()}");
-            } else {
-              const el = document.getElementById('timer');
-              if (el) el.innerText = seconds;
-              setTimeout(tick, 1000);
-            }
+    // RECORD VIEW EXACTLY ONCE (only if token was not already consumed previously)
+    if (!tokenResult.isAlreadyConsumed) {
+      const hasPaidClickToday = db.clicksLog.some(
+        (c: any) => {
+          let loggedIp = c.ip;
+          if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+            loggedIp = loggedIp.split(",")[0].trim();
           }
-          setTimeout(tick, 1000);
-        </script>
-      </head>
-      <body>
-        <div class="card">
-          <div class="badge">1 View Successfully Completed</div>
-          <div class="icon-wrap">✓</div>
-          <h2>Shorteners Fully Completed!</h2>
-          <p>Your visit has been verified and recorded. Redirecting to your destination in <span id="timer" style="color: #6366f1; font-weight: bold;">2</span> seconds...</p>
-          <a href="${targetUrl.replace(/"/g, '&quot;')}" rel="noreferrer" class="btn">
-            Continue to Destination →
-          </a>
-        </div>
-      </body>
-      </html>
-    `);
+          return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
+        }
+      );
+
+      const currentCpm = getCurrentCpmForLink(link, db);
+      const earningAmount = hasPaidClickToday ? 0 : (currentCpm / 1000);
+
+      const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || req.query.referrer || "Direct / Unknown") as string;
+
+      // Save click log
+      const clickId = "c-" + Math.random().toString(36).substring(2, 9);
+      const click: ClickLog = {
+        id: clickId,
+        linkId: link.id,
+        userId: link.userId,
+        timestamp: new Date().toISOString(),
+        ip: String(ip),
+        earning: earningAmount,
+        country: "Global",
+        referrer: rawReferrer
+      };
+      db.clicksLog.push(click);
+
+      // Update Link stats
+      link.clicks += 1;
+      link.earnings += earningAmount;
+
+      // Update User Wallet balance & earnings
+      if (link.userId && link.userId !== "guest") {
+        const { user } = getUserIdentifiers(db, link.userId);
+        if (user && !user.banned) {
+          user.balance = Number(((user.balance || 0) + earningAmount).toFixed(6));
+          user.totalEarned = Number(((user.totalEarned || 0) + earningAmount).toFixed(6));
+        }
+      }
+
+      saveDb(db);
+    }
+
+    // Direct HTTP 302 redirect to original destination URL
+    res.setHeader("Referrer-Policy", "no-referrer");
+    return res.redirect(302, targetUrl);
   });
 
   // --- ADSLAB CAPTCHA MONETIZATION & VERIFICATION S2S API ---
