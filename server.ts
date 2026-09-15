@@ -355,7 +355,8 @@ function createVerificationToken(code: string, ip?: string, requiredSteps: numbe
   // Resilient cryptographic signature based on code, requiredSteps, timestamp, and unique nonce
   const rawPayload = `${cleanCode}:${requiredSteps}:${ts}:${nonce}`;
   const sig = crypto.createHmac("sha256", VTOK_SECRET).update(rawPayload).digest("hex").substring(0, 16);
-  const vtok = `vtok_${cleanCode}_s${requiredSteps}_${ts}_${nonce}_${sig}`;
+  // Use tilde ~ as delimiter so code containing underscores _ or hyphens - never breaks splitting
+  const vtok = `vtok~${encodeURIComponent(cleanCode)}~s${requiredSteps}~${ts}~${nonce}~${sig}`;
 
   pendingVerificationsMap.set(vtok, {
     code: cleanCode,
@@ -397,10 +398,10 @@ function verifyAndConsumeTokenResult(
     }
   }
 
-  // 1. Check if token was already consumed recently
+  // 1. Check if token was already consumed recently (within 10 mins)
   const existingConsumed = consumedTokensMap.get(tokenToVerify);
   if (existingConsumed) {
-    if (existingConsumed.code === cleanCode && now - existingConsumed.consumedAt < 10 * 60 * 1000) {
+    if (existingConsumed.code.toLowerCase() === cleanCode.toLowerCase() && now - existingConsumed.consumedAt < 10 * 60 * 1000) {
       return { valid: true, isAlreadyConsumed: true };
     }
     return { valid: false, isAlreadyConsumed: true };
@@ -409,7 +410,7 @@ function verifyAndConsumeTokenResult(
   // 2. Direct match from pending verifications map
   const entry = pendingVerificationsMap.get(tokenToVerify);
   if (entry) {
-    if (entry.code !== cleanCode) return { valid: false, isAlreadyConsumed: false };
+    if (entry.code.toLowerCase() !== cleanCode.toLowerCase()) return { valid: false, isAlreadyConsumed: false };
     if (entry.used) return { valid: false, isAlreadyConsumed: true };
     if (now - entry.createdAt > 2 * 60 * 60 * 1000) return { valid: false, isAlreadyConsumed: false };
     if (expectedMinSteps > 0 && (entry.requiredSteps || 0) < expectedMinSteps) {
@@ -424,28 +425,41 @@ function verifyAndConsumeTokenResult(
   }
 
   // 3. Cryptographic HMAC signature verification (for multi-instance Cloud Run containers and restarts)
-  if (tokenToVerify.startsWith("vtok_")) {
-    const parts = tokenToVerify.split("_");
+  if (tokenToVerify.startsWith("vtok~") || tokenToVerify.startsWith("vtok_")) {
     let tokenCode = "";
     let tokenSteps = 0;
     let tsStr = "";
     let nonce = "";
     let sig = "";
 
-    if (parts.length === 6 && parts[2].startsWith("s")) {
-      // Format: vtok_CODE_sSTEPS_TS_NONCE_SIG
-      [, tokenCode, , tsStr, nonce, sig] = parts;
-      tokenSteps = parseInt(parts[2].replace("s", ""), 10) || 0;
-    } else if (parts.length === 5) {
-      // Format: vtok_CODE_TS_NONCE_SIG
-      [, tokenCode, tsStr, nonce, sig] = parts;
-      tokenSteps = 0;
+    if (tokenToVerify.startsWith("vtok~")) {
+      const parts = tokenToVerify.split("~");
+      if (parts.length === 6) {
+        tokenCode = decodeURIComponent(parts[1] || "");
+        tokenSteps = parseInt((parts[2] || "").replace("s", ""), 10) || 0;
+        tsStr = parts[3] || "";
+        nonce = parts[4] || "";
+        sig = parts[5] || "";
+      } else {
+        return { valid: false, isAlreadyConsumed: false };
+      }
     } else {
-      return { valid: false, isAlreadyConsumed: false };
+      // Legacy _ format fallback
+      const parts = tokenToVerify.split("_");
+      if (parts.length === 6 && parts[2].startsWith("s")) {
+        [, tokenCode, , tsStr, nonce, sig] = parts;
+        tokenSteps = parseInt(parts[2].replace("s", ""), 10) || 0;
+      } else if (parts.length === 5) {
+        [, tokenCode, tsStr, nonce, sig] = parts;
+        tokenSteps = 0;
+      } else {
+        return { valid: false, isAlreadyConsumed: false };
+      }
     }
 
-    if (tokenCode !== cleanCode) return { valid: false, isAlreadyConsumed: false };
+    if (tokenCode.toLowerCase() !== cleanCode.toLowerCase()) return { valid: false, isAlreadyConsumed: false };
     if (expectedMinSteps > 0 && tokenSteps < expectedMinSteps) {
+      console.warn(`[TOKEN REJECTED] Token steps (${tokenSteps}) < required (${expectedMinSteps})`);
       return { valid: false, isAlreadyConsumed: false };
     }
 
@@ -462,7 +476,7 @@ function verifyAndConsumeTokenResult(
     const rawWithIp = `${cleanCode}:${ip || ""}:${ts}:${nonce}`;
     const sigWithIp = crypto.createHmac("sha256", VTOK_SECRET).update(rawWithIp).digest("hex").substring(0, 16);
 
-    if (sig === sigStandardWithSteps || sig === sigStandard || sig === sigWithIp) {
+    if (sig === sigStandardWithSteps || (tokenSteps === 0 && (sig === sigStandard || sig === sigWithIp))) {
       consumedTokensMap.set(tokenToVerify, { code: cleanCode, ip: String(ip || ""), consumedAt: now });
       return { valid: true, isAlreadyConsumed: false };
     }
@@ -1733,9 +1747,12 @@ function setupRoutes() {
     let adFlyShortenerId = undefined;
     let adFlyShortenedUrl = undefined;
 
-    const intermediateUrl = `${protocol}://${host}/go-final/${code}`;
-
     const isFaucetMode = !!user?.enableFaucetMode;
+    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
+    const requiredSteps = enabledApis.length;
+    const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
+    const intermediateUrl = `${protocol}://${host}/go-final/${code}?vtok=${initVtok}`;
+
     const external = await getExternalShortenedUrl(intermediateUrl, db, user, isFaucetMode);
     if (external) {
       adFlyShortenerId = external.id;
@@ -1966,9 +1983,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     const protocol = getRequestProtocol(req);
     const host = getRequestHost(req);
-    const intermediateUrl = `${protocol}://${host}/go-final/${code}`;
 
     const isFaucetMode = !!user?.enableFaucetMode;
+    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
+    const requiredSteps = enabledApis.length;
+    const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
+    const intermediateUrl = `${protocol}://${host}/go-final/${code}?vtok=${initVtok}`;
+
     const external = await getExternalShortenedUrl(intermediateUrl, db, user, isFaucetMode);
     if (external) {
       adFlyShortenerId = external.id;
@@ -2381,7 +2402,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
   // --- EXTERNAL SHORTENER CALLBACK AND LANDING ENDPOINT ---
   app.get("/go-final/:code", async (req, res) => {
     const { code } = req.params;
-    const vtok = req.query.vtok as string;
+    const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
+    const vtok = typeof rawVtok === "string" ? rawVtok.trim() : "";
     const ip = getClientIp(req);
     const db = loadDb();
 
