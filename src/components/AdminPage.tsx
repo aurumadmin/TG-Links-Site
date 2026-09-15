@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { fetchApi } from "../lib/api";
+import Pagination from "./Pagination";
 import { 
   User, 
   Link, 
@@ -164,6 +165,8 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [adminStats, setAdminStats] = useState<any>(null);
   const [usersList, setUsersList] = useState<User[]>([]);
   const [linksList, setLinksList] = useState<Link[]>([]);
+  const [adminLinkSearch, setAdminLinkSearch] = useState("");
+  const [adminLinkPage, setAdminLinkPage] = useState(1);
   const [withdrawalsList, setWithdrawalsList] = useState<Withdrawal[]>([]);
   const [withdrawalFilter, setWithdrawalFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [withdrawalSortOrder, setWithdrawalSortOrder] = useState<"newest" | "oldest">("newest");
@@ -1726,83 +1729,166 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         )}
 
         {/* TAB WORKSPACE: LINKS */}
-        {activeTab === "links" && (
-          <div className="bg-slate-900/40 rounded-xl border border-slate-800/80 overflow-hidden" id="admin_links">
-            <div className="p-6 border-b border-slate-800/60 bg-slate-900/20">
-              <h2 className="text-lg font-extrabold text-white">Global URL Shortcuts Inventory</h2>
-              <p className="text-xs text-slate-400 mt-0.5">List and monitor links created by all publishers on the platform.</p>
-            </div>
+        {activeTab === "links" && (() => {
+          const filteredLinks = linksList.filter((link) => {
+            if (!adminLinkSearch.trim()) return true;
+            const q = adminLinkSearch.toLowerCase().trim();
+            return (
+              (link.userEmail && link.userEmail.toLowerCase().includes(q)) ||
+              (link.userId && link.userId.toLowerCase().includes(q)) ||
+              link.code.toLowerCase().includes(q) ||
+              link.originalUrl.toLowerCase().includes(q) ||
+              (link.adFlyShortenedUrl && link.adFlyShortenedUrl.toLowerCase().includes(q))
+            );
+          });
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase border-b border-slate-800/60">
-                    <th className="py-4 px-6">Creator / Origin</th>
-                    <th className="py-4 px-6">Short Slug</th>
-                    <th className="py-4 px-6 text-center">Clicks</th>
-                    <th className="py-4 px-6 text-right">Total Earnings</th>
-                    <th className="py-4 px-6 text-center">Status</th>
-                    <th className="py-4 px-6 text-center">Toggle Access</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 text-slate-300 font-medium">
-                  {linksList.map((link) => (
-                    <tr key={link.id} className="hover:bg-slate-900/20 transition">
-                      <td className="py-4 px-6 max-w-sm truncate">
-                        <span className="font-bold text-white block">{link.userEmail}</span>
-                        <span className="text-[10px] text-slate-500 block font-mono" title={link.originalUrl}>
-                          Origin: {link.originalUrl}
-                        </span>
-                        {link.isApiGenerated && (
-                          <span className="inline-flex px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[9px] text-amber-400 font-extrabold mt-1 mr-1" title="API Generated URL: Auto-deleted after 3 days with no new views">
-                            ⚡ API URL (Auto-deletes after 3d idle)
-                          </span>
-                        )}
-                        {link.adFlyShortenedUrl && (
-                          <span className="inline-flex px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[9px] text-indigo-300 font-bold mt-1 max-w-full truncate" title={link.adFlyShortenedUrl}>
-                            🔀 Syndicated: {link.adFlyShortenedUrl}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-4 px-6">
-                        <span className="font-mono font-bold text-indigo-400 text-sm block">
-                          {link.code}
-                        </span>
-                        <span className="text-[10px] text-slate-500 block">
-                          CPM: ${link.cpm.toFixed(2)}
-                        </span>
-                      </td>
-                      <td className="py-4 px-6 text-center font-bold text-white text-sm">
-                        {link.clicks}
-                      </td>
-                      <td className="py-4 px-6 text-right font-bold text-emerald-400 text-sm">
-                        ${link.earnings.toFixed(4)}
-                      </td>
-                      <td className="py-4 px-6 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full font-bold uppercase text-[9px] ${link.status === "active" ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border border-rose-500/20 text-rose-400"}`}>
-                          {link.status}
-                        </span>
-                      </td>
-                      <td className="py-4 px-6 text-center">
-                        <button
-                          onClick={() => handleToggleLink(link.id)}
-                          className="p-1.5 hover:bg-slate-850 rounded text-slate-400 hover:text-white transition"
-                          title={link.status === "active" ? "Suspend short URL" : "Activate short URL"}
-                        >
-                          {link.status === "active" ? (
-                            <ToggleRight className="w-6 h-6 text-indigo-500" />
-                          ) : (
-                            <ToggleLeft className="w-6 h-6 text-slate-600" />
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          const linksPerPage = 10;
+          const totalPages = Math.ceil(filteredLinks.length / linksPerPage) || 1;
+          const safePage = Math.min(adminLinkPage, totalPages);
+          const paginatedAdminLinks = filteredLinks.slice((safePage - 1) * linksPerPage, safePage * linksPerPage);
+
+          return (
+            <div className="bg-slate-900/40 rounded-xl border border-slate-800/80 overflow-hidden shadow-xl" id="admin_links">
+              <div className="p-5 md:p-6 border-b border-slate-800/60 bg-slate-900/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
+                    <Link2 className="w-5 h-5 text-indigo-400" />
+                    Global URL Shortcuts Inventory
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">List and monitor links created by all publishers on the platform.</p>
+                </div>
+
+                {/* Search Input */}
+                <div className="relative w-full md:w-72">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={adminLinkSearch}
+                    onChange={(e) => {
+                      setAdminLinkSearch(e.target.value);
+                      setAdminLinkPage(1);
+                    }}
+                    placeholder="Search publisher, code, or URL..."
+                    className="w-full pl-9 pr-9 py-2 bg-slate-950/80 border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  />
+                  {adminLinkSearch && (
+                    <button
+                      onClick={() => {
+                        setAdminLinkSearch("");
+                        setAdminLinkPage(1);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      title="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {filteredLinks.length === 0 ? (
+                <div className="p-12 text-center text-slate-400">
+                  <p className="font-bold text-base text-slate-300">
+                    {adminLinkSearch ? `No links matched "${adminLinkSearch}"` : "No links found in system database."}
+                  </p>
+                  {adminLinkSearch && (
+                    <button
+                      onClick={() => {
+                        setAdminLinkSearch("");
+                        setAdminLinkPage(1);
+                      }}
+                      className="mt-3 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-lg transition"
+                    >
+                      Clear Filter
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-950/60 text-slate-400 font-extrabold uppercase border-b border-slate-800/60">
+                          <th className="py-4 px-6">Creator / Origin</th>
+                          <th className="py-4 px-6">Short Slug</th>
+                          <th className="py-4 px-6 text-center">Clicks</th>
+                          <th className="py-4 px-6 text-right">Total Earnings</th>
+                          <th className="py-4 px-6 text-center">Status</th>
+                          <th className="py-4 px-6 text-center">Toggle Access</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 text-slate-300 font-medium">
+                        {paginatedAdminLinks.map((link) => (
+                          <tr key={link.id} className="hover:bg-slate-900/20 transition">
+                            <td className="py-4 px-6 max-w-sm truncate">
+                              <span className="font-bold text-white block">{link.userEmail}</span>
+                              <span className="text-[10px] text-slate-500 block font-mono truncate" title={link.originalUrl}>
+                                Origin: {link.originalUrl}
+                              </span>
+                              {link.isApiGenerated && (
+                                <span className="inline-flex px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[9px] text-amber-400 font-extrabold mt-1 mr-1" title="API Generated URL: Auto-deleted after 3 days with no new views">
+                                  ⚡ API URL (Auto-deletes after 3d idle)
+                                </span>
+                              )}
+                              {link.adFlyShortenedUrl && (
+                                <span className="inline-flex px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[9px] text-indigo-300 font-bold mt-1 max-w-full truncate" title={link.adFlyShortenedUrl}>
+                                  🔀 Syndicated: {link.adFlyShortenedUrl}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-4 px-6">
+                              <span className="font-mono font-bold text-indigo-400 text-sm block">
+                                {link.code}
+                              </span>
+                              <span className="text-[10px] text-slate-500 block">
+                                CPM: ${link.cpm.toFixed(2)}
+                              </span>
+                            </td>
+                            <td className="py-4 px-6 text-center font-bold text-white text-sm">
+                              {link.clicks}
+                            </td>
+                            <td className="py-4 px-6 text-right font-bold text-emerald-400 text-sm">
+                              ${link.earnings.toFixed(4)}
+                            </td>
+                            <td className="py-4 px-6 text-center">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full font-bold uppercase text-[9px] ${link.status === "active" ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border border-rose-500/20 text-rose-400"}`}>
+                                {link.status}
+                              </span>
+                            </td>
+                            <td className="py-4 px-6 text-center">
+                              <button
+                                onClick={() => handleToggleLink(link.id)}
+                                className="p-1.5 hover:bg-slate-850 rounded text-slate-400 hover:text-white transition"
+                                title={link.status === "active" ? "Suspend short URL" : "Activate short URL"}
+                              >
+                                {link.status === "active" ? (
+                                  <ToggleRight className="w-6 h-6 text-indigo-500" />
+                                ) : (
+                                  <ToggleLeft className="w-6 h-6 text-slate-600" />
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <Pagination
+                    currentPage={safePage}
+                    totalPages={totalPages}
+                    totalItems={filteredLinks.length}
+                    itemsPerPage={linksPerPage}
+                    onPageChange={(p) => {
+                      setAdminLinkPage(p);
+                      document.getElementById("admin_links")?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  />
+                </>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* TAB WORKSPACE: WITHDRAWALS */}
         {activeTab === "withdrawals" && (() => {

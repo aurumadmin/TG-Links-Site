@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { fetchApi } from "../lib/api";
+import Pagination from "./Pagination";
 import { 
   User, 
   Link, 
@@ -41,7 +42,8 @@ import {
   LifeBuoy,
   RefreshCw,
   Info,
-  CheckCircle2
+  CheckCircle2,
+  Search
 } from "lucide-react";
 import QRCode from "qrcode";
 import { motion } from "motion/react";
@@ -104,6 +106,10 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
   const [shortenLoading, setShortenLoading] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [copiedApiToken, setCopiedApiToken] = useState(false);
+
+  // Manage Links search & pagination state
+  const [linkSearchQuery, setLinkSearchQuery] = useState("");
+  const [linksCurrentPage, setLinksCurrentPage] = useState(1);
 
   // Withdrawal form state
   const [withdrawAmount, setWithdrawAmount] = useState("");
@@ -1092,126 +1098,210 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
         )}
 
         {/* TAB WORKSPACE: LINKS */}
-        {activeTab === "links" && (
-          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden" id="links_workspace">
-            {links.length === 0 ? (
-              <div className="p-16 text-center text-slate-400">
-                <p className="font-bold text-lg text-white">No shortened links yet</p>
-                <p className="text-sm mt-1">Shorten links on the Overview tab to display your url inventory.</p>
-                <button
-                  onClick={() => setActiveTab("overview")}
-                  className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow"
-                >
-                  Go Shorten Link
-                </button>
+        {activeTab === "links" && (() => {
+          const filteredLinks = links.filter((link) => {
+            if (!linkSearchQuery.trim()) return true;
+            const q = linkSearchQuery.toLowerCase().trim();
+            return (
+              link.code.toLowerCase().includes(q) ||
+              link.originalUrl.toLowerCase().includes(q)
+            );
+          });
+
+          const linksPerPage = 10;
+          const totalLinkPages = Math.ceil(filteredLinks.length / linksPerPage) || 1;
+          const safeCurrentPage = Math.min(linksCurrentPage, totalLinkPages);
+          const paginatedLinks = filteredLinks.slice((safeCurrentPage - 1) * linksPerPage, safeCurrentPage * linksPerPage);
+
+          return (
+            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden shadow-xl" id="links_workspace">
+              {/* Header & Search Bar */}
+              <div className="p-5 md:p-6 border-b border-slate-800/80 bg-slate-900/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
+                    <Link2 className="w-5 h-5 text-indigo-400" />
+                    Manage Shortened Links
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    View, search, copy, and manage all your shortened destination URLs.
+                  </p>
+                </div>
+
+                {/* Search Input */}
+                <div className="relative w-full md:w-72">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={linkSearchQuery}
+                    onChange={(e) => {
+                      setLinkSearchQuery(e.target.value);
+                      setLinksCurrentPage(1);
+                    }}
+                    placeholder="Search link code or URL..."
+                    className="w-full pl-9 pr-9 py-2 bg-slate-950/80 border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  />
+                  {linkSearchQuery && (
+                    <button
+                      onClick={() => {
+                        setLinkSearchQuery("");
+                        setLinksCurrentPage(1);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      title="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-900/80 text-slate-400 font-extrabold text-xs uppercase tracking-wider border-b border-slate-800/80">
-                      <th className="py-4 px-6">Original Destination URL</th>
-                      <th className="py-4 px-6">Short Link Code</th>
-                      <th className="py-4 px-6 text-center">Views</th>
-                      <th className="py-4 px-6 text-right">Earning</th>
-                      <th className="py-4 px-6 text-center">Status</th>
-                      <th className="py-4 px-6 text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 text-sm text-slate-300">
-                    {links.map((link) => {
-                      const fullShortUrl = `${getBaseShortUrl()}/go/${link.code}`;
-                      return (
-                        <tr key={link.id} className="hover:bg-slate-800/20 transition">
-                          <td className="py-4 px-6 max-w-xs md:max-w-md truncate">
-                            <span className="font-semibold text-white block truncate" title={link.originalUrl}>
-                              {link.originalUrl}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-medium block">
-                              Created on: {new Date(link.createdAt).toLocaleString()}
-                            </span>
-                            {link.isApiGenerated && (
-                              <span
-                                className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                                title="API Generated Link: Auto-deleted if no new views/clicks occur within 3 days"
-                              >
-                                ⚡ API Link (Auto-deletes after 3d no views)
-                              </span>
-                            )}
-                            {link.expiresAt && (
-                              <span className={`text-[10px] font-semibold block mt-0.5 ${new Date(link.expiresAt).getTime() < Date.now() ? "text-rose-400" : "text-amber-400"}`}>
-                                {new Date(link.expiresAt).getTime() < Date.now() ? "Expired on: " : "Expires: "}
-                                {new Date(link.expiresAt).toLocaleString()}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-4 px-6">
-                            <span className="font-mono font-bold text-indigo-400 block select-all">
-                              {link.code}
-                            </span>
-                            <span className="text-[10px] text-slate-500 block font-medium">
-                              CPM: ${link.cpm.toFixed(2)}
-                            </span>
-                          </td>
-                          <td className="py-4 px-6 text-center font-bold text-white">
-                            {link.clicks}
-                          </td>
-                          <td className="py-4 px-6 text-right font-bold text-emerald-400 text-base">
-                            ${link.earnings.toFixed(4)}
-                          </td>
-                          <td className="py-4 px-6 text-center">
-                            <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${link.status === "active" ? (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now() ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20") : "bg-rose-500/10 text-rose-400 border border-rose-500/20"}`}>
-                              {link.status === "active" ? (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now() ? "expired" : "active") : link.status}
-                            </span>
-                          </td>
-                          <td className="py-4 px-6 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                onClick={() => copyLink(link.code)}
-                                className="p-2 bg-slate-900 hover:bg-indigo-950 text-slate-400 hover:text-indigo-400 rounded-lg transition"
-                                title="Copy Shortened URL"
-                              >
-                                {copiedCode === link.code ? (
-                                  <Check className="w-4 h-4 text-emerald-400" />
-                                ) : (
-                                  <Copy className="w-4 h-4" />
-                                )}
-                              </button>
 
-                              <button
-                                onClick={() => handleGenerateQrCode(fullShortUrl)}
-                                className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
-                                title="Generate QR Code"
-                              >
-                                <QrCode className="w-4 h-4" />
-                              </button>
-                              
-                              <button
-                                onClick={() => window.open(fullShortUrl, "_blank")}
-                                className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded-lg transition"
-                                title="Test Redirect Page"
-                              >
-                                <ExternalLink className="w-4 h-4" />
-                              </button>
-
-                              <button
-                                onClick={() => handleDeleteLink(link.id)}
-                                className="p-2 bg-slate-900 hover:bg-rose-950/40 text-rose-400 rounded-lg transition"
-                                title="Delete link"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
+              {links.length === 0 ? (
+                <div className="p-16 text-center text-slate-400">
+                  <p className="font-bold text-lg text-white">No shortened links yet</p>
+                  <p className="text-sm mt-1">Shorten links on the Overview tab to display your url inventory.</p>
+                  <button
+                    onClick={() => setActiveTab("overview")}
+                    className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow transition"
+                  >
+                    Go Shorten Link
+                  </button>
+                </div>
+              ) : filteredLinks.length === 0 ? (
+                <div className="p-12 text-center text-slate-400">
+                  <p className="font-bold text-base text-slate-300">No links matched "{linkSearchQuery}"</p>
+                  <p className="text-xs text-slate-500 mt-1">Try searching with a different short code or original URL.</p>
+                  <button
+                    onClick={() => {
+                      setLinkSearchQuery("");
+                      setLinksCurrentPage(1);
+                    }}
+                    className="mt-4 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-lg transition"
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-950/60 text-slate-400 font-extrabold text-xs uppercase tracking-wider border-b border-slate-800/80">
+                          <th className="py-4 px-6">Original Destination URL</th>
+                          <th className="py-4 px-6">Short Link Code</th>
+                          <th className="py-4 px-6 text-center">Views</th>
+                          <th className="py-4 px-6 text-right">Earning</th>
+                          <th className="py-4 px-6 text-center">Status</th>
+                          <th className="py-4 px-6 text-center">Actions</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 text-sm text-slate-300">
+                        {paginatedLinks.map((link) => {
+                          const fullShortUrl = `${getBaseShortUrl()}/go/${link.code}`;
+                          return (
+                            <tr key={link.id} className="hover:bg-slate-800/20 transition">
+                              <td className="py-4 px-6 max-w-xs md:max-w-md truncate">
+                                <span className="font-semibold text-white block truncate" title={link.originalUrl}>
+                                  {link.originalUrl}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-medium block">
+                                  Created on: {new Date(link.createdAt).toLocaleString()}
+                                </span>
+                                {link.isApiGenerated && (
+                                  <span
+                                    className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                                    title="API Generated Link: Auto-deleted if no new views/clicks occur within 3 days"
+                                  >
+                                    ⚡ API Link (Auto-deletes after 3d no views)
+                                  </span>
+                                )}
+                                {link.expiresAt && (
+                                  <span className={`text-[10px] font-semibold block mt-0.5 ${new Date(link.expiresAt).getTime() < Date.now() ? "text-rose-400" : "text-amber-400"}`}>
+                                    {new Date(link.expiresAt).getTime() < Date.now() ? "Expired on: " : "Expires: "}
+                                    {new Date(link.expiresAt).toLocaleString()}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-4 px-6">
+                                <span className="font-mono font-bold text-indigo-400 block select-all">
+                                  {link.code}
+                                </span>
+                                <span className="text-[10px] text-slate-500 block font-medium">
+                                  CPM: ${link.cpm.toFixed(2)}
+                                </span>
+                              </td>
+                              <td className="py-4 px-6 text-center font-bold text-white">
+                                {link.clicks}
+                              </td>
+                              <td className="py-4 px-6 text-right font-bold text-emerald-400 text-base">
+                                ${link.earnings.toFixed(4)}
+                              </td>
+                              <td className="py-4 px-6 text-center">
+                                <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${link.status === "active" ? (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now() ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20") : "bg-rose-500/10 text-rose-400 border border-rose-500/20"}`}>
+                                  {link.status === "active" ? (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now() ? "expired" : "active") : link.status}
+                                </span>
+                              </td>
+                              <td className="py-4 px-6 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => copyLink(link.code)}
+                                    className="p-2 bg-slate-900 hover:bg-indigo-950 text-slate-400 hover:text-indigo-400 rounded-lg transition"
+                                    title="Copy Shortened URL"
+                                  >
+                                    {copiedCode === link.code ? (
+                                      <Check className="w-4 h-4 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-4 h-4" />
+                                    )}
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleGenerateQrCode(fullShortUrl)}
+                                    className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
+                                    title="Generate QR Code"
+                                  >
+                                    <QrCode className="w-4 h-4" />
+                                  </button>
+
+                                  <button
+                                    onClick={() => window.open(fullShortUrl, "_blank")}
+                                    className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded-lg transition"
+                                    title="Test Redirect Page"
+                                  >
+                                    <ExternalLink className="w-4 h-4" />
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleDeleteLink(link.id)}
+                                    className="p-2 bg-slate-900 hover:bg-rose-950/40 text-rose-400 rounded-lg transition"
+                                    title="Delete link"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* PAGINATION */}
+                  <Pagination
+                    currentPage={safeCurrentPage}
+                    totalPages={totalLinkPages}
+                    totalItems={filteredLinks.length}
+                    itemsPerPage={linksPerPage}
+                    onPageChange={(p) => {
+                      setLinksCurrentPage(p);
+                      document.getElementById("links_workspace")?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  />
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {/* TAB WORKSPACE: WITHDRAW */}
         {activeTab === "withdraw" && (
