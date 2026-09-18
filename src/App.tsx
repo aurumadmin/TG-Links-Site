@@ -194,7 +194,7 @@ export default function App() {
 
     // Public Landing routes: /rates, /publisher-rates, /contact, /support, /privacy, /terms, /dmca
     let landingTab = "home";
-    if (path === "/rates" || path === "/publisher-rates") landingTab = "rates";
+    if (path === "/plans" || path === "/rates" || path === "/publisher-rates") landingTab = "plans";
     else if (path === "/contact" || path === "/support") landingTab = "contact";
     else if (path === "/privacy") landingTab = "privacy";
     else if (path === "/terms") landingTab = "terms";

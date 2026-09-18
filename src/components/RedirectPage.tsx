@@ -1497,7 +1497,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     );
   }
 
-  if (faucetLimitDetected) {
+  if (false && faucetLimitDetected) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
         <div className="p-4 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 mb-6">
@@ -1513,7 +1513,7 @@ export default function RedirectPage({ code }: RedirectPageProps) {
           
           <div className="flex items-start gap-2.5 text-slate-300 leading-relaxed pt-1">
             <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <span>Integrated shortener APIs and advertiser networks only count <strong>1 view per IP per 24 hours</strong>.</span>
+            <span>Advertiser networks and publisher networks only count <strong>1 view per IP per 24 hours</strong>.</span>
           </div>
 
           <p className="text-slate-400 text-[11px] leading-relaxed">

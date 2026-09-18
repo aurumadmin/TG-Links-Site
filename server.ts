@@ -164,37 +164,63 @@ function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): nu
   return (user && user.customCpm) ? user.customCpm : dbSettings.globalCpm;
 }
 
+function getPlanForUser(user: any, db: any): any {
+  const plans = db.plans || [];
+  const userPlanId = user?.planId || "default";
+  const found = plans.find((p: any) => p.id === userPlanId && p.enabled);
+  if (found) return found;
+  const defaultPlan = plans.find((p: any) => p.isDefault && p.enabled) || plans.find((p: any) => p.id === "default") || plans[0];
+  return defaultPlan || {
+    id: "default",
+    name: "Default Plan",
+    cpm: 10.0,
+    shortenerIds: [],
+    blogPageUrl: "https://thunder-appz.eu.org",
+    description: "Default high-converting shortener pipeline.",
+    isDefault: true,
+    enabled: true
+  };
+}
+
 function getCurrentCpmForLink(link: any, db: any): number {
-  if (!link) return db.settings.globalCpm;
+  if (!link) return db.settings?.globalCpm || 10.0;
   if (link.userId && link.userId !== "guest") {
-    const user = db.users.find((u: any) => u.id === link.userId);
+    const user = (db.users || []).find((u: any) => u.id === link.userId);
     if (user) {
       if (user.customCpm !== undefined && user.customCpm !== null && user.customCpm > 0) {
         return user.customCpm;
       }
+      const userPlan = getPlanForUser(user, db);
+      if (userPlan && userPlan.cpm) {
+        return userPlan.cpm;
+      }
     }
   }
-  return db.settings.globalCpm;
+  if (link.cpm && link.cpm > 0) return link.cpm;
+  return db.settings?.globalCpm || 10.0;
 }
 
-// Helper to syndicate a link with external AdLinkFly shortener APIs dynamically
+// Helper to syndicate a link with external AdLinkFly shortener APIs dynamically based on Publisher Plan
 async function getExternalShortenedUrl(
   finalDestinationUrl: string, 
   db: any, 
   user?: any,
-  isFaucetModeOverride?: boolean
+  planIdOverride?: string
 ): Promise<{ id: string; url: string; fullChainSuccess: boolean; chainedCount: number; requiredCount: number } | null> {
-  // Determine if this request is for Faucet traffic
-  const isFaucetUser = isFaucetModeOverride !== undefined 
-    ? !!isFaucetModeOverride 
-    : !!user?.enableFaucetMode;
+  const plan = db.plans?.find((p: any) => p.id === (planIdOverride || user?.planId || "default")) || getPlanForUser(user, db);
+  const planShortenerIds = plan?.shortenerIds || [];
 
-  const enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
+  let enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
     if (!api.enabled) return false;
-    // Strict separation: Faucet shorteners ONLY for Faucet users/traffic, Normal shorteners ONLY for Normal users/traffic
-    const apiIsFaucet = !!api.isFaucetApi;
-    return apiIsFaucet === isFaucetUser;
+    if (planShortenerIds.length > 0) {
+      return planShortenerIds.includes(api.id);
+    }
+    return true;
   });
+
+  if (enabledApis.length === 0) {
+    enabledApis = (db.adFlyShorteners || []).filter((api: any) => api.enabled);
+  }
 
   if (enabledApis.length === 0) return null;
 
@@ -1066,6 +1092,64 @@ function loadDb() {
     db.adFlyShorteners = db.adFlyShorteners.filter(Boolean);
     if (db.adFlyShorteners.length !== originalLength) changed = true;
   }
+  if (!db.plans || db.plans.length === 0) {
+    const allShorteners = db.adFlyShorteners || [];
+    const allIds = allShorteners.map((s: any) => s.id);
+    const faucetIds = allShorteners.filter((s: any) => s.isFaucetApi).map((s: any) => s.id);
+    const defaultShorteners = faucetIds.length > 0 ? faucetIds : allIds;
+
+    db.plans = [
+      {
+        id: "default",
+        name: "Default Plan",
+        cpm: 10.0,
+        shortenerIds: defaultShorteners,
+        blogPageUrl: "https://thunder-appz.eu.org",
+        description: "Default high-converting shortener pipeline with instant link generation and standard payout rates.",
+        isDefault: true,
+        enabled: true,
+        requirements: "All traffic allowed. 100% completed view counting."
+      },
+      {
+        id: "standard",
+        name: "Standard Plan",
+        cpm: 12.50,
+        shortenerIds: allIds.slice(0, 2),
+        blogPageUrl: "https://thunder-appz.eu.org",
+        description: "Optimized payout tier for active creators looking for higher CPM yield.",
+        isDefault: false,
+        enabled: true,
+        requirements: "General audience & web traffic."
+      },
+      {
+        id: "premium",
+        name: "Premium Plan",
+        cpm: 15.0,
+        shortenerIds: allIds.slice(2, 4).length > 0 ? allIds.slice(2, 4) : allIds.slice(0, 1),
+        blogPageUrl: "https://thunder-appz.eu.org",
+        description: "High-yield monetization plan engineered for targeted high quality publisher traffic.",
+        isDefault: false,
+        enabled: true,
+        requirements: "Targeted audience & Telegram channel traffic."
+      },
+      {
+        id: "vip",
+        name: "VIP Publisher Plan",
+        cpm: 20.0,
+        shortenerIds: defaultShorteners,
+        blogPageUrl: "https://thunder-appz.eu.org",
+        description: "Maximized CPM tier for top-tier volume publishers and network creators.",
+        isDefault: false,
+        enabled: true,
+        requirements: "High volume publishers (10,000+ views/day)."
+      }
+    ];
+    changed = true;
+  } else {
+    const originalLength = db.plans.length;
+    db.plans = db.plans.filter(Boolean);
+    if (db.plans.length !== originalLength) changed = true;
+  }
   if (!db.clicksLog) {
     db.clicksLog = [];
     changed = true;
@@ -1753,7 +1837,7 @@ function setupRoutes() {
     const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
     const intermediateUrl = `${protocol}://${host}/go-final/${code}?vtok=${initVtok}`;
 
-    const external = await getExternalShortenedUrl(intermediateUrl, db, user, isFaucetMode);
+    const external = await getExternalShortenedUrl(intermediateUrl, db, user, user?.planId);
     if (external) {
       adFlyShortenerId = external.id;
       adFlyShortenedUrl = external.url;
@@ -1990,7 +2074,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
     const intermediateUrl = `${protocol}://${host}/go-final/${code}?vtok=${initVtok}`;
 
-    const external = await getExternalShortenedUrl(intermediateUrl, db, user, isFaucetMode);
+    const external = await getExternalShortenedUrl(intermediateUrl, db, user, user?.planId);
     if (external) {
       adFlyShortenerId = external.id;
       adFlyShortenedUrl = external.url;
@@ -2310,7 +2394,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     let adFlyShortenedUrl: string | undefined = undefined;
 
     if (requiredSteps > 0) {
-      const external = await getExternalShortenedUrl(finalLandingUrl, db, user, isFaucetMode);
+      const external = await getExternalShortenedUrl(finalLandingUrl, db, user, user?.planId);
       if (external && external.fullChainSuccess && external.url) {
         adFlyShortenedUrl = external.url;
         link.adFlyShortenedUrl = external.url;
@@ -3178,6 +3262,104 @@ Sitemap: ${baseUrl}/sitemap.xml`
     res.json({ success: true, message: "Password updated successfully!", user: userSafe });
   });
 
+  // GET /api/plans - Public / User Plans List
+  app.get("/api/plans", (req, res) => {
+    const db = loadDb();
+    res.json({
+      plans: db.plans || [],
+      shorteners: (db.adFlyShorteners || []).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        enabled: s.enabled
+      }))
+    });
+  });
+
+  // POST /api/users/switch-plan - User switch active plan
+  app.post("/api/users/switch-plan", (req, res) => {
+    const { userId, planId } = req.body;
+    if (!userId || !planId) {
+      return res.status(400).json({ error: "userId and planId are required" });
+    }
+
+    const db = loadDb();
+    const { user } = getUserIdentifiers(db, userId);
+    if (!user || user.banned) return res.status(404).json({ error: "User not found" });
+
+    const plan = (db.plans || []).find((p: any) => p.id === planId && p.enabled);
+    if (!plan) {
+      return res.status(400).json({ error: "Selected plan is invalid or disabled" });
+    }
+
+    user.planId = plan.id;
+    saveDb(db);
+
+    const { password: _, ...safeUser } = user;
+    res.json({ success: true, user: safeUser, plan });
+  });
+
+  // POST /api/admin/plans - Admin create/update plan
+  app.post("/api/admin/plans", requireAdmin, (req, res) => {
+    const { id, name, cpm, shortenerIds, blogPageUrl, description, isDefault, enabled, requirements } = req.body;
+    if (!name || cpm === undefined || Number(cpm) < 0) {
+      return res.status(400).json({ error: "Valid plan name and non-negative CPM are required" });
+    }
+
+    const db = loadDb();
+    if (!db.plans) db.plans = [];
+
+    const planId = id || `plan_${Date.now()}`;
+    let plan = db.plans.find((p: any) => p.id === planId);
+
+    if (isDefault) {
+      db.plans.forEach((p: any) => { p.isDefault = false; });
+    }
+
+    if (plan) {
+      plan.name = name;
+      plan.cpm = Number(cpm);
+      plan.shortenerIds = Array.isArray(shortenerIds) ? shortenerIds : [];
+      plan.blogPageUrl = blogPageUrl || "https://thunder-appz.eu.org";
+      plan.description = description || "";
+      plan.isDefault = !!isDefault;
+      plan.enabled = enabled !== undefined ? !!enabled : true;
+      plan.requirements = requirements || "";
+    } else {
+      plan = {
+        id: planId,
+        name,
+        cpm: Number(cpm),
+        shortenerIds: Array.isArray(shortenerIds) ? shortenerIds : [],
+        blogPageUrl: blogPageUrl || "https://thunder-appz.eu.org",
+        description: description || "",
+        isDefault: !!isDefault,
+        enabled: enabled !== undefined ? !!enabled : true,
+        requirements: requirements || ""
+      };
+      db.plans.push(plan);
+    }
+
+    saveDb(db);
+    res.json({ success: true, plan, plans: db.plans });
+  });
+
+  // DELETE /api/admin/plans/:id - Admin delete plan
+  app.delete("/api/admin/plans/:id", requireAdmin, (req, res) => {
+    const planId = req.params.id;
+    const db = loadDb();
+    if (!db.plans) db.plans = [];
+    const planIndex = db.plans.findIndex((p: any) => p.id === planId);
+    if (planIndex === -1) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+    if (db.plans[planIndex].isDefault) {
+      return res.status(400).json({ error: "Cannot delete the default plan" });
+    }
+    db.plans.splice(planIndex, 1);
+    saveDb(db);
+    res.json({ success: true, plans: db.plans });
+  });
+
   app.post("/api/users/faucet-settings", (req, res) => {
     const { userId, enableFaucetMode, faucetPromptSeen } = req.body;
     if (!userId) {
@@ -3275,14 +3457,13 @@ ${ticket.message}
     res.json({ tickets: userTickets });
   });
 
-  // Admin Auth Middleware
-  const requireAdmin = (req: any, res: any, next: any) => {
+  function requireAdmin(req: any, res: any, next: any) {
     const user = getAuthUser(req);
     if (!user || user.role !== "admin") {
       return res.status(403).json({ error: "Admin privilege required" });
     }
     next();
-  };
+  }
 
   // --- ADMIN PANEL SECURE ROUTES ---
 

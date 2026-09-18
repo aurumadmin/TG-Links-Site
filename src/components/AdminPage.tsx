@@ -65,7 +65,7 @@ import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
 import TopLoadingBar from "./TopLoadingBar";
 
-type AdminTab = "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "ad_settings" | "click_ads" | "ptc_ads" | "external" | "views" | "backup";
+type AdminTab = "overview" | "users" | "links" | "withdrawals" | "tickets" | "settings" | "ad_settings" | "click_ads" | "ptc_ads" | "external" | "plans" | "views" | "backup";
 
 interface AdminPageProps {
   initialTab?: string;
@@ -151,8 +151,9 @@ function normalizeAdminTab(rawTab?: string): AdminTab {
   if (rawTab === "ptc-ads" || rawTab === "ptc_ads" || rawTab === "ptc" || rawTab === "ptcads") return "ptc_ads";
   if (rawTab === "backup" || rawTab === "database") return "backup";
   if (rawTab === "external" || rawTab === "external-apis" || rawTab === "apis") return "external";
+  if (rawTab === "plans" || rawTab === "publisher-plans" || rawTab === "publisher_plans") return "plans";
   if (rawTab === "views" || rawTab === "reports") return "overview";
-  if (["overview", "users", "links", "withdrawals", "tickets"].includes(rawTab)) {
+  if (["overview", "users", "links", "withdrawals", "tickets", "plans"].includes(rawTab)) {
     return rawTab as AdminTab;
   }
   return "overview";
@@ -177,7 +178,22 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [externalApis, setExternalApis] = useState<AdFlyShortener[]>([]);
   const [alsoSetFavicon, setAlsoSetFavicon] = useState(true);
 
-  // Views Analytics & Reports state
+  // Publisher Plans state
+  const [adminPlansList, setAdminPlansList] = useState<any[]>([]);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [planSaveLoading, setPlanSaveLoading] = useState(false);
+  const [planSaveMsg, setPlanSaveMsg] = useState("");
+  const [planFormData, setPlanFormData] = useState<any>({
+    id: "",
+    name: "",
+    cpm: 10.0,
+    shortenerIds: [],
+    blogPageUrl: "https://thunder-appz.eu.org",
+    description: "",
+    isDefault: false,
+    enabled: true,
+    requirements: ""
+  });
   const [viewsReportData, setViewsReportData] = useState<any>(null);
   const [viewsSubTab, setViewsSubTab] = useState<"users" | "daily" | "monthly" | "logs">("users");
   const [viewSearchQuery, setViewSearchQuery] = useState("");
@@ -488,7 +504,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const loadAdminData = async () => {
     setIsAdminLoading(true);
     try {
-      const [stats, users, links, withdrawals, tickets, settings, apis, viewsReport] = await Promise.all([
+      const [stats, users, links, withdrawals, tickets, settings, apis, viewsReport, plansRes] = await Promise.all([
         fetchApi("/admin/stats"),
         fetchApi("/admin/users"),
         fetchApi("/admin/links"),
@@ -496,7 +512,8 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         fetchApi("/admin/tickets"),
         fetchApi("/admin/settings"),
         fetchApi("/admin/external-shorteners"),
-        fetchApi("/admin/views-report")
+        fetchApi("/admin/views-report"),
+        fetchApi("/plans").catch(() => null)
       ]);
 
       if (stats) setAdminStats(stats);
@@ -516,6 +533,9 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       if (apis?.shorteners) setExternalApis(apis.shorteners);
       if (viewsReport) {
         setViewsReportData(viewsReport);
+      }
+      if (plansRes?.plans) {
+        setAdminPlansList(plansRes.plans);
       }
     } catch (err) {
       console.error("Failed to load admin panel data:", err);
@@ -572,7 +592,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     setEditBalance(String(u.balance));
     setEditCustomCpm(u.customCpm ? String(u.customCpm) : "");
     setEditRole(u.role);
-    setEditFaucetMode(!!u.enableFaucetMode);
+    setEditFaucetMode(!!(u as any).enableFaucetMode);
   };
 
   const handleSaveUser = async (userId: string) => {
@@ -808,6 +828,93 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     }
   };
 
+  const handleSavePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!planFormData.name || planFormData.cpm < 0) {
+      alert("Plan name and non-negative CPM are required.");
+      return;
+    }
+    setPlanSaveLoading(true);
+    setPlanSaveMsg("");
+    try {
+      const res = await fetchApi("/admin/plans", {
+        method: "POST",
+        body: JSON.stringify(planFormData)
+      });
+      if (res?.success && res.plans) {
+        setAdminPlansList(res.plans);
+        setPlanSaveMsg("Publisher plan saved successfully!");
+        setTimeout(() => setPlanSaveMsg(""), 3000);
+        setEditingPlanId(null);
+        setPlanFormData({
+          id: "",
+          name: "",
+          cpm: 10.0,
+          shortenerIds: [],
+          blogPageUrl: "https://thunder-appz.eu.org",
+          description: "",
+          isDefault: false,
+          enabled: true,
+          requirements: ""
+        });
+      } else {
+        alert(res?.error || "Failed to save plan.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error saving publisher plan.");
+    } finally {
+      setPlanSaveLoading(false);
+    }
+  };
+
+  const handleStartEditPlan = (plan: any) => {
+    setEditingPlanId(plan.id);
+    setPlanFormData({
+      id: plan.id,
+      name: plan.name,
+      cpm: plan.cpm,
+      shortenerIds: plan.shortenerIds || [],
+      blogPageUrl: plan.blogPageUrl || "https://thunder-appz.eu.org",
+      description: plan.description || "",
+      isDefault: !!plan.isDefault,
+      enabled: plan.enabled !== undefined ? !!plan.enabled : true,
+      requirements: plan.requirements || ""
+    });
+  };
+
+  const handleDeletePlan = async (planId: string) => {
+    if (!confirm("Are you sure you want to delete this plan? Users on this plan will be moved to the default plan.")) return;
+    try {
+      const res = await fetchApi(`/admin/plans/${planId}`, {
+        method: "DELETE"
+      });
+      if (res?.success && res.plans) {
+        setAdminPlansList(res.plans);
+        loadAdminData();
+      } else {
+        alert(res?.error || "Failed to delete plan.");
+      }
+    } catch (err) {
+      alert("Failed to delete plan.");
+    }
+  };
+
+  const handleTogglePlanShortener = (shortenerId: string) => {
+    const current = planFormData.shortenerIds || [];
+    if (current.includes(shortenerId)) {
+      setPlanFormData({
+        ...planFormData,
+        shortenerIds: current.filter((id: string) => id !== shortenerId)
+      });
+    } else {
+      setPlanFormData({
+        ...planFormData,
+        shortenerIds: [...current, shortenerId]
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row" id="admin_root">
       <TopLoadingBar isLoading={isAdminLoading} />
@@ -892,14 +999,14 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
             <button
               onClick={() => {
                 setIsSettingsOpen(true);
-                if (activeTab !== "settings" && activeTab !== "ad_settings" && activeTab !== "click_ads" && activeTab !== "backup" && activeTab !== "external") {
+                if (activeTab !== "settings" && activeTab !== "ad_settings" && activeTab !== "click_ads" && activeTab !== "backup" && activeTab !== "external" && activeTab !== "plans") {
                   changeTab("settings", "/admin/settings");
                 } else {
                   setIsSettingsOpen(!isSettingsOpen);
                 }
               }}
               className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition cursor-pointer ${
-                (activeTab === "settings" || activeTab === "ad_settings" || activeTab === "click_ads" || activeTab === "backup" || activeTab === "external")
+                (activeTab === "settings" || activeTab === "ad_settings" || activeTab === "click_ads" || activeTab === "backup" || activeTab === "external" || activeTab === "plans")
                   ? "bg-indigo-600/20 text-indigo-300 font-bold border border-indigo-500/30"
                   : "hover:bg-slate-850 hover:text-white text-slate-300 font-semibold"
               }`}
@@ -987,6 +1094,18 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 >
                   <Cpu className="w-3.5 h-3.5 text-amber-400" />
                   <span>AdLinkFly External APIs</span>
+                </button>
+
+                <button
+                  onClick={() => changeTab("plans", "/admin/plans")}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                    activeTab === "plans"
+                      ? "bg-indigo-600 text-white font-extrabold shadow-md shadow-indigo-900/30"
+                      : "text-slate-400 hover:bg-slate-850 hover:text-white font-semibold"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Publisher Plans Manager</span>
                 </button>
               </div>
             )}
@@ -5181,6 +5300,274 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB WORKSPACE: PUBLISHER PLANS MANAGER */}
+        {activeTab === "plans" && (
+          <div className="space-y-8" id="admin_plans_workspace">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
+                  <Sparkles className="w-8 h-8 text-indigo-400" />
+                  Publisher Plans & Dynamic CPM Rates
+                </h1>
+                <p className="text-xs text-slate-400 mt-1">
+                  Configure custom plans with different CPM rates, assigned shorteners, and blog page routing. Users can switch plans freely.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingPlanId(null);
+                  setPlanFormData({
+                    id: "",
+                    name: "",
+                    cpm: 10.0,
+                    shortenerIds: externalApis.map(s => s.id),
+                    blogPageUrl: "https://thunder-appz.eu.org",
+                    description: "",
+                    isDefault: false,
+                    enabled: true,
+                    requirements: ""
+                  });
+                }}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-indigo-600/20 transition flex items-center gap-2 cursor-pointer shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create New Plan</span>
+              </button>
+            </div>
+
+            {planSaveMsg && (
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center gap-3 text-emerald-400 text-xs font-bold">
+                <Check className="w-4 h-4" />
+                <span>{planSaveMsg}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Form Side */}
+              <div className="lg:col-span-5 bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl backdrop-blur-md shadow-xl">
+                <h3 className="font-extrabold text-white text-base mb-4 flex items-center gap-2">
+                  <Edit2 className="w-4 h-4 text-indigo-400" />
+                  {editingPlanId ? "Edit Publisher Plan" : "Create New Publisher Plan"}
+                </h3>
+
+                <form onSubmit={handleSavePlan} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Plan Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. VIP Publisher Plan"
+                      value={planFormData.name}
+                      onChange={(e) => setPlanFormData({ ...planFormData, name: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-indigo-500 font-semibold"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">CPM Rate ($/1,000 views) *</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        required
+                        placeholder="10.00"
+                        value={planFormData.cpm}
+                        onChange={(e) => setPlanFormData({ ...planFormData, cpm: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-emerald-400 outline-none focus:border-indigo-500 font-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Blog Page URL</label>
+                      <input
+                        type="text"
+                        placeholder="https://thunder-appz.eu.org"
+                        value={planFormData.blogPageUrl}
+                        onChange={(e) => setPlanFormData({ ...planFormData, blogPageUrl: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-indigo-300 outline-none focus:border-indigo-500 font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Assign Integrated Shorteners</label>
+                    <p className="text-[11px] text-slate-500 mb-2">Check shortener APIs used in this plan's sequential chain:</p>
+                    <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 max-h-48 overflow-y-auto space-y-2">
+                      {externalApis.length === 0 ? (
+                        <p className="text-xs text-slate-500 font-medium">No external shorteners added in system.</p>
+                      ) : (
+                        externalApis.map((shortener) => {
+                          const isChecked = (planFormData.shortenerIds || []).includes(shortener.id);
+                          return (
+                            <label key={shortener.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-900 cursor-pointer text-xs">
+                              <span className="font-bold text-slate-200 flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleTogglePlanShortener(shortener.id)}
+                                  className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                                />
+                                {shortener.name}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500">{shortener.apiUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Description</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Brief description of the plan shown on the Plans page..."
+                      value={planFormData.description}
+                      onChange={(e) => setPlanFormData({ ...planFormData, description: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Traffic Requirements</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 10,000+ views/day from Telegram"
+                      value={planFormData.requirements}
+                      onChange={(e) => setPlanFormData({ ...planFormData, requirements: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-6 pt-2">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={planFormData.isDefault}
+                        onChange={(e) => setPlanFormData({ ...planFormData, isDefault: e.target.checked })}
+                        className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                      />
+                      <span>Make Default Plan</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={planFormData.enabled}
+                        onChange={(e) => setPlanFormData({ ...planFormData, enabled: e.target.checked })}
+                        className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                      />
+                      <span>Plan Enabled</span>
+                    </label>
+                  </div>
+
+                  <div className="pt-2 flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={planSaveLoading}
+                      className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {planSaveLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      <span>{editingPlanId ? "Update Plan" : "Create Plan"}</span>
+                    </button>
+                    {editingPlanId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingPlanId(null);
+                          setPlanFormData({
+                            id: "",
+                            name: "",
+                            cpm: 10.0,
+                            shortenerIds: externalApis.map(s => s.id),
+                            blogPageUrl: "https://thunder-appz.eu.org",
+                            description: "",
+                            isDefault: false,
+                            enabled: true,
+                            requirements: ""
+                          });
+                        }}
+                        className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+
+              {/* Plans Table Side */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden backdrop-blur-md shadow-xl">
+                  <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                    <h3 className="font-extrabold text-white text-sm">Configured Publisher Plans ({adminPlansList.length})</h3>
+                    <span className="text-[11px] text-slate-400">Users select plans in dashboard</span>
+                  </div>
+
+                  <div className="divide-y divide-slate-800">
+                    {adminPlansList.map((plan) => {
+                      const matchedShortenerCount = plan.shortenerIds?.length || 0;
+                      return (
+                        <div key={plan.id} className="p-4 hover:bg-slate-850/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-white text-base">{plan.name}</span>
+                              {plan.isDefault && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                                  Default
+                                </span>
+                              )}
+                              {!plan.enabled && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                                  Disabled
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-xs text-emerald-400 font-extrabold">
+                              ${plan.cpm.toFixed(2)} CPM Rate
+                            </p>
+
+                            <p className="text-xs text-slate-400 line-clamp-1">
+                              {plan.description || "No description provided."}
+                            </p>
+
+                            <div className="flex items-center gap-3 text-[11px] text-slate-500 pt-1 font-mono">
+                              <span>Shorteners: {matchedShortenerCount} assigned</span>
+                              <span>•</span>
+                              <span className="truncate max-w-[200px]">Blog: {plan.blogPageUrl ? plan.blogPageUrl.replace(/^https?:\/\//, "") : "thunder-appz.eu.org"}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => handleStartEditPlan(plan)}
+                              className="px-3 py-2 bg-slate-800 hover:bg-indigo-600 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
+
+                            {!plan.isDefault && (
+                              <button
+                                onClick={() => handleDeletePlan(plan.id)}
+                                className="p-2 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-xl transition cursor-pointer"
+                                title="Delete Plan"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

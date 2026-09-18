@@ -43,6 +43,8 @@ import {
   RefreshCw,
   Info,
   CheckCircle2,
+  Sparkles,
+  ArrowUpRight,
   Search
 } from "lucide-react";
 import QRCode from "qrcode";
@@ -122,11 +124,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
   const [userAccount, setUserAccount] = useState(user.withdrawalAccount || "");
   const [profileSuccess, setProfileSuccess] = useState("");
 
-  // Faucet state
-  const [faucetModeEnabled, setFaucetModeEnabled] = useState(user.enableFaucetMode || false);
-  const [showFaucetModal, setShowFaucetModal] = useState(false);
-  const [faucetModalLoading, setFaucetModalLoading] = useState(false);
-  const [faucetSettingsSuccess, setFaucetSettingsSuccess] = useState("");
+  // Publisher Plans state
+  const [plansList, setPlansList] = useState<any[]>([]);
+  const [activePlan, setActivePlan] = useState<any>(null);
+  const [planSwitchLoading, setPlanSwitchLoading] = useState(false);
+  const [planSwitchSuccess, setPlanSwitchSuccess] = useState("");
 
   // Advanced shortener options state
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -248,8 +250,16 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
           } catch (e) {}
           setUserMethod(freshUser.user.withdrawalMethod || "");
           setUserAccount(freshUser.user.withdrawalAccount || "");
-          setFaucetModeEnabled(!!freshUser.user.enableFaucetMode);
-          setShowFaucetModal(false);
+        }
+
+        const plansRes = await fetchApi("/plans").catch(() => null);
+        if (plansRes?.plans) {
+          setPlansList(plansRes.plans);
+          const userPlanId = freshUser?.user?.planId || currentUser?.planId || "default";
+          const currentPlanObj = plansRes.plans.find((p: any) => p.id === userPlanId && p.enabled)
+            || plansRes.plans.find((p: any) => p.isDefault)
+            || plansRes.plans[0];
+          setActivePlan(currentPlanObj);
         }
       } catch (userErr) {
         console.error("Failed to refresh user profile data:", userErr);
@@ -397,51 +407,32 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
     }
   };
 
-  const handleToggleFaucetMode = async (enabled: boolean) => {
+  const handleSwitchUserPlan = async (targetPlanId: string) => {
+    if (!targetPlanId) return;
     try {
-      setFaucetModalLoading(true);
-      const res = await fetchApi("/users/faucet-settings", {
+      setPlanSwitchLoading(true);
+      const res = await fetchApi("/users/switch-plan", {
         method: "POST",
         body: JSON.stringify({
           userId: currentUser.id,
-          enableFaucetMode: enabled
+          planId: targetPlanId
         })
       });
-      if (res.success && res.user) {
+      if (res?.success && res.user) {
         setCurrentUser(res.user);
-        setFaucetModeEnabled(!!res.user.enableFaucetMode);
-        setFaucetSettingsSuccess("Faucet Mode updated successfully!");
-        setTimeout(() => setFaucetSettingsSuccess(""), 3000);
+        localStorage.setItem("tglinks_user", JSON.stringify(res.user));
+        const newlySelected = plansList.find((p) => p.id === targetPlanId);
+        if (newlySelected) setActivePlan(newlySelected);
+        setPlanSwitchSuccess(`Active plan updated to ${newlySelected?.name || "selected plan"}!`);
+        setTimeout(() => setPlanSwitchSuccess(""), 4000);
+      } else {
+        alert(res?.error || "Failed to switch plan.");
       }
     } catch (err) {
       console.error(err);
-      alert("Failed to update Faucet Mode settings.");
+      alert("Failed to update active plan.");
     } finally {
-      setFaucetModalLoading(false);
-    }
-  };
-
-  const handleDismissFaucetModal = async (enableFaucetMode: boolean) => {
-    try {
-      setFaucetModalLoading(true);
-      const res = await fetchApi("/users/faucet-settings", {
-        method: "POST",
-        body: JSON.stringify({
-          userId: currentUser.id,
-          enableFaucetMode,
-          faucetPromptSeen: true
-        })
-      });
-      if (res.success && res.user) {
-        setCurrentUser(res.user);
-        setFaucetModeEnabled(!!res.user.enableFaucetMode);
-        setShowFaucetModal(false);
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Failed to save Faucet settings.");
-    } finally {
-      setFaucetModalLoading(false);
+      setPlanSwitchLoading(false);
     }
   };
 
@@ -674,43 +665,24 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
         {/* TAB WORKSPACE: OVERVIEW */}
         {activeTab === "overview" && (
           <div className="space-y-8" id="overview_workspace">
-            {faucetModeEnabled ? (
-              <div className="bg-amber-950/20 border border-amber-900/30 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-                    <AlertTriangle className="w-4.5 h-4.5" />
-                    Faucet Mode is Enabled
-                  </div>
-                  <p className="text-xs text-slate-300 leading-normal">
-                    Your account is currently running in <strong>Faucet Mode</strong>. Faucet traffic is allowed, and is correctly routed through high-capacity shorteners. Do not send standard organic traffic to your links while in Faucet Mode, as CPM calculation might differ.
-                  </p>
+            <div className="bg-slate-900/60 border border-slate-800/80 p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 backdrop-blur-md shadow-xl">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-indigo-400 font-extrabold text-sm">
+                  <Sparkles className="w-4.5 h-4.5 text-indigo-400" />
+                  Active Plan: <span className="text-white uppercase tracking-wider bg-indigo-500/10 px-2.5 py-0.5 rounded-lg border border-indigo-500/20">{activePlan?.name || "Default Plan"}</span>
                 </div>
-                <button
-                  onClick={() => handleToggleFaucetMode(false)}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition shrink-0 cursor-pointer"
-                >
-                  Disable Faucet Mode
-                </button>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Earn <strong className="text-emerald-400">${(activePlan?.cpm || 10).toFixed(2)} CPM</strong> per 1,000 completed views with maximum conversion rate and instant payout tracking.
+                </p>
               </div>
-            ) : (
-              <div className="bg-amber-950/20 border border-amber-900/30 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-                    <AlertTriangle className="w-4.5 h-4.5" />
-                    Faucet Traffic Warning
-                  </div>
-                  <p className="text-xs text-slate-300 leading-normal">
-                    Are you sending traffic from a crypto faucet or similar rewards platform? You <strong>must</strong> enable Faucet Mode in your settings, otherwise your traffic will violate our terms and your pending payments will be cancelled.
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleToggleFaucetMode(true)}
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-slate-950 font-extrabold text-xs rounded-xl transition shrink-0 cursor-pointer"
-                >
-                  Enable Faucet Mode
-                </button>
-              </div>
-            )}
+              <button
+                onClick={() => onNavigate("/plans")}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl transition shrink-0 cursor-pointer shadow-lg shadow-indigo-600/20 flex items-center gap-1.5"
+              >
+                <span>View All Publisher Plans</span>
+                <ArrowUpRight className="w-4 h-4" />
+              </button>
+            </div>
 
             {/* IN-DASHBOARD SHORTENER CARD */}
             <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-md">
@@ -1364,18 +1336,16 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
                   )}
                 </div>
 
-                {/* Account Faucet Mode Status */}
+                {/* Account Plan Status */}
                 <div className="mb-6 p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs space-y-1">
                   <div className="flex items-center justify-between">
-                    <p className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">Account Traffic Mode</p>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${faucetModeEnabled ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-800 text-slate-400 border-slate-700"}`}>
-                      {faucetModeEnabled ? "🚰 FAUCET MODE ON" : "🌐 ORGANIC TRAFFIC"}
+                    <p className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">Active Publisher Plan</p>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-indigo-500/10 text-indigo-400 border-indigo-500/20 uppercase">
+                      {activePlan?.name || "Default Plan"}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-400 font-medium mt-1">
-                    {faucetModeEnabled 
-                      ? "Your account is set to Crypto Faucet Mode. Admins verify traffic referrers prior to payout approval."
-                      : "Organic traffic mode active. You can toggle Faucet Mode in your account Settings."}
+                    Your account is earning <strong className="text-emerald-400">${(activePlan?.cpm || 10).toFixed(2)} CPM</strong>. You can change your plan anytime under Publisher Plan Settings.
                   </p>
                 </div>
 
@@ -1541,49 +1511,50 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
             <div className="mt-8 bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6">
               <h3 className="font-extrabold text-white text-base mb-2 flex items-center gap-2">
                 <SlidersHorizontal className="w-5 h-5 text-indigo-400" />
-                Faucet Integration Settings
+                Publisher Plan Settings
               </h3>
               <p className="text-xs text-slate-400 mb-6 leading-normal">
-                If you integrate your TG Links with a faucet platform, enable Faucet Mode below. This ensures faucet traffic is correctly routed through faucet-specific high-capacity shorteners.
+                Choose the publisher plan that best matches your traffic model. Each plan comes with transparent CPM rates and designated shortener pipelines.
               </p>
 
-              {faucetSettingsSuccess && (
+              {planSwitchSuccess && (
                 <div className="mb-4 p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs font-semibold flex items-start gap-2">
                   <Check className="w-4 h-4 flex-shrink-0 text-emerald-400 mt-0.5" />
-                  <span>{faucetSettingsSuccess}</span>
+                  <span>{planSwitchSuccess}</span>
                 </div>
               )}
 
-              <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800/80">
-                <div className="space-y-1 pr-4">
-                  <div className="text-sm font-bold text-white flex items-center gap-2">
-                    Faucet Mode
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${faucetModeEnabled ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-slate-800 text-slate-500"}`}>
-                      {faucetModeEnabled ? "ENABLED" : "DISABLED"}
-                    </span>
+              <div className="p-4 bg-slate-950 rounded-xl border border-slate-800/80 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Select Active Plan</label>
+                    <p className="text-[11px] text-slate-500">Switching takes effect immediately for all your shortened links.</p>
                   </div>
-                  <p className="text-[11px] text-slate-500 leading-normal">
-                    Turn this on ONLY if you are sending automated/incentivized traffic from a crypto faucet. Non-faucet users should keep this disabled.
-                  </p>
+                  <select
+                    value={activePlan?.id || "default"}
+                    onChange={(e) => handleSwitchUserPlan(e.target.value)}
+                    disabled={planSwitchLoading}
+                    className="bg-slate-900 border border-slate-700 text-white font-bold text-xs rounded-xl px-4 py-2.5 outline-none focus:border-indigo-500 transition cursor-pointer"
+                  >
+                    {plansList.map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {plan.name} — ${plan.cpm.toFixed(2)} CPM {plan.isDefault ? "(Default)" : ""}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                
-                <button
-                  onClick={() => handleToggleFaucetMode(!faucetModeEnabled)}
-                  disabled={faucetModalLoading}
-                  className={`px-4 py-2 font-bold text-xs rounded-xl transition cursor-pointer shrink-0 ${faucetModeEnabled ? "bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30" : "bg-indigo-600 hover:bg-indigo-700 text-white shadow"}`}
-                >
-                  {faucetModalLoading ? "Updating..." : faucetModeEnabled ? "Disable Faucet Mode" : "Enable Faucet Mode"}
-                </button>
-              </div>
 
-              {faucetModeEnabled && (
-                <div className="mt-4 p-3.5 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-300 text-xs leading-normal font-medium flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-                  <span>
-                    <strong>Warning:</strong> Since Faucet Mode is enabled, you will only use the Faucet API URL shorteners defined by the Admin. Do not send standard organic traffic to your links while in Faucet Mode, as CPM calculation might differ.
-                  </span>
+                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Want to inspect shortener steps & requirements?</span>
+                  <button
+                    onClick={() => onNavigate("/plans")}
+                    className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 transition"
+                  >
+                    <span>View Full Plans Table</span>
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
           </div>
         )}

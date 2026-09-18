@@ -12,6 +12,18 @@ export interface PtcAdItem {
   active?: boolean;
 }
 
+export interface PublisherPlan {
+  id: string;
+  name: string;
+  cpm: number;
+  shortenerIds: string[];
+  blogPageUrl: string;
+  description: string;
+  isDefault: boolean;
+  enabled: boolean;
+  requirements?: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -25,8 +37,7 @@ export interface User {
   advertiserBalance?: number; // Separate advertiser balance (non-withdrawable)
   customCpm?: number; // Custom CPM set by admin for this user
   apiToken: string; // Dynamic API Token for programmatic integration
-  enableFaucetMode?: boolean; // Faucet Mode setting for faucet traffic users
-  faucetPromptSeen?: boolean; // Track if user has seen the initial faucet prompt
+  planId?: string; // Active publisher traffic plan ID
 }
 
 export interface Link {
@@ -84,7 +95,7 @@ export interface Withdrawal {
   account: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
-  userFaucetMode?: boolean;
+  userPlanId?: string;
   totalUserClicks?: number;
   trafficSources?: TrafficSource[];
 }

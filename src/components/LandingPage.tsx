@@ -3,6 +3,7 @@ import { ArrowRight, Link2, Eye, ShieldAlert, Sparkles, DollarSign, Activity, Fi
 import { motion } from "motion/react";
 import { fetchApi } from "../lib/api";
 import SiteLogo, { getCachedSettings } from "./SiteLogo";
+import PlansPage from "./PlansPage";
 
 const getBaseShortUrl = () => {
   const hostname = window.location.hostname;
@@ -174,10 +175,10 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
               Home
             </button>
             <button 
-              onClick={() => changeTab("rates", "/rates")} 
-              className={`hover:text-indigo-400 transition ${activeTab === "rates" ? "text-indigo-400 border-b-2 border-indigo-500 pb-1" : ""}`}
+              onClick={() => changeTab("plans", "/plans")} 
+              className={`hover:text-indigo-400 transition ${activeTab === "rates" || activeTab === "plans" ? "text-indigo-400 border-b-2 border-indigo-500 pb-1" : ""}`}
             >
-              Publisher Rates
+              Publisher Plans
             </button>
             <button 
               onClick={() => {
@@ -646,57 +647,14 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
           </div>
         )}
 
-        {/* TAB 2: PUBLISHER RATES */}
-        {activeTab === "rates" && (
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16" id="tab_rates">
-            <div className="text-center mb-12">
-              <span className="text-xs font-bold uppercase tracking-widest text-indigo-400">Earnings Calculator</span>
-              <h1 className="text-4xl font-extrabold text-white tracking-tight mt-1">Publisher Payout CPM Rates</h1>
-              <p className="text-slate-400 mt-2">See how much you will earn per 1,000 views of your shortened URLs based on visitor country.</p>
-            </div>
-
-            <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-950 text-slate-400 font-extrabold text-xs uppercase tracking-wider border-b border-slate-800">
-                    <th className="py-4 px-6">Country Flag & Name</th>
-                    <th className="py-4 px-6 text-right">Payout per 1,000 Views (CPM)</th>
-                    <th className="py-4 px-6 text-center">Traffic Source Allowed</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800 text-sm text-slate-300">
-                  {countries.map((country, idx) => (
-                    <tr key={idx} className="hover:bg-slate-850/40 transition">
-                      <td className="py-4 px-6 font-semibold text-white flex items-center gap-3">
-                        <span className="text-xl">
-                          {country.code === "US" && "🇺🇸"}
-                          {country.code === "GB" && "🇬🇧"}
-                          {country.code === "DE" && "🇩🇪"}
-                          {country.code === "CA" && "🇨🇦"}
-                          {country.code === "IN" && "🇮🇳"}
-                          {country.code === "ID" && "🇮🇩"}
-                          {country.code === "GL" && "🌐"}
-                        </span>
-                        {country.name}
-                      </td>
-                      <td className="py-4 px-6 text-right font-bold text-emerald-450 text-base">
-                        ${country.cpm.toFixed(2)}
-                      </td>
-                      <td className="py-4 px-6 text-center text-xs text-slate-400 font-medium">
-                        <span className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-md">{country.type}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-8 bg-indigo-950/40 border border-indigo-900/40 p-6 rounded-2xl text-center">
-              <h4 className="font-bold text-indigo-300 mb-1">Looking for custom deals?</h4>
-              <p className="text-xs text-indigo-400 leading-relaxed max-w-xl mx-auto">
-                If you generate over 10,000 unique impressions daily from high-quality sources, contact us to unlock special VIP CPM tiers with custom payment options.
-              </p>
-            </div>
+        {/* TAB 2: PUBLISHER PLANS */}
+        {(activeTab === "rates" || activeTab === "plans") && (
+          <div id="tab_plans">
+            <PlansPage 
+              user={user} 
+              onOpenAuth={onOpenAuth} 
+              onNavigate={onNavigate} 
+            />
           </div>
         )}
 
