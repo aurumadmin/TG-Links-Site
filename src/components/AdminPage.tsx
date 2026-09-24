@@ -192,6 +192,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     description: "",
     isDefault: false,
     enabled: true,
+    isFaucetPlan: false,
     requirements: ""
   });
   const [viewsReportData, setViewsReportData] = useState<any>(null);
@@ -879,6 +880,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       description: plan.description || "",
       isDefault: !!plan.isDefault,
       enabled: plan.enabled !== undefined ? !!plan.enabled : true,
+      isFaucetPlan: plan.isFaucetPlan || plan.faucetMode || false,
       requirements: plan.requirements || ""
     });
   };
@@ -5444,7 +5446,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     />
                   </div>
 
-                  <div className="flex items-center gap-6 pt-2">
+                  <div className="flex flex-wrap items-center gap-6 pt-2">
                     <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-300">
                       <input
                         type="checkbox"
@@ -5463,6 +5465,16 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                         className="rounded border-slate-700 text-indigo-600 focus:ring-0"
                       />
                       <span>Plan Enabled</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-amber-400">
+                      <input
+                        type="checkbox"
+                        checked={!!planFormData.isFaucetPlan}
+                        onChange={(e) => setPlanFormData({ ...planFormData, isFaucetPlan: e.target.checked })}
+                        className="rounded border-slate-700 text-amber-500 focus:ring-0"
+                      />
+                      <span>🚰 Faucet Mode Plan (/faucet/ routing)</span>
                     </label>
                   </div>
 
@@ -5520,6 +5532,11 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                               {plan.isDefault && (
                                 <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
                                   Default
+                                </span>
+                              )}
+                              {plan.isFaucetPlan && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                  🚰 Faucet Mode (/faucet/)
                                 </span>
                               )}
                               {!plan.enabled && (

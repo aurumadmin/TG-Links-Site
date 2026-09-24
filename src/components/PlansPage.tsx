@@ -170,6 +170,12 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
                         Default Plan
                       </span>
                     )}
+
+                    {plan.isFaucetPlan && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                        🚰 Faucet Mode (/faucet/)
+                      </span>
+                    )}
                   </div>
 
                   {/* CPM Price display */}

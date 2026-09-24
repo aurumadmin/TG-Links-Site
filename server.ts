@@ -182,6 +182,24 @@ function getPlanForUser(user: any, db: any): any {
   };
 }
 
+function checkIsFaucetMode(user: any, link: any, db: any): boolean {
+  if (link && link.isFaucetApi) return true;
+  if (user && user.enableFaucetMode) return true;
+  if (user) {
+    const userPlan = getPlanForUser(user, db);
+    if (userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode)) return true;
+  }
+  if (link && link.userId && link.userId !== "guest") {
+    const linkOwner = (db.users || []).find((u: any) => u.id === link.userId);
+    if (linkOwner) {
+      if (linkOwner.enableFaucetMode) return true;
+      const ownerPlan = getPlanForUser(linkOwner, db);
+      if (ownerPlan && (ownerPlan.isFaucetPlan || ownerPlan.faucetMode)) return true;
+    }
+  }
+  return !!(db.settings?.enableFaucetMode);
+}
+
 function getCurrentCpmForLink(link: any, db: any): number {
   if (!link) return db.settings?.globalCpm || 10.0;
   if (link.userId && link.userId !== "guest") {
@@ -209,15 +227,19 @@ async function getExternalShortenedUrl(
 ): Promise<{ id: string; url: string; fullChainSuccess: boolean; chainedCount: number; requiredCount: number } | null> {
   const plan = db.plans?.find((p: any) => p.id === (planIdOverride || user?.planId || "default")) || getPlanForUser(user, db);
   const planShortenerIds = plan?.shortenerIds || [];
+  const isFaucetMode = checkIsFaucetMode(user, null, db);
 
   let enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
     if (!api.enabled) return false;
     if (planShortenerIds.length > 0) {
       return planShortenerIds.includes(api.id);
     }
-    return true;
+    return !!api.isFaucetApi === isFaucetMode;
   });
 
+  if (enabledApis.length === 0) {
+    enabledApis = (db.adFlyShorteners || []).filter((api: any) => api.enabled && (!!api.isFaucetApi === isFaucetMode));
+  }
   if (enabledApis.length === 0) {
     enabledApis = (db.adFlyShorteners || []).filter((api: any) => api.enabled);
   }
@@ -1108,7 +1130,20 @@ function loadDb() {
         description: "Default high-converting shortener pipeline with instant link generation and standard payout rates.",
         isDefault: true,
         enabled: true,
+        isFaucetPlan: false,
         requirements: "All traffic allowed. 100% completed view counting."
+      },
+      {
+        id: "faucet",
+        name: "Faucet Mode Plan",
+        cpm: 8.0,
+        shortenerIds: faucetIds.length > 0 ? faucetIds : allIds,
+        blogPageUrl: "https://thunder-appz.eu.org",
+        description: "Dedicated crypto faucet traffic monetization plan routing via /faucet/ with custom shortener step count.",
+        isDefault: false,
+        enabled: true,
+        isFaucetPlan: true,
+        requirements: "Crypto faucet & claim site traffic. Restricted to 1 view per IP per 24 hours."
       },
       {
         id: "standard",
@@ -1119,6 +1154,7 @@ function loadDb() {
         description: "Optimized payout tier for active creators looking for higher CPM yield.",
         isDefault: false,
         enabled: true,
+        isFaucetPlan: false,
         requirements: "General audience & web traffic."
       },
       {
@@ -1130,6 +1166,7 @@ function loadDb() {
         description: "High-yield monetization plan engineered for targeted high quality publisher traffic.",
         isDefault: false,
         enabled: true,
+        isFaucetPlan: false,
         requirements: "Targeted audience & Telegram channel traffic."
       },
       {
@@ -1141,6 +1178,7 @@ function loadDb() {
         description: "Maximized CPM tier for top-tier volume publishers and network creators.",
         isDefault: false,
         enabled: true,
+        isFaucetPlan: false,
         requirements: "High volume publishers (10,000+ views/day)."
       }
     ];
@@ -1831,11 +1869,19 @@ function setupRoutes() {
     let adFlyShortenerId = undefined;
     let adFlyShortenedUrl = undefined;
 
-    const isFaucetMode = !!user?.enableFaucetMode;
-    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
+    const userPlan = getPlanForUser(user, db);
+    const isFaucetMode = checkIsFaucetMode(user, null, db);
+    const planShortenerIds = userPlan?.shortenerIds || [];
+
+    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => {
+      if (!s.enabled) return false;
+      if (planShortenerIds.length > 0) return planShortenerIds.includes(s.id);
+      return !!s.isFaucetApi === isFaucetMode;
+    });
     const requiredSteps = enabledApis.length;
     const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
-    const intermediateUrl = `${protocol}://${host}/go-final/${code}?vtok=${initVtok}`;
+    const targetPath = isFaucetMode ? "faucet" : "go-final";
+    const intermediateUrl = `${protocol}://${host}/${targetPath}/${code}?vtok=${initVtok}`;
 
     const external = await getExternalShortenedUrl(intermediateUrl, db, user, user?.planId);
     if (external) {
@@ -2068,11 +2114,19 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const protocol = getRequestProtocol(req);
     const host = getRequestHost(req);
 
-    const isFaucetMode = !!user?.enableFaucetMode;
-    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
+    const userPlan = getPlanForUser(user, db);
+    const isFaucetMode = checkIsFaucetMode(user, null, db);
+    const planShortenerIds = userPlan?.shortenerIds || [];
+
+    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => {
+      if (!s.enabled) return false;
+      if (planShortenerIds.length > 0) return planShortenerIds.includes(s.id);
+      return !!s.isFaucetApi === isFaucetMode;
+    });
     const requiredSteps = enabledApis.length;
     const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
-    const intermediateUrl = `${protocol}://${host}/go-final/${code}?vtok=${initVtok}`;
+    const targetPath = isFaucetMode ? "faucet" : "go-final";
+    const intermediateUrl = `${protocol}://${host}/${targetPath}/${code}?vtok=${initVtok}`;
 
     const external = await getExternalShortenedUrl(intermediateUrl, db, user, user?.planId);
     if (external) {
@@ -2378,11 +2432,14 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const user = link.userId !== "guest" ? db.users.find((u: any) => u.id === link.userId) : null;
+    const userPlan = user ? getPlanForUser(user, db) : null;
+    const planShortenerIds = userPlan?.shortenerIds || [];
     const protocol = getRequestProtocol(req);
     const host = getRequestHost(req);
 
     const enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
       if (!api.enabled) return false;
+      if (planShortenerIds.length > 0) return planShortenerIds.includes(api.id);
       return !!api.isFaucetApi === isFaucetMode;
     });
 
@@ -2429,21 +2486,28 @@ Sitemap: ${baseUrl}/sitemap.xml`
   // --- GATEWAY AND REFERRER REDIRECTIONS ---
   
   // Redirect visitors from shortlink domains (e.g. tglinks.eu.cc) to the registered safelink blog domain (thunder-appz.eu.org)
-  app.get("/go/:code", (req, res, next) => {
+  app.get(["/go/:code", "/faucet/:code"], (req, res, next) => {
     const hostHeader = getRequestHost(req);
     const isProd = !hostHeader.includes("localhost") && !hostHeader.includes("127.0.0.1") && !hostHeader.includes("ais-dev") && !hostHeader.includes("ais-pre");
     
     const db = loadDb();
-    const registeredDomain = (db.settings?.adslabRegisteredDomain || "https://thunder-appz.eu.org").replace(/\/+$/, "");
+    const { code } = req.params;
+    const link = db.links?.find((l: any) => l.code === code);
+    const linkOwner = link ? db.users?.find((u: any) => u.id === link.userId) : null;
+    const userPlan = linkOwner ? getPlanForUser(linkOwner, db) : null;
+    const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
+
+    const registeredDomain = (userPlan?.blogPageUrl || db.settings?.adslabRegisteredDomain || "https://thunder-appz.eu.org").replace(/\/+$/, "");
     let targetHost = "thunder-appz.eu.org";
     try {
       targetHost = new URL(registeredDomain).hostname;
     } catch (e) {}
 
+    const targetRoute = isFaucetMode ? "faucet" : "go";
+
     if (isProd && !hostHeader.includes(targetHost)) {
-      const { code } = req.params;
       const queryString = req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : "";
-      return res.redirect(`${registeredDomain}/go/${code}${queryString}`);
+      return res.redirect(`${registeredDomain}/${targetRoute}/${code}${queryString}`);
     }
     
     next();
@@ -2484,12 +2548,17 @@ Sitemap: ${baseUrl}/sitemap.xml`
   });
 
   // --- EXTERNAL SHORTENER CALLBACK AND LANDING ENDPOINT ---
-  app.get("/go-final/:code", async (req, res) => {
+  app.get(["/go-final/:code", "/faucet-final/:code", "/faucet/:code"], async (req, res, next) => {
     const { code } = req.params;
     const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
     const vtok = typeof rawVtok === "string" ? rawVtok.trim() : "";
     const ip = getClientIp(req);
     const db = loadDb();
+
+    // If request to /faucet/:code has no vtok parameter, pass to next() so the SPA handles the landing page
+    if (req.path.startsWith("/faucet") && !vtok && !req.path.includes("final")) {
+      return next();
+    }
 
     const link = db.links.find((l: any) => l.code === code);
     if (!link) {
@@ -2510,8 +2579,15 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
-    const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
-    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => s.enabled && (!!s.isFaucetApi === isFaucetMode));
+    const ownerPlan = linkOwner ? getPlanForUser(linkOwner, db) : null;
+    const planShortenerIds = ownerPlan?.shortenerIds || [];
+    const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
+
+    let enabledApis = (db.adFlyShorteners || []).filter((s: any) => {
+      if (!s.enabled) return false;
+      if (planShortenerIds.length > 0) return planShortenerIds.includes(s.id);
+      return !!s.isFaucetApi === isFaucetMode;
+    });
     const requiredSteps = enabledApis.length;
 
     // Strictly enforce verification token check and required shortener step count
@@ -2543,7 +2619,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
             <div class="badge">Shortener Verification Required</div>
             <h2>Access Verification Incomplete</h2>
             <p>You cannot access this destination without completing all required API shortener steps. Please visit the short link again to complete verification.</p>
-            <a href="/go/${code}" class="btn">Start Shortener Verification →</a>
+            <a href="${isFaucetMode ? '/faucet/' : '/go/'}${code}" class="btn">Start Shortener Verification →</a>
           </div>
         </body>
         </html>
@@ -3300,7 +3376,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   // POST /api/admin/plans - Admin create/update plan
   app.post("/api/admin/plans", requireAdmin, (req, res) => {
-    const { id, name, cpm, shortenerIds, blogPageUrl, description, isDefault, enabled, requirements } = req.body;
+    const { id, name, cpm, shortenerIds, blogPageUrl, description, isDefault, enabled, requirements, isFaucetPlan } = req.body;
     if (!name || cpm === undefined || Number(cpm) < 0) {
       return res.status(400).json({ error: "Valid plan name and non-negative CPM are required" });
     }
@@ -3324,6 +3400,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       plan.isDefault = !!isDefault;
       plan.enabled = enabled !== undefined ? !!enabled : true;
       plan.requirements = requirements || "";
+      plan.isFaucetPlan = !!isFaucetPlan;
     } else {
       plan = {
         id: planId,
@@ -3334,7 +3411,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
         description: description || "",
         isDefault: !!isDefault,
         enabled: enabled !== undefined ? !!enabled : true,
-        requirements: requirements || ""
+        requirements: requirements || "",
+        isFaucetPlan: !!isFaucetPlan
       };
       db.plans.push(plan);
     }

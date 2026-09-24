@@ -22,6 +22,7 @@ export interface PublisherPlan {
   isDefault: boolean;
   enabled: boolean;
   requirements?: string;
+  isFaucetPlan?: boolean;
 }
 
 export interface User {
