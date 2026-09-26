@@ -164,9 +164,24 @@ function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): nu
   return (user && user.customCpm) ? user.customCpm : dbSettings.globalCpm;
 }
 
+function findUserInDb(db: any, rawIdentifier: any): any {
+  if (!rawIdentifier) return null;
+  const clean = String(rawIdentifier).trim().toLowerCase();
+  const users = db.users || [];
+  return users.find((u: any) => {
+    if (!u) return false;
+    const id = u.id ? String(u.id).toLowerCase() : "";
+    const email = u.email ? String(u.email).toLowerCase() : "";
+    const emailPrefix = email.includes("@") ? email.split("@")[0] : "";
+    const username = u.username ? String(u.username).toLowerCase() : "";
+    return clean === id || clean === email || clean === emailPrefix || clean === username;
+  }) || null;
+}
+
 function getPlanForUser(user: any, db: any): any {
   const plans = db.plans || [];
-  const userPlanId = user?.planId || "default";
+  const userObj = typeof user === "string" ? findUserInDb(db, user) : user;
+  const userPlanId = userObj?.planId || "default";
   const found = plans.find((p: any) => p.id === userPlanId && p.enabled);
   if (found) return found;
   const defaultPlan = plans.find((p: any) => p.isDefault && p.enabled) || plans.find((p: any) => p.id === "default") || plans[0];
@@ -184,13 +199,16 @@ function getPlanForUser(user: any, db: any): any {
 
 function checkIsFaucetMode(user: any, link: any, db: any): boolean {
   if (user) {
-    if (user.enableFaucetMode) return true;
-    const userPlan = getPlanForUser(user, db);
-    if (userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode || userPlan.id === "faucet")) return true;
-    return false;
+    const userObj = typeof user === "string" ? findUserInDb(db, user) : user;
+    if (userObj) {
+      if (userObj.enableFaucetMode) return true;
+      const userPlan = getPlanForUser(userObj, db);
+      if (userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode || userPlan.id === "faucet")) return true;
+      return false;
+    }
   }
-  if (link && link.userId && link.userId !== "guest") {
-    const linkOwner = (db.users || []).find((u: any) => u.id === link.userId);
+  if (link) {
+    const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
     if (linkOwner) {
       if (linkOwner.enableFaucetMode) return true;
       const ownerPlan = getPlanForUser(linkOwner, db);
@@ -204,16 +222,14 @@ function checkIsFaucetMode(user: any, link: any, db: any): boolean {
 
 function getCurrentCpmForLink(link: any, db: any): number {
   if (!link) return db.settings?.globalCpm || 10.0;
-  if (link.userId && link.userId !== "guest") {
-    const user = (db.users || []).find((u: any) => u.id === link.userId);
-    if (user) {
-      if (user.customCpm !== undefined && user.customCpm !== null && user.customCpm > 0) {
-        return user.customCpm;
-      }
-      const userPlan = getPlanForUser(user, db);
-      if (userPlan && userPlan.cpm) {
-        return userPlan.cpm;
-      }
+  const user = findUserInDb(db, link?.userId) || findUserInDb(db, link?.userEmail);
+  if (user) {
+    if (user.customCpm !== undefined && user.customCpm !== null && user.customCpm > 0) {
+      return user.customCpm;
+    }
+    const userPlan = getPlanForUser(user, db);
+    if (userPlan && userPlan.cpm) {
+      return userPlan.cpm;
     }
   }
   if (link.cpm && link.cpm > 0) return link.cpm;
@@ -2231,7 +2247,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     link.lastViewedAt = new Date().toISOString();
     saveDb(db);
 
-    const linkOwner = db.users.find((u: any) => u.id === link.userId);
+    const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
 
     // Include ad configs in resolution (allow user to complete own shortener pages first)
@@ -2415,7 +2431,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return res.status(410).json({ error: "This shortened link has expired and is no longer active." });
     }
 
-    const linkOwner = db.users.find((u: any) => u.id === link.userId);
+    const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
 
     const todayIST = getISTDateString();
@@ -2436,7 +2452,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       });
     }
 
-    const user = link.userId !== "guest" ? db.users.find((u: any) => u.id === link.userId) : null;
+    const user = link.userId !== "guest" ? linkOwner : null;
     const userPlan = user ? getPlanForUser(user, db) : null;
     const planShortenerIds = userPlan?.shortenerIds || [];
     const protocol = getRequestProtocol(req);
@@ -2500,7 +2516,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const db = loadDb();
     const { code } = req.params;
     const link = db.links?.find((l: any) => l.code === code);
-    const linkOwner = link ? db.users?.find((u: any) => u.id === link.userId) : null;
+    const linkOwner = link ? (findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail)) : null;
     const userPlan = linkOwner ? getPlanForUser(linkOwner, db) : null;
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
 
@@ -2589,7 +2605,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       targetUrl = "https://" + targetUrl;
     }
 
-    const linkOwner = db.users.find((u: any) => u.id === link.userId);
+    const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
     const ownerPlan = linkOwner ? getPlanForUser(linkOwner, db) : null;
     const planShortenerIds = ownerPlan?.shortenerIds || [];
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
