@@ -183,7 +183,6 @@ function getPlanForUser(user: any, db: any): any {
 }
 
 function checkIsFaucetMode(user: any, link: any, db: any): boolean {
-  if (link && link.isFaucetApi) return true;
   if (user) {
     if (user.enableFaucetMode) return true;
     const userPlan = getPlanForUser(user, db);
@@ -199,6 +198,7 @@ function checkIsFaucetMode(user: any, link: any, db: any): boolean {
       return false;
     }
   }
+  if (link && link.isFaucetApi) return true;
   return false;
 }
 
