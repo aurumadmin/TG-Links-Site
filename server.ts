@@ -198,24 +198,17 @@ function getPlanForUser(user: any, db: any): any {
 }
 
 function checkIsFaucetMode(user: any, link: any, db: any): boolean {
-  if (user) {
-    const userObj = typeof user === "string" ? findUserInDb(db, user) : user;
-    if (userObj) {
-      if (userObj.enableFaucetMode) return true;
-      const userPlan = getPlanForUser(userObj, db);
-      if (userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode || userPlan.id === "faucet")) return true;
-      return false;
-    }
+  let userObj = typeof user === "string" ? findUserInDb(db, user) : user;
+  if (!userObj && link) {
+    userObj = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
   }
-  if (link) {
-    const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
-    if (linkOwner) {
-      if (linkOwner.enableFaucetMode) return true;
-      const ownerPlan = getPlanForUser(linkOwner, db);
-      if (ownerPlan && (ownerPlan.isFaucetPlan || ownerPlan.faucetMode || ownerPlan.id === "faucet")) return true;
-      return false;
-    }
+
+  if (userObj) {
+    const userPlan = getPlanForUser(userObj, db);
+    const isPlanFaucet = Boolean(userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode || userPlan.id === "faucet"));
+    return isPlanFaucet;
   }
+
   if (link && link.isFaucetApi) return true;
   return false;
 }
