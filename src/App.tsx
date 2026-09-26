@@ -297,6 +297,7 @@ export default function App() {
           initialTab={activeTab as any}
           onLogout={handleLogout} 
           onNavigate={handleNavigate} 
+          onUserUpdated={(updatedUser) => setUser(updatedUser)}
         />
         <FloatingTelegramButton 
           channelUrl={siteSettings?.telegramChannelUrl} 
@@ -341,6 +342,7 @@ export default function App() {
     <>
       <LandingPage 
         user={user} 
+        onUserUpdated={(updatedUser) => setUser(updatedUser)}
         initialTab={activeTab}
         siteSettings={siteSettings}
         isSettingsLoaded={isSettingsLoaded}

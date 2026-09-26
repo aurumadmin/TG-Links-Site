@@ -14,13 +14,14 @@ const getBaseShortUrl = () => {
 interface LandingPageProps {
   onNavigate: (page: string) => void;
   user: any;
+  onUserUpdated?: (updatedUser: any) => void;
   onOpenAuth: () => void;
   initialTab?: string;
   siteSettings?: any;
   isSettingsLoaded?: boolean;
 }
 
-export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, siteSettings: propSettings, isSettingsLoaded = true }: LandingPageProps) {
+export default function LandingPage({ onNavigate, user, onUserUpdated, onOpenAuth, initialTab, siteSettings: propSettings, isSettingsLoaded = true }: LandingPageProps) {
   const [url, setUrl] = useState("");
   const [shortenedLink, setShortenedLink] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -652,6 +653,7 @@ export default function LandingPage({ onNavigate, user, onOpenAuth, initialTab, 
           <div id="tab_plans">
             <PlansPage 
               user={user} 
+              onUserUpdated={onUserUpdated}
               onOpenAuth={onOpenAuth} 
               onNavigate={onNavigate} 
             />

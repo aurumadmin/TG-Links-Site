@@ -184,20 +184,22 @@ function getPlanForUser(user: any, db: any): any {
 
 function checkIsFaucetMode(user: any, link: any, db: any): boolean {
   if (link && link.isFaucetApi) return true;
-  if (user && user.enableFaucetMode) return true;
   if (user) {
+    if (user.enableFaucetMode) return true;
     const userPlan = getPlanForUser(user, db);
-    if (userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode)) return true;
+    if (userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode || userPlan.id === "faucet")) return true;
+    return false;
   }
   if (link && link.userId && link.userId !== "guest") {
     const linkOwner = (db.users || []).find((u: any) => u.id === link.userId);
     if (linkOwner) {
       if (linkOwner.enableFaucetMode) return true;
       const ownerPlan = getPlanForUser(linkOwner, db);
-      if (ownerPlan && (ownerPlan.isFaucetPlan || ownerPlan.faucetMode)) return true;
+      if (ownerPlan && (ownerPlan.isFaucetPlan || ownerPlan.faucetMode || ownerPlan.id === "faucet")) return true;
+      return false;
     }
   }
-  return !!(db.settings?.enableFaucetMode);
+  return false;
 }
 
 function getCurrentCpmForLink(link: any, db: any): number {
@@ -2227,7 +2229,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     saveDb(db);
 
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
-    const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
+    const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
 
     // Include ad configs in resolution (allow user to complete own shortener pages first)
     res.json({ 
@@ -2411,7 +2413,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const linkOwner = db.users.find((u: any) => u.id === link.userId);
-    const isFaucetMode = !!(linkOwner?.enableFaucetMode || link.isFaucetApi || db.settings.enableFaucetMode);
+    const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
 
     const todayIST = getISTDateString();
     const hasCompletedToday = db.clicksLog.some(
@@ -2504,10 +2506,14 @@ Sitemap: ${baseUrl}/sitemap.xml`
     } catch (e) {}
 
     const targetRoute = isFaucetMode ? "faucet" : "go";
+    const currentRoute = req.path.startsWith("/faucet") ? "faucet" : "go";
 
-    if (isProd && !hostHeader.includes(targetHost)) {
+    if (isProd && (!hostHeader.includes(targetHost) || currentRoute !== targetRoute)) {
       const queryString = req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : "";
       return res.redirect(`${registeredDomain}/${targetRoute}/${code}${queryString}`);
+    } else if (currentRoute !== targetRoute) {
+      const queryString = req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : "";
+      return res.redirect(`/${targetRoute}/${code}${queryString}`);
     }
     
     next();
@@ -3368,6 +3374,11 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     user.planId = plan.id;
+    if (plan.isFaucetPlan || plan.faucetMode || plan.id === "faucet") {
+      user.enableFaucetMode = true;
+    } else {
+      user.enableFaucetMode = false;
+    }
     saveDb(db);
 
     const { password: _, ...safeUser } = user;

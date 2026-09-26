@@ -73,9 +73,10 @@ interface DashboardPageProps {
   initialTab?: "overview" | "links" | "withdraw" | "settings" | "tools" | "contact";
   onLogout: () => void;
   onNavigate: (page: string) => void;
+  onUserUpdated?: (user: User) => void;
 }
 
-export default function DashboardPage({ user, initialTab, onLogout, onNavigate }: DashboardPageProps) {
+export default function DashboardPage({ user, initialTab, onLogout, onNavigate, onUserUpdated }: DashboardPageProps) {
   const [currentUser, setCurrentUser] = useState<User>(user);
   const [activeTab, setActiveTab] = useState<"overview" | "links" | "withdraw" | "settings" | "tools" | "contact">(initialTab || "overview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -421,6 +422,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate }
       if (res?.success && res.user) {
         setCurrentUser(res.user);
         localStorage.setItem("tglinks_user", JSON.stringify(res.user));
+        onUserUpdated?.(res.user);
         const newlySelected = plansList.find((p) => p.id === targetPlanId);
         if (newlySelected) setActivePlan(newlySelected);
         setPlanSwitchSuccess(`Active plan updated to ${newlySelected?.name || "selected plan"}!`);
