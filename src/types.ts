@@ -206,6 +206,7 @@ export interface SystemSettings {
   fakeExtraWithdrawn?: number;
   fakeExtraUsers?: number;
   fakeExtraLinks?: number;
+  homeTheme?: 'default' | 'cyberpunk' | 'emerald' | 'glassmorphism';
 }
 
 export interface DepositRequest {

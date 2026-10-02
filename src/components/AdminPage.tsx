@@ -112,6 +112,7 @@ const DEFAULT_ADMIN_SETTINGS: SystemSettings = {
   ptcRequiredCount: 1,
   ptcTimerSeconds: 10,
   ptcWindowFocusCheck: true,
+  homeTheme: "default",
   ptcCustomAds: [
     {
       id: "ptc-1",
@@ -2767,6 +2768,103 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       </span>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* HOMEPAGE THEME & DESIGN SELECTION SECTION */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-indigo-500/30 space-y-4">
+              <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+                <Sparkles className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-extrabold text-white text-base">Homepage Theme & Design Selector</h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                Select the active visual theme and design for the public Homepage. All themes preserve slogans (Daily payment, $10 CPM Rate, $0.25 Min Payout) and shortener functionality with distinct, production-grade visual designs.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+                {/* Theme 1: Default Dark Indigo */}
+                <div 
+                  onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'default' })}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    (sysSettings.homeTheme || 'default') === 'default'
+                      ? 'bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/30 shadow-lg shadow-indigo-950/50'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Default Theme</span>
+                    {(sysSettings.homeTheme || 'default') === 'default' && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                    )}
+                  </div>
+                  <h4 className="font-extrabold text-white text-sm">Classic Dark Indigo</h4>
+                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                    Original deep slate and indigo layout with hero vector artwork and curved feature cards.
+                  </p>
+                </div>
+
+                {/* Theme 2: Cyberpunk Neon Grid */}
+                <div 
+                  onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'cyberpunk' })}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    sysSettings.homeTheme === 'cyberpunk'
+                      ? 'bg-cyan-950/40 border-cyan-400 ring-2 ring-cyan-500/30 shadow-lg shadow-cyan-950/50'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">Cyberpunk</span>
+                    {sysSettings.homeTheme === 'cyberpunk' && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                    )}
+                  </div>
+                  <h4 className="font-extrabold text-white text-sm">Cyberpunk Neon Grid</h4>
+                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                    Futuristic terminal aesthetic with neon cyan & magenta glow, cyber HUD stats, and tech grid layout.
+                  </p>
+                </div>
+
+                {/* Theme 3: Emerald Pro Fintech */}
+                <div 
+                  onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'emerald' })}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    sysSettings.homeTheme === 'emerald'
+                      ? 'bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-500/30 shadow-lg shadow-emerald-950/50'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Emerald Pro</span>
+                    {sysSettings.homeTheme === 'emerald' && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    )}
+                  </div>
+                  <h4 className="font-extrabold text-white text-sm">Emerald Pro Fintech</h4>
+                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                    High-converting executive finance style with emerald green accents, unboxed typography, and clean depth.
+                  </p>
+                </div>
+
+                {/* Theme 4: Glassmorphism Horizon */}
+                <div 
+                  onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'glassmorphism' })}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    sysSettings.homeTheme === 'glassmorphism'
+                      ? 'bg-purple-950/40 border-purple-400 ring-2 ring-purple-500/30 shadow-lg shadow-purple-950/50'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">Glassmorphism</span>
+                    {sysSettings.homeTheme === 'glassmorphism' && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse"></span>
+                    )}
+                  </div>
+                  <h4 className="font-extrabold text-white text-sm">Glassmorphism Horizon</h4>
+                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                    Ultra-modern translucent frosted glass cards, gradient ambient glow meshes, and glowing text titles.
+                  </p>
                 </div>
               </div>
             </div>

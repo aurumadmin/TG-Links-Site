@@ -4,6 +4,9 @@ import { motion } from "motion/react";
 import { fetchApi } from "../lib/api";
 import SiteLogo, { getCachedSettings } from "./SiteLogo";
 import PlansPage from "./PlansPage";
+import CyberpunkTheme from "./home_themes/CyberpunkTheme";
+import EmeraldTheme from "./home_themes/EmeraldTheme";
+import GlassmorphismTheme from "./home_themes/GlassmorphismTheme";
 
 const getBaseShortUrl = () => {
   const hostname = window.location.hostname;
@@ -147,6 +150,40 @@ export default function LandingPage({ onNavigate, user, onUserUpdated, onOpenAut
   const countries = [
     { name: "Worldwide Deal (Global)", code: "GL", cpm: currentCpm, type: "Desktop / Mobile" },
   ];
+
+  const activeTheme = siteSettings?.homeTheme || "default";
+
+  const themeProps = {
+    siteSettings,
+    stats,
+    currentCpm,
+    formattedMinPayout,
+    url,
+    setUrl,
+    shortenedLink,
+    loading,
+    copied,
+    handleShorten,
+    copyToClipboard,
+    user,
+    onNavigate,
+    onOpenAuth,
+    changeTab,
+    getBaseShortUrl,
+    isSettingsLoaded
+  };
+
+  if (activeTab === "home") {
+    if (activeTheme === "cyberpunk") {
+      return <CyberpunkTheme {...themeProps} />;
+    }
+    if (activeTheme === "emerald") {
+      return <EmeraldTheme {...themeProps} />;
+    }
+    if (activeTheme === "glassmorphism") {
+      return <GlassmorphismTheme {...themeProps} />;
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col text-slate-200" id="landing_root">

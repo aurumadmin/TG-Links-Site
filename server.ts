@@ -229,17 +229,9 @@ function getCurrentCpmForLink(link: any, db: any): number {
   return db.settings?.globalCpm || 10.0;
 }
 
-// Helper to syndicate a link with external AdLinkFly shortener APIs dynamically based on Publisher Plan
-async function getExternalShortenedUrl(
-  finalDestinationUrl: string, 
-  db: any, 
-  user?: any,
-  planIdOverride?: string
-): Promise<{ id: string; url: string; fullChainSuccess: boolean; chainedCount: number; requiredCount: number } | null> {
-  const plan = db.plans?.find((p: any) => p.id === (planIdOverride || user?.planId || "default")) || getPlanForUser(user, db);
+// Unified helper to retrieve active integrated shorteners for a given publisher plan & faucet mode
+function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[] {
   const planShortenerIds = plan?.shortenerIds || [];
-  const isFaucetMode = checkIsFaucetMode(user, null, db);
-
   let enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
     if (!api.enabled) return false;
     if (!!api.isFaucetApi !== isFaucetMode) return false;
@@ -249,12 +241,26 @@ async function getExternalShortenedUrl(
     return true;
   });
 
-  if (enabledApis.length === 0) {
+  if (enabledApis.length === 0 && planShortenerIds.length > 0) {
     enabledApis = (db.adFlyShorteners || []).filter((api: any) => api.enabled && (!!api.isFaucetApi === isFaucetMode));
   }
   if (enabledApis.length === 0) {
     enabledApis = (db.adFlyShorteners || []).filter((api: any) => api.enabled);
   }
+
+  return enabledApis;
+}
+
+// Helper to syndicate a link with external AdLinkFly shortener APIs dynamically based on Publisher Plan
+async function getExternalShortenedUrl(
+  finalDestinationUrl: string, 
+  db: any, 
+  user?: any,
+  planIdOverride?: string
+): Promise<{ id: string; url: string; fullChainSuccess: boolean; chainedCount: number; requiredCount: number } | null> {
+  const plan = db.plans?.find((p: any) => p.id === (planIdOverride || user?.planId || "default")) || getPlanForUser(user, db);
+  const isFaucetMode = checkIsFaucetMode(user, null, db);
+  const enabledApis = getEnabledApisForPlan(plan, isFaucetMode, db);
 
   if (enabledApis.length === 0) return null;
 
@@ -2446,18 +2452,11 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const user = link.userId !== "guest" ? linkOwner : null;
-    const userPlan = user ? getPlanForUser(user, db) : null;
-    const planShortenerIds = userPlan?.shortenerIds || [];
+    const userPlan = getPlanForUser(user || linkOwner, db);
     const protocol = getRequestProtocol(req);
     const host = getRequestHost(req);
 
-    const enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
-      if (!api.enabled) return false;
-      if (!!api.isFaucetApi !== isFaucetMode) return false;
-      if (planShortenerIds.length > 0) return planShortenerIds.includes(api.id);
-      return true;
-    });
-
+    const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
     const vtok = createVerificationToken(link.code, String(ip), requiredSteps);
     const targetPath = isFaucetMode ? "faucet" : "go-final";
@@ -2599,16 +2598,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
-    const ownerPlan = linkOwner ? getPlanForUser(linkOwner, db) : null;
-    const planShortenerIds = ownerPlan?.shortenerIds || [];
+    const ownerPlan = getPlanForUser(linkOwner, db);
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
 
-    let enabledApis = (db.adFlyShorteners || []).filter((s: any) => {
-      if (!s.enabled) return false;
-      if (!!s.isFaucetApi !== isFaucetMode) return false;
-      if (planShortenerIds.length > 0) return planShortenerIds.includes(s.id);
-      return true;
-    });
+    const enabledApis = getEnabledApisForPlan(ownerPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
 
     // Strictly enforce verification token check and required shortener step count
@@ -4184,6 +4177,7 @@ ${ticket.adminReply}
       advCpmBanner300x600: s.advCpmBanner300x600 ?? 2.5,
       advCpmBannerLeft: s.advCpmBannerLeft ?? 1.5,
       advCpmBannerRight: s.advCpmBannerRight ?? 1.5,
+      homeTheme: s.homeTheme || "default",
       activeAdvertiserAds: activeAds
     });
   });
