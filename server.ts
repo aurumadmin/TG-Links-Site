@@ -2128,17 +2128,11 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     const userPlan = getPlanForUser(user, db);
     const isFaucetMode = checkIsFaucetMode(user, null, db);
-    const planShortenerIds = userPlan?.shortenerIds || [];
 
-    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => {
-      if (!s.enabled) return false;
-      if (!!s.isFaucetApi !== isFaucetMode) return false;
-      if (planShortenerIds.length > 0) return planShortenerIds.includes(s.id);
-      return true;
-    });
+    const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
     const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
-    const targetPath = isFaucetMode ? "faucet" : "go-final";
+    const targetPath = isFaucetMode ? "faucet-final" : "go-final";
     const intermediateUrl = `${protocol}://${host}/${targetPath}/${code}?vtok=${initVtok}`;
 
     const external = await getExternalShortenedUrl(intermediateUrl, db, user, user?.planId);
@@ -2452,7 +2446,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
     const vtok = createVerificationToken(link.code, String(ip), requiredSteps);
-    const targetPath = isFaucetMode ? "faucet" : "go-final";
+    const targetPath = isFaucetMode ? "faucet-final" : "go-final";
     const finalLandingUrl = `${protocol}://${host}/${targetPath}/${link.code}?vtok=${vtok}`;
 
     // Dynamically retrieve or re-evaluate the external shortened URL wrapping finalLandingUrl
