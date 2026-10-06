@@ -449,12 +449,24 @@ export default function RedirectPage({ code }: RedirectPageProps) {
   const [linkData, setLinkData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(() => getCachedSettings());
   
+  const isReturnFromSafelink = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    const sp = new URLSearchParams(window.location.search);
+    const statusInUrl = sp.get("status") || sp.get("captcha_status");
+    return (
+      window.location.pathname.startsWith("/p/") ||
+      window.location.pathname.startsWith("/callback/") ||
+      statusInUrl === "completed" ||
+      statusInUrl === "success"
+    );
+  }, []);
+
   // Redirection stepper state
   const [currentStep, setCurrentStep] = useState(1);
   const [timer, setTimer] = useState(10);
   const [isTimerFinished, setIsTimerFinished] = useState(false);
   const [verifiedHuman, setVerifiedHuman] = useState(false);
-  const [redirecting, setRedirecting] = useState(false);
+  const [redirecting, setRedirecting] = useState<boolean>(() => isReturnFromSafelink);
   const [redirectTargetUrl, setRedirectTargetUrl] = useState<string | null>(null);
 
   // AdsLab CAPTCHA Monetization & S2S Verification State
@@ -1118,17 +1130,12 @@ export default function RedirectPage({ code }: RedirectPageProps) {
 
   // Check on load/mount if user returned from AdsLab Captcha solve redirect or Safelink Blog
   useEffect(() => {
-    if (loading || error || redirecting) return;
+    if (error) return;
     try {
       const sp = new URLSearchParams(window.location.search);
       const subIdInUrl = sp.get("sub_id") || sp.get("captcha_sub_id");
       const tokenInUrl = sp.get("token") || sp.get("captcha_token");
       const statusInUrl = sp.get("status") || sp.get("captcha_status");
-
-      const isReturnFromSafelink =
-        window.location.pathname.startsWith("/p/") ||
-        statusInUrl === "completed" ||
-        statusInUrl === "success";
 
       if (isReturnFromSafelink && code) {
         setRedirecting(true);
@@ -1156,6 +1163,8 @@ export default function RedirectPage({ code }: RedirectPageProps) {
         });
         return;
       }
+
+      if (loading) return;
 
       if (subIdInUrl || tokenInUrl || statusInUrl === "success") {
         const targetSubId = subIdInUrl || captchaSubId;

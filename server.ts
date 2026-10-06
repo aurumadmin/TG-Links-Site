@@ -2498,6 +2498,119 @@ Sitemap: ${baseUrl}/sitemap.xml`
     });
   });
 
+  // Handler for returning from Safelink / Faucet Blog pages (/p/:code or /callback/:code)
+  app.get(["/p/:code", "/callback/:code"], async (req, res, next) => {
+    const { code } = req.params;
+    const ip = getClientIp(req);
+    const db = loadDb();
+
+    const link = db.links?.find((l: any) => l.code === code);
+    if (!link) return next();
+
+    if (link.status === "suspended") {
+      return res.status(403).send("This link has been suspended");
+    }
+
+    if (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now()) {
+      return res.status(410).send("This shortened link has expired and is no longer active.");
+    }
+
+    const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
+    const userPlan = getPlanForUser(linkOwner, db);
+    const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
+
+    const todayIST = getISTDateString();
+    const hasCompletedToday = db.clicksLog.some(
+      (c: any) => {
+        let loggedIp = c.ip;
+        if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+          loggedIp = loggedIp.split(",")[0].trim();
+        }
+        return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST;
+      }
+    );
+
+    if (isFaucetMode && hasCompletedToday) {
+      return res.status(429).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>429 - Faucet Mode Daily Limit Reached</title>
+          <style>
+            body { background-color: #020617; color: #f8fafc; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+            .card { background: #0f172a; border: 1px solid #1e293b; padding: 32px; border-radius: 16px; max-width: 440px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
+            h2 { color: #f59e0b; margin-top: 0; }
+            p { color: #94a3b8; font-size: 14px; line-height: 1.6; }
+            .badge { background: #78350f33; border: 1px solid #b4530944; color: #fcd34d; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: bold; margin-top: 16px; display: inline-block; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>Faucet Mode Daily Limit Reached</h2>
+            <p>Your IP address has already completed this shortener link today.</p>
+            <div class="badge">1 Completion Per IP / Daily Limit Enforced (Resets 00:00 IST)</div>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
+    const requiredSteps = enabledApis.length;
+
+    const user = link.userId !== "guest" ? linkOwner : null;
+    const protocol = getRequestProtocol(req);
+    const host = getRequestHost(req);
+
+    const vtok = createVerificationToken(link.code, String(ip), requiredSteps);
+    const targetPath = isFaucetMode ? "faucet-final" : "go-final";
+    const finalLandingUrl = `${protocol}://${host}/${targetPath}/${link.code}?vtok=${vtok}`;
+
+    if (requiredSteps > 0) {
+      // Plan HAS API shortlink(s) added from admin panel:
+      // Redirect them FIRST to complete those external shorteners!
+      const external = await getExternalShortenedUrl(finalLandingUrl, db, user, user?.planId);
+      if (external && external.fullChainSuccess && external.url) {
+        link.adFlyShortenedUrl = external.url;
+        link.adFlyShortenerId = external.id;
+        saveDb(db);
+        res.setHeader("Referrer-Policy", "no-referrer");
+        return res.redirect(302, external.url);
+      } else {
+        saveDb(db);
+        return res.status(503).send(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>503 - Shortener Network Incomplete</title>
+            <style>
+              body { background-color: #020617; color: #f8fafc; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+              .card { background: #0f172a; border: 1px solid #1e293b; padding: 32px; border-radius: 16px; max-width: 440px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
+              h2 { color: #f43f5e; margin-top: 0; }
+              p { color: #94a3b8; font-size: 14px; line-height: 1.6; }
+              .btn { display: inline-block; margin-top: 16px; padding: 12px 24px; background: #6366f1; color: white; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h2>Shortener Network Incomplete</h2>
+              <p>All integrated ad shorteners must be active to proceed. Please try again in a moment.</p>
+              <a href="${req.originalUrl}" class="btn">Retry Completion</a>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+    } else {
+      // Plan has NO API shortlinks added from admin panel:
+      // DIRECTLY redirect them to final destination link via finalLandingUrl (which verifies vtok, records click, credits wallet, and 302 redirects to link.originalUrl)!
+      res.setHeader("Referrer-Policy", "no-referrer");
+      return res.redirect(302, finalLandingUrl);
+    }
+  });
+
   // --- GATEWAY AND REFERRER REDIRECTIONS ---
   
   // Redirect visitors from shortlink domains (e.g. tglinks.eu.cc) to the registered safelink blog domain (thunder-appz.eu.org)
