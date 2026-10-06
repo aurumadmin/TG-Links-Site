@@ -231,24 +231,17 @@ function getCurrentCpmForLink(link: any, db: any): number {
 
 // Unified helper to retrieve active integrated shorteners for a given publisher plan & faucet mode
 function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[] {
-  const planShortenerIds = plan?.shortenerIds || [];
-  let enabledApis = (db.adFlyShorteners || []).filter((api: any) => {
-    if (!api.enabled) return false;
-    if (!!api.isFaucetApi !== isFaucetMode) return false;
-    if (planShortenerIds.length > 0) {
+  const planShortenerIds: string[] = Array.isArray(plan?.shortenerIds) ? plan.shortenerIds : [];
+
+  if (planShortenerIds.length > 0) {
+    return (db.adFlyShorteners || []).filter((api: any) => {
+      if (!api.enabled) return false;
       return planShortenerIds.includes(api.id);
-    }
-    return true;
-  });
-
-  if (enabledApis.length === 0 && planShortenerIds.length > 0) {
-    enabledApis = (db.adFlyShorteners || []).filter((api: any) => api.enabled && (!!api.isFaucetApi === isFaucetMode));
-  }
-  if (enabledApis.length === 0) {
-    enabledApis = (db.adFlyShorteners || []).filter((api: any) => api.enabled);
+    });
   }
 
-  return enabledApis;
+  // If no shorteners are explicitly assigned to this plan in Admin Panel, return empty array (0 shorteners required)
+  return [];
 }
 
 // Helper to syndicate a link with external AdLinkFly shortener APIs dynamically based on Publisher Plan
@@ -2472,11 +2465,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
         link.adFlyShortenedUrl = external.url;
         link.adFlyShortenerId = external.id;
       } else {
-        saveDb(db);
-        return res.status(503).json({ 
-          error: `Shortener Network Incomplete: All ${requiredSteps} integrated ad shorteners must be active to proceed. Please try again in a moment.`,
-          networkIncomplete: true 
-        });
+        // Fallback gracefully to final landing URL if API shortener is unreachable
+        adFlyShortenedUrl = undefined;
       }
     } else {
       adFlyShortenedUrl = undefined;
@@ -2578,30 +2568,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
         res.setHeader("Referrer-Policy", "no-referrer");
         return res.redirect(302, external.url);
       } else {
+        // Fallback: If external shortener API fails/times out, directly redirect to final landing URL so user is never blocked!
         saveDb(db);
-        return res.status(503).send(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>503 - Shortener Network Incomplete</title>
-            <style>
-              body { background-color: #020617; color: #f8fafc; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
-              .card { background: #0f172a; border: 1px solid #1e293b; padding: 32px; border-radius: 16px; max-width: 440px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
-              h2 { color: #f43f5e; margin-top: 0; }
-              p { color: #94a3b8; font-size: 14px; line-height: 1.6; }
-              .btn { display: inline-block; margin-top: 16px; padding: 12px 24px; background: #6366f1; color: white; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <h2>Shortener Network Incomplete</h2>
-              <p>All integrated ad shorteners must be active to proceed. Please try again in a moment.</p>
-              <a href="${req.originalUrl}" class="btn">Retry Completion</a>
-            </div>
-          </body>
-          </html>
-        `);
+        res.setHeader("Referrer-Policy", "no-referrer");
+        return res.redirect(302, finalLandingUrl);
       }
     } else {
       // Plan has NO API shortlinks added from admin panel:
