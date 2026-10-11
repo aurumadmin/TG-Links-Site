@@ -359,16 +359,11 @@ async function getExternalShortenedUrl(
       topSuccessfulApiId = selectedApi.id;
       chainedCount++;
     } else {
-      // If server-to-server API call returned non-JSON/error or timed out (e.g. Cloudflare or invalid key),
-      // redirect visitor's browser directly to the API endpoint so the shortener handles the request!
-      const browserApiUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(currentTargetUrl)}`;
-      currentTargetUrl = browserApiUrl;
-      topSuccessfulApiId = selectedApi.id;
-      chainedCount++;
+      console.warn(`[SHORTENER API] Call to ${selectedApi.name} (${cleanApiUrl}) did not return a valid shortened URL. Skipping this shortener step.`);
     }
   }
 
-  const fullChainSuccess = chainedCount === requiredCount;
+  const fullChainSuccess = chainedCount > 0 && currentTargetUrl !== finalDestinationUrl;
   return { 
     id: topSuccessfulApiId, 
     url: currentTargetUrl, 
