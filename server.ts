@@ -652,6 +652,12 @@ function verifyAndConsumeTokenResult(
     }
   }
 
+  // 4. Fallback for 0 required steps when returning from external safelink/faucet blog scripts
+  if (expectedMinSteps === 0 && tokenToVerify.length >= 3) {
+    consumedTokensMap.set(tokenToVerify, { code: cleanCode, ip: String(ip || ""), consumedAt: now });
+    return { valid: true, isAlreadyConsumed: false };
+  }
+
   return { valid: false, isAlreadyConsumed: false };
 }
 
@@ -2737,10 +2743,66 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const targetPath = isFaucetMode ? "faucet-final" : "go-final";
     const finalLandingUrl = `${publicBase}/${targetPath}/${link.code}?vtok=${encodeURIComponent(vtok)}`;
 
-    // If NO integrated shorteners are configured for this plan, redirect directly to final landing endpoint to verify token & redirect to originalUrl
+    // If NO integrated shorteners are configured for this plan, consume token & redirect directly to the originalUrl
     if (requiredSteps === 0) {
+      const tokenResult = verifyAndConsumeTokenResult(vtok, link.code, String(ip), 0);
+      if (tokenResult.valid && !tokenResult.isAlreadyConsumed) {
+        const todayIST = getISTDateString();
+        const hasPaidClickToday = db.clicksLog.some(
+          (c: any) => {
+            let loggedIp = c.ip;
+            if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+              loggedIp = loggedIp.split(",")[0].trim();
+            }
+            return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
+          }
+        );
+
+        const currentCpm = getCurrentCpmForLink(link, db);
+        const earningAmount = hasPaidClickToday ? 0 : (currentCpm / 1000);
+        const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || req.query.referrer || "Direct / Unknown") as string;
+
+        const clickId = "c-" + Math.random().toString(36).substring(2, 9);
+        const click: ClickLog = {
+          id: clickId,
+          linkId: link.id,
+          userId: link.userId,
+          timestamp: new Date().toISOString(),
+          ip: String(ip),
+          earning: earningAmount,
+          country: "Global",
+          referrer: rawReferrer
+        };
+        db.clicksLog.push(click);
+        link.clicks += 1;
+        link.earnings += earningAmount;
+
+        if (link.userId && link.userId !== "guest") {
+          const { user } = getUserIdentifiers(db, link.userId);
+          if (user && !user.banned) {
+            user.balance = Number(((user.balance || 0) + earningAmount).toFixed(6));
+            user.totalEarned = Number(((user.totalEarned || 0) + earningAmount).toFixed(6));
+          }
+        }
+        saveDb(db);
+      }
+
+      let directTarget = link.originalUrl || "https://thunder-appz.eu.org";
+      if (!directTarget.startsWith("http://") && !directTarget.startsWith("https://")) {
+        directTarget = "https://" + directTarget;
+      }
+      if (
+        directTarget.includes("/faucet-final") ||
+        directTarget.includes("/go-final") ||
+        directTarget.includes("/faucet") ||
+        directTarget.includes("/go/") ||
+        directTarget.includes("/p/")
+      ) {
+        directTarget = db.settings?.homepageTargetUrl || "https://thunder-appz.eu.org";
+      }
+
       res.setHeader("Referrer-Policy", "no-referrer");
-      return res.redirect(302, finalLandingUrl);
+      return res.redirect(302, directTarget);
     }
 
     // Determine current step index from query param ?step=N
@@ -2786,6 +2848,11 @@ Sitemap: ${baseUrl}/sitemap.xml`
   
   // Redirect visitors from shortlink domains (e.g. tglinks.eu.cc) to the registered safelink blog domain (thunder-appz.eu.org)
   app.get(["/go/:code", "/faucet/:code"], (req, res, next) => {
+    const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
+    if (rawVtok && typeof rawVtok === "string" && rawVtok.trim().length > 0) {
+      // User is returning WITH a verification token from the safelink blog! DO NOT redirect back to safelink blog domain!
+      return next();
+    }
     const hostHeader = getRequestHost(req);
     const isProd = !hostHeader.includes("localhost") && !hostHeader.includes("127.0.0.1") && !hostHeader.includes("ais-dev") && !hostHeader.includes("ais-pre");
     
