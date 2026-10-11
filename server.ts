@@ -253,20 +253,26 @@ function getCurrentCpmForLink(link: any, db: any): number {
 // Unified helper to retrieve active integrated shorteners for a given publisher plan & faucet mode
 function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[] {
   const allShorteners = db.adFlyShorteners || [];
-  const planShortenerIds: string[] = Array.isArray(plan?.shortenerIds) ? plan.shortenerIds : [];
 
-  // Consider shorteners that are enabled (enabled !== false)
+  // Consider shorteners that are active in the system (enabled !== false)
   const activeShorteners = allShorteners.filter((api: any) => api && api.enabled !== false);
 
-  let matched: any[] = [];
-  if (planShortenerIds.length > 0) {
-    matched = activeShorteners.filter((api: any) => planShortenerIds.includes(api.id));
+  // If plan explicitly defines shortenerIds array (even if empty []), ONLY use those assigned shorteners!
+  if (plan && Array.isArray(plan.shortenerIds)) {
+    const planShortenerIds: string[] = plan.shortenerIds;
+    if (planShortenerIds.length === 0) {
+      // The admin has explicitly configured ZERO shorteners for this plan (e.g. Faucet Mode)!
+      return [];
+    }
+    // Only return shorteners assigned to this plan that are also enabled in system
+    const matched = activeShorteners.filter((api: any) => planShortenerIds.includes(api.id));
     // Preserve the EXACT order defined in plan.shortenerIds!
     matched.sort((a: any, b: any) => planShortenerIds.indexOf(a.id) - planShortenerIds.indexOf(b.id));
     return matched;
   }
 
-  matched = activeShorteners.filter((api: any) => {
+  // Fallback ONLY for legacy plans with no shortenerIds field at all
+  let matched = activeShorteners.filter((api: any) => {
     if (isFaucetMode) {
       return Boolean(api.isFaucetApi);
     } else {
@@ -1179,9 +1185,9 @@ function loadDb() {
         isFaucetApi: false
       },
       {
-        id: "api-easysky-2",
-        name: "EasySky",
-        apiUrl: "https://easysky.in/",
+        id: "api-softurl-2",
+        name: "SoftURL",
+        apiUrl: "https://softurl.in/api",
         apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
         enabled: true,
         priority: 5,
@@ -1254,9 +1260,9 @@ function loadDb() {
         id: "faucet",
         name: "Faucet Mode Plan",
         cpm: 8.0,
-        shortenerIds: faucetIds.length > 0 ? faucetIds : allIds,
+        shortenerIds: [], // Direct claim landing with zero external shorteners
         blogPageUrl: "https://thunder-appz.eu.org",
-        description: "Dedicated crypto faucet traffic monetization plan routing via /faucet/ with custom shortener step count.",
+        description: "Dedicated crypto faucet traffic monetization plan routing via /faucet/ with direct claim landing.",
         isDefault: false,
         enabled: true,
         isFaucetPlan: true,
@@ -2323,7 +2329,16 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const { code } = req.params;
     const ip = getClientIp(req);
     const db = loadDb();
-    const link = db.links.find((l: any) => l.code === code && l.status === "active");
+    let link = db.links.find((l: any) => l.code === code && l.status === "active");
+
+    if (!link && (req.query.vtok || req.query.token)) {
+      const vtokStr = String(req.query.vtok || req.query.token);
+      const match = vtokStr.match(/^vtok[~_]([^~_]+)/);
+      if (match && match[1]) {
+        const decodedCode = decodeURIComponent(match[1]);
+        link = db.links.find((l: any) => l.code === decodedCode && l.status === "active");
+      }
+    }
 
     if (!link) {
       return res.status(404).json({ error: "Shortened link not found or suspended" });
