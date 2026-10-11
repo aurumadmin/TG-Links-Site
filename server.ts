@@ -231,17 +231,28 @@ function getCurrentCpmForLink(link: any, db: any): number {
 
 // Unified helper to retrieve active integrated shorteners for a given publisher plan & faucet mode
 function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[] {
+  const allShorteners = db.adFlyShorteners || [];
   const planShortenerIds: string[] = Array.isArray(plan?.shortenerIds) ? plan.shortenerIds : [];
 
+  // Consider shorteners that are enabled (enabled !== false)
+  const activeShorteners = allShorteners.filter((api: any) => api && api.enabled !== false);
+
   if (planShortenerIds.length > 0) {
-    return (db.adFlyShorteners || []).filter((api: any) => {
-      if (!api.enabled) return false;
-      return planShortenerIds.includes(api.id);
-    });
+    const matched = activeShorteners.filter((api: any) => planShortenerIds.includes(api.id));
+    if (matched.length > 0) {
+      return matched;
+    }
   }
 
-  // If no shorteners are explicitly assigned to this plan in Admin Panel, return empty array (0 shorteners required)
-  return [];
+  // Fallback: If no shortener IDs in plan matched, or if list was unpopulated,
+  // return active shorteners matching the mode (Faucet vs Non-Faucet)
+  return activeShorteners.filter((api: any) => {
+    if (isFaucetMode) {
+      return Boolean(api.isFaucetApi);
+    } else {
+      return !api.isFaucetApi;
+    }
+  });
 }
 
 // Helper to syndicate a link with external AdLinkFly shortener APIs dynamically based on Publisher Plan
