@@ -153,6 +153,27 @@ function getRequestHost(req: express.Request): string {
   return hostHeader || "thunder-appz.eu.org";
 }
 
+function getPublicBaseUrl(req: express.Request, userPlan: any, db: any): string {
+  if (userPlan?.blogPageUrl && typeof userPlan.blogPageUrl === "string") {
+    const trimmed = userPlan.blogPageUrl.trim().replace(/\/+$/, "");
+    if (/^https?:\/\//i.test(trimmed) && !trimmed.includes("localhost") && !trimmed.includes("127.0.0.1")) {
+      return trimmed;
+    }
+  }
+  if (db?.settings?.adslabRegisteredDomain && typeof db.settings.adslabRegisteredDomain === "string") {
+    const trimmed = db.settings.adslabRegisteredDomain.trim().replace(/\/+$/, "");
+    if (/^https?:\/\//i.test(trimmed) && !trimmed.includes("localhost") && !trimmed.includes("127.0.0.1")) {
+      return trimmed;
+    }
+  }
+  const host = getRequestHost(req);
+  if (host && !host.includes("localhost") && !host.includes("127.0.0.1") && !host.includes("ais-dev") && !host.includes("ais-pre")) {
+    const proto = getRequestProtocol(req);
+    return `${proto}://${host}`;
+  }
+  return "https://thunder-appz.eu.org";
+}
+
 function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): number {
   const xVal = req.query.x || req.body?.x || req.query.cpm || req.body?.cpm;
   if (xVal !== undefined && xVal !== null && xVal !== "") {
@@ -415,12 +436,17 @@ async function getExternalShortenedUrl(
   const codeMatch = finalDestinationUrl.match(/\/(?:go-final|faucet-final|faucet|go)\/([^?\/]+)/);
   const code = codeMatch ? codeMatch[1] : "";
 
-  let nextTargetUrl = finalDestinationUrl;
+  let publicOrigin = "https://thunder-appz.eu.org";
+  if (plan?.blogPageUrl && /^https?:\/\//i.test(plan.blogPageUrl) && !plan.blogPageUrl.includes("localhost") && !plan.blogPageUrl.includes("127.0.0.1")) {
+    publicOrigin = plan.blogPageUrl.trim().replace(/\/+$/, "");
+  } else if (db?.settings?.adslabRegisteredDomain && /^https?:\/\//i.test(db.settings.adslabRegisteredDomain) && !db.settings.adslabRegisteredDomain.includes("localhost") && !db.settings.adslabRegisteredDomain.includes("127.0.0.1")) {
+    publicOrigin = db.settings.adslabRegisteredDomain.trim().replace(/\/+$/, "");
+  }
+
+  const queryPart = finalDestinationUrl.includes("?") ? finalDestinationUrl.substring(finalDestinationUrl.indexOf("?")) : "";
+  let nextTargetUrl = `${publicOrigin}/${finalDestinationUrl.includes("faucet") ? "faucet-final" : "go-final"}/${code}${queryPart}`;
   if (requiredCount > 1 && code) {
-    const protocol = finalDestinationUrl.startsWith("https") ? "https" : "http";
-    const hostMatch = finalDestinationUrl.match(/https?:\/\/([^\/]+)/);
-    const host = hostMatch ? hostMatch[1] : "thunder-appz.eu.org";
-    nextTargetUrl = `${protocol}://${host}/p/${code}?step=2`;
+    nextTargetUrl = `${publicOrigin}/p/${code}?step=2`;
   }
 
   const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
@@ -2203,17 +2229,15 @@ Sitemap: ${baseUrl}/sitemap.xml`
     let adFlyShortenerId = undefined;
     let adFlyShortenedUrl = undefined;
 
-    const protocol = getRequestProtocol(req);
-    const host = getRequestHost(req);
-
     const userPlan = getPlanForUser(user, db);
     const isFaucetMode = checkIsFaucetMode(user, null, db);
+    const publicBase = getPublicBaseUrl(req, userPlan, db);
 
     const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
     const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
     const targetPath = isFaucetMode ? "faucet-final" : "go-final";
-    const intermediateUrl = `${protocol}://${host}/${targetPath}/${code}?vtok=${initVtok}`;
+    const intermediateUrl = `${publicBase}/${targetPath}/${code}?vtok=${initVtok}`;
 
     const external = await getExternalShortenedUrl(intermediateUrl, db, user, user?.planId);
     if (external) {
@@ -2520,14 +2544,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     const user = link.userId !== "guest" ? linkOwner : null;
     const userPlan = getPlanForUser(user || linkOwner, db);
-    const protocol = getRequestProtocol(req);
-    const host = getRequestHost(req);
+    const publicBase = getPublicBaseUrl(req, userPlan, db);
 
     const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
     const vtok = createVerificationToken(link.code, String(ip), requiredSteps);
     const targetPath = isFaucetMode ? "faucet-final" : "go-final";
-    const finalLandingUrl = `${protocol}://${host}/${targetPath}/${link.code}?vtok=${vtok}`;
+    const finalLandingUrl = `${publicBase}/${targetPath}/${link.code}?vtok=${vtok}`;
 
     let targetUrl = finalLandingUrl;
     let adFlyShortenedUrl: string | undefined = undefined;
@@ -2535,17 +2558,31 @@ Sitemap: ${baseUrl}/sitemap.xml`
     if (requiredSteps > 0) {
       const firstApi = enabledApis[0];
       const nextTargetUrl = requiredSteps > 1
-        ? `${protocol}://${host}/p/${link.code}?step=2`
+        ? `${publicBase}/p/${link.code}?step=2`
         : finalLandingUrl;
 
-      const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
-      if (shortenedUrl) {
-        targetUrl = shortenedUrl;
-        adFlyShortenedUrl = shortenedUrl;
-        link.adFlyShortenedUrl = shortenedUrl;
-        link.adFlyShortenerId = firstApi.id;
+      // 1. If link already has a valid shortened URL for this first shortener, use it
+      if (
+        link.adFlyShortenedUrl &&
+        link.adFlyShortenerId === firstApi.id &&
+        isValidShortenedUrl(link.adFlyShortenedUrl, nextTargetUrl, firstApi.apiUrl)
+      ) {
+        targetUrl = link.adFlyShortenedUrl;
+        adFlyShortenedUrl = link.adFlyShortenedUrl;
       } else {
-        targetUrl = nextTargetUrl;
+        const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
+        if (shortenedUrl) {
+          targetUrl = shortenedUrl;
+          adFlyShortenedUrl = shortenedUrl;
+          link.adFlyShortenedUrl = shortenedUrl;
+          link.adFlyShortenerId = firstApi.id;
+        } else if (link.adFlyShortenedUrl && isValidShortenedUrl(link.adFlyShortenedUrl, nextTargetUrl, firstApi.apiUrl)) {
+          targetUrl = link.adFlyShortenedUrl;
+          adFlyShortenedUrl = link.adFlyShortenedUrl;
+        } else {
+          console.warn(`[Links Click] First API ${firstApi.name} generation notice. Redirecting to ${nextTargetUrl}`);
+          targetUrl = nextTargetUrl;
+        }
       }
     } else {
       link.adFlyShortenedUrl = undefined;
@@ -2622,15 +2659,14 @@ Sitemap: ${baseUrl}/sitemap.xml`
       `);
     }
 
+    const publicBase = getPublicBaseUrl(req, userPlan, db);
+
     const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
 
-    const protocol = getRequestProtocol(req);
-    const host = getRequestHost(req);
-
     const vtok = createVerificationToken(link.code, String(ip), requiredSteps);
     const targetPath = isFaucetMode ? "faucet-final" : "go-final";
-    const finalLandingUrl = `${protocol}://${host}/${targetPath}/${link.code}?vtok=${vtok}`;
+    const finalLandingUrl = `${publicBase}/${targetPath}/${link.code}?vtok=${vtok}`;
 
     if (requiredSteps === 0) {
       res.setHeader("Referrer-Policy", "no-referrer");
@@ -2658,7 +2694,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const isLastStep = stepIndex === requiredSteps - 1;
     const nextTargetUrl = isLastStep
       ? finalLandingUrl
-      : `${protocol}://${host}/p/${link.code}?step=${stepNum + 1}`;
+      : `${publicBase}/p/${link.code}?step=${stepNum + 1}`;
 
     const shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
 

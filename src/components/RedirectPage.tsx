@@ -30,19 +30,23 @@ const redirectWithoutReferrer = (url: string) => {
     console.error("Failed to inject referrer meta tag", e);
   }
 
-  const a = document.createElement("a");
-  a.href = target;
-  a.rel = "noreferrer";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  
-  // Safe fallback if anchor click is blocked by strict browser policy after 1s
-  setTimeout(() => {
-    if (window.location.href !== target) {
-      window.location.replace(target);
-    }
-  }, 1000);
+  try {
+    const a = document.createElement("a");
+    a.href = target;
+    a.rel = "noreferrer";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+  } catch (e) {
+    console.error("Failed anchor click:", e);
+  }
+
+  // Navigate immediately
+  try {
+    window.location.href = target;
+  } catch (e) {
+    window.location.replace(target);
+  }
 };
 
 interface AdvertiserAdProp {
@@ -1461,9 +1465,6 @@ export default function RedirectPage({ code }: RedirectPageProps) {
     } else {
       // Final step: Get Link!
       if (faucetLimitDetected) return;
-
-      // Trigger AdsLab Rewarded Ad on Get Final Link (with fail-safe fallback)
-      triggerAdsLabRewarded(settings);
 
       setRedirecting(true);
       try {
