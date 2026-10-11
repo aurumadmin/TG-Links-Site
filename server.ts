@@ -423,7 +423,7 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
       }
 
       if (shortenedUrl) {
-        shortenedUrl = shortenedUrl.replace(/\\/g, '').trim();
+        shortenedUrl = shortenedUrl.replace(/\\/g, '').replace(/^"+|"+$/g, '').trim();
       }
 
       if (isValidShortenedUrl(shortenedUrl, targetUrl, endpoint)) {
@@ -1204,7 +1204,7 @@ function loadDb() {
         id: "api-softurl-2",
         name: "SoftURL",
         apiUrl: "https://softurl.in/api",
-        apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
+        apiToken: "609c875b96d61f0592bfe5ae036b2db1df673680",
         enabled: true,
         priority: 5,
         isFaucetApi: false
@@ -1251,6 +1251,13 @@ function loadDb() {
     const originalLength = db.adFlyShorteners.length;
     db.adFlyShorteners = db.adFlyShorteners.filter(Boolean);
     if (db.adFlyShorteners.length !== originalLength) changed = true;
+
+    // Auto-migrate SoftURL token if old/invalid token is present
+    const softUrlObj = db.adFlyShorteners.find((s: any) => s && (s.id === "api-softurl-2" || (s.name && s.name.toLowerCase().includes("softurl"))));
+    if (softUrlObj && (softUrlObj.apiToken === "c74c424d10103b41dff815bcad304dce1f6050b1" || !softUrlObj.apiToken)) {
+      softUrlObj.apiToken = "609c875b96d61f0592bfe5ae036b2db1df673680";
+      changed = true;
+    }
   }
   if (!db.plans || db.plans.length === 0) {
     const allShorteners = db.adFlyShorteners || [];
