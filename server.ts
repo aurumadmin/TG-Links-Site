@@ -359,9 +359,12 @@ async function getExternalShortenedUrl(
       topSuccessfulApiId = selectedApi.id;
       chainedCount++;
     } else {
-      console.warn(`[CHAIN STRICT ENFORCEMENT] External shortener API ${selectedApi.name} failed after 3 retries. Full chain requirement (${requiredCount} shorteners) broken.`);
-      // STRICT REQUIREMENT: If ANY shortener API fails, DO NOT allow partial chain!
-      return { id: "", url: "", fullChainSuccess: false, chainedCount, requiredCount };
+      // If server-to-server API call returned non-JSON/error or timed out (e.g. Cloudflare or invalid key),
+      // redirect visitor's browser directly to the API endpoint so the shortener handles the request!
+      const browserApiUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(currentTargetUrl)}`;
+      currentTargetUrl = browserApiUrl;
+      topSuccessfulApiId = selectedApi.id;
+      chainedCount++;
     }
   }
 
