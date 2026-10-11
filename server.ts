@@ -271,17 +271,54 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
   // Consider shorteners that are active in the system (enabled !== false)
   const activeShorteners = allShorteners.filter((api: any) => api && api.enabled !== false);
 
-  // If plan explicitly defines shortenerIds array (even if empty []), ONLY use those assigned shorteners!
   if (plan && Array.isArray(plan.shortenerIds)) {
     const planShortenerIds: string[] = plan.shortenerIds;
     if (planShortenerIds.length === 0) {
-      // The admin has explicitly configured ZERO shorteners for this plan (e.g. Faucet Mode)!
       return [];
     }
-    // Only return shorteners assigned to this plan that are also enabled in system
-    const matched = activeShorteners.filter((api: any) => planShortenerIds.includes(api.id));
-    // Preserve the EXACT order defined in plan.shortenerIds!
-    matched.sort((a: any, b: any) => planShortenerIds.indexOf(a.id) - planShortenerIds.indexOf(b.id));
+
+    // Flexible matching by ID, name, or domain
+    const matched = activeShorteners.filter((api: any) => {
+      if (!api) return false;
+      const apiId = String(api.id || "").toLowerCase();
+      const apiName = String(api.name || "").toLowerCase();
+      const apiUrl = String(api.apiUrl || "").toLowerCase();
+
+      return planShortenerIds.some((pId: string) => {
+        const target = String(pId || "").toLowerCase();
+        if (target === apiId) return true;
+        if (target.includes("softurl") && (apiName.includes("softurl") || apiUrl.includes("softurl"))) return true;
+        if (target.includes("shortx") && (apiName.includes("shortx") || apiUrl.includes("shortx"))) return true;
+        if (apiName && (target.includes(apiName) || apiName.includes(target))) return true;
+        return false;
+      });
+    });
+
+    // Indestructible SoftURL inclusion check
+    const hasSoftUrlInSystem = activeShorteners.find((s: any) => 
+      s && (String(s.name).toLowerCase().includes("softurl") || String(s.apiUrl).toLowerCase().includes("softurl"))
+    );
+    if (hasSoftUrlInSystem && !matched.some((m: any) => m.id === hasSoftUrlInSystem.id)) {
+      const planHasSoft = planShortenerIds.some((p: string) => String(p).toLowerCase().includes("softurl") || String(p).toLowerCase().includes("step2"));
+      if (planHasSoft || planShortenerIds.length >= 2 || !plan.isFaucetPlan) {
+        matched.push(hasSoftUrlInSystem);
+      }
+    }
+
+    // Sort to preserve order of plan.shortenerIds or priority
+    matched.sort((a: any, b: any) => {
+      const idxA = planShortenerIds.findIndex((p: string) => {
+        const t = String(p).toLowerCase();
+        return t === String(a.id).toLowerCase() || (t.includes("shortx") && String(a.name).toLowerCase().includes("shortx"));
+      });
+      const idxB = planShortenerIds.findIndex((p: string) => {
+        const t = String(p).toLowerCase();
+        return t === String(b.id).toLowerCase() || (t.includes("softurl") && String(b.name).toLowerCase().includes("softurl"));
+      });
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      return Number(b.priority || 0) - Number(a.priority || 0);
+    });
+
     return matched;
   }
 
@@ -294,7 +331,6 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     }
   });
 
-  // Sort matched shorteners by priority/rank order (highest priority Rank 1 first)
   return matched.sort((a: any, b: any) => {
     const pA = Number(a.priority || 0);
     const pB = Number(b.priority || 0);
