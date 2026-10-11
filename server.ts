@@ -273,8 +273,8 @@ function isValidShortenedUrl(url: string, targetUrl: string, candidateEndpoint: 
     lower.includes("gstatic.com") ||
     lower.includes("recaptcha.net") ||
     lower.includes("cloudflare.com") ||
-    lower.includes("/api?api=") ||
-    lower.includes("/st?api=") ||
+    lower.includes("?api=") ||
+    lower.includes("&api=") ||
     lower.includes("/api/tasks") ||
     lower.includes("recaptcha") ||
     lower.endsWith(".js") ||
@@ -283,7 +283,8 @@ function isValidShortenedUrl(url: string, targetUrl: string, candidateEndpoint: 
     lower.endsWith(".jpg") ||
     lower.endsWith(".svg") ||
     clean === targetUrl ||
-    clean.startsWith(candidateEndpoint)
+    clean === candidateEndpoint ||
+    clean === candidateEndpoint + "/"
   ) {
     return false;
   }
@@ -328,68 +329,69 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
       };
 
   for (const endpoint of candidateEndpoints) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const apiRequestUrl = `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
+    try {
+      const apiRequestUrl = `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-        const response = await fetchFn(apiRequestUrl, { 
-          signal: controller.signal,
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*"
+      const response = await fetchFn(apiRequestUrl, { 
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*"
+        }
+      });
+      clearTimeout(timeoutId);
+
+      const text = await response.text();
+      let shortenedUrl = "";
+
+      // Check if text is HTML (Cloudflare challenge, reCAPTCHA, 404/500 error pages)
+      const isHtml = /^\s*<(!DOCTYPE|html|head|body|script|div)/i.test(text);
+
+      if (!isHtml) {
+        try {
+          const json = JSON.parse(text);
+          if (json && (json.status === "success" || (json.status !== "error" && json.status !== "fail"))) {
+            shortenedUrl = 
+              json.shortenedUrl || 
+              json.shortened_url || 
+              json.shortUrl || 
+              json.short_url || 
+              json.url || 
+              json.link || 
+              json.shortlink ||
+              json.data?.shortenedUrl ||
+              json.data?.shortened_url ||
+              json.data?.url ||
+              json.data?.link ||
+              json.result?.shortenedUrl ||
+              json.result?.url ||
+              "";
+          } else if (json && (json.status === "error" || json.status === "fail")) {
+            console.warn(`[Shortener API] ${selectedApi.name} returned error status at ${endpoint}:`, json.message || json);
+            // Non-recoverable API error (e.g., invalid token) - stop trying other endpoints to save latency
+            break;
           }
-        });
-        clearTimeout(timeoutId);
-
-        const text = await response.text();
-        let shortenedUrl = "";
-
-        // Check if text is HTML (Cloudflare challenge, reCAPTCHA, 404/500 error pages)
-        const isHtml = /^\s*<(!DOCTYPE|html|head|body|script|div)/i.test(text);
-
-        if (!isHtml) {
-          try {
-            const json = JSON.parse(text);
-            if (json && (json.status === "success" || json.status !== "error")) {
-              shortenedUrl = 
-                json.shortenedUrl || 
-                json.shortened_url || 
-                json.shortUrl || 
-                json.short_url || 
-                json.url || 
-                json.link || 
-                json.shortlink ||
-                json.data?.shortenedUrl ||
-                json.data?.shortened_url ||
-                json.data?.url ||
-                json.data?.link ||
-                json.result?.shortenedUrl ||
-                json.result?.url ||
-                "";
-            }
-          } catch (e) {
-            // Plain text response (only if plain string starting with http:// and not HTML)
-            const trimmedText = text.trim();
-            if (/^https?:\/\/[^\s"']+/i.test(trimmedText) && !trimmedText.includes("<")) {
-              shortenedUrl = trimmedText;
-            }
+        } catch (e) {
+          // Plain text response (only if plain string starting with http:// and not HTML)
+          const trimmedText = text.trim();
+          if (/^https?:\/\/[^\s"']+/i.test(trimmedText) && !trimmedText.includes("<")) {
+            shortenedUrl = trimmedText;
           }
-        }
-
-        if (shortenedUrl) {
-          shortenedUrl = shortenedUrl.replace(/\\/g, '').trim();
-        }
-
-        if (isValidShortenedUrl(shortenedUrl, targetUrl, endpoint)) {
-          return shortenedUrl;
-        }
-      } catch (err) {
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 300));
         }
       }
+
+      if (shortenedUrl) {
+        shortenedUrl = shortenedUrl.replace(/\\/g, '').trim();
+      }
+
+      if (isValidShortenedUrl(shortenedUrl, targetUrl, endpoint)) {
+        console.log(`[Shortener API] Successfully generated shortened URL for ${selectedApi.name}: ${shortenedUrl}`);
+        return shortenedUrl;
+      }
+    } catch (err: any) {
+      console.warn(`[Shortener API] Failed request to ${endpoint} for ${selectedApi.name}: ${err?.message || err}`);
     }
   }
 
@@ -1146,7 +1148,7 @@ function loadDb() {
         id: "api-shortxlinks-1",
         name: "ShortXLinks",
         apiUrl: "https://shortxlinks.com/",
-        apiToken: "b6ac099187a0572e9d24ce4a679e9eb10115b02d",
+        apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1",
         enabled: true,
         priority: 6,
         isFaucetApi: false
@@ -1164,7 +1166,7 @@ function loadDb() {
         id: "api-shortxlinks-faucet-3",
         name: "ShortXLinks-Faucet",
         apiUrl: "https://shortxlinks.com/",
-        apiToken: "b6ac099187a0572e9d24ce4a679e9eb10115b02d",
+        apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1",
         enabled: true,
         priority: 4,
         isFaucetApi: true
