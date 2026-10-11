@@ -2604,8 +2604,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
         ? `${platformBase}/p/${link.code}?vtok=${encodeURIComponent(vtok)}&step=2`
         : finalLandingUrl;
 
-      // Always attempt to generate a fresh shortened URL for this session's unique vtok
-      const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
+      // Always attempt to generate a fresh shortened URL for this session's unique vtok (with retry)
+      let shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
+      if (!shortenedUrl) {
+        console.warn(`[Links Click] Retrying first shortener API generation for ${firstApi.name}...`);
+        shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
+      }
+
       if (shortenedUrl) {
         targetUrl = shortenedUrl;
         adFlyShortenedUrl = shortenedUrl;
@@ -2856,12 +2861,6 @@ Sitemap: ${baseUrl}/sitemap.xml`
       console.warn(`[Pipeline Step ${stepNum}] Retrying shortener API generation for ${currentApi?.name}...`);
       shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
     }
-
-    if (shortenedUrl) {
-      link.adFlyShortenedUrl = shortenedUrl;
-      link.adFlyShortenerId = currentApi.id;
-    }
-    saveDb(db);
 
     res.setHeader("Referrer-Policy", "no-referrer");
     if (shortenedUrl) {
