@@ -437,7 +437,12 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     }
   }
 
-  return null;
+  // Fallback: If server-side API request fails or is blocked by Cloudflare/WAF, return direct Quick Link (/st) URL so visitor browser completes shortener redirect directly
+  let baseUrl = rawUrl.endsWith("/api") ? rawUrl.slice(0, -4) : (rawUrl.endsWith("/st") ? rawUrl.slice(0, -3) : rawUrl);
+  baseUrl = baseUrl.replace(/\/+$/, "");
+  const fallbackQuickLink = `${baseUrl}/st?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`;
+  console.log(`[Shortener API Fallback] Using Quick Link fallback for ${selectedApi.name}: ${fallbackQuickLink}`);
+  return fallbackQuickLink;
 }
 
 // Helper to generate initial step shortener URL for link creation
