@@ -116,8 +116,16 @@ export default function App() {
   const parseRouteFromUrl = useCallback((pathName?: string) => {
     const path = pathName || window.location.pathname;
 
-    // Check link redirection route: /go/:code, /p/:code, /faucet/:code or /faucet/p/:code
-    const goMatch = path.match(/^\/(?:faucet\/)?(?:go|p)?\/?([a-zA-Z0-9_-]+)$/) || path.match(/^\/(?:go|p|faucet)\/([a-zA-Z0-9_-]+)$/);
+    // Do NOT handle server-side final redirect landing routes in SPA!
+    if (path.startsWith("/faucet-final/") || path.startsWith("/go-final/")) {
+      return;
+    }
+
+    // Check link redirection route: /go/:code, /p/:code, /faucet/:code, /callback/:code or /faucet/p/:code
+    const goMatch = 
+      path.match(/^\/(?:faucet|go|p|callback)\/([a-zA-Z0-9_-]+)$/) || 
+      path.match(/^\/faucet\/p\/([a-zA-Z0-9_-]+)$/);
+
     const isFaucetPath = path.startsWith("/faucet");
     if (goMatch && goMatch[1] && !["admin", "login", "register", "dashboard", "plans", "withdrawals", "settings", "external", "profile"].includes(goMatch[1])) {
       const isReturnRoute = path.includes("/p/");

@@ -2816,7 +2816,15 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return next();
     }
 
-    const link = db.links.find((l: any) => l.code === code);
+    let link = db.links.find((l: any) => l.code === code);
+    if (!link && vtok) {
+      const match = vtok.match(/^vtok[~_]([^~_]+)/);
+      if (match && match[1]) {
+        const decodedCode = decodeURIComponent(match[1]);
+        link = db.links.find((l: any) => l.code === decodedCode);
+      }
+    }
+
     if (!link) {
       return res.status(404).send("Destination link not found");
     }
@@ -2832,6 +2840,12 @@ Sitemap: ${baseUrl}/sitemap.xml`
     let targetUrl = link.originalUrl;
     if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
       targetUrl = "https://" + targetUrl;
+    }
+
+    // Safeguard: Prevent destination URL loops if originalUrl points back to /faucet-final or /faucet
+    if (targetUrl.includes("/faucet-final") || targetUrl.includes("/go-final")) {
+      console.warn("[Loop Safeguard] Destination URL loops back to final landing page:", targetUrl);
+      targetUrl = "https://thunder-appz.eu.org";
     }
 
     const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
