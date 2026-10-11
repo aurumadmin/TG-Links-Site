@@ -2623,28 +2623,6 @@ Sitemap: ${baseUrl}/sitemap.xml`
         shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
       }
 
-      if (!shortenedUrl && firstApi) {
-        let rawApiUrl = (firstApi.apiUrl || "").trim();
-        let apiToken = (firstApi.apiToken || "").trim();
-        if (!apiToken && rawApiUrl.includes("api=")) {
-          try {
-            const u = new URL(rawApiUrl.startsWith("http") ? rawApiUrl : "https://" + rawApiUrl);
-            apiToken = u.searchParams.get("api") || "";
-          } catch (e) {}
-        }
-        let baseUrl = rawApiUrl.split("?")[0].trim();
-        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-          baseUrl = "https://" + baseUrl;
-        }
-        baseUrl = baseUrl.replace(/\/+$/, "");
-        if (baseUrl.endsWith("/api")) baseUrl = baseUrl.slice(0, -4);
-        if (baseUrl.endsWith("/st")) baseUrl = baseUrl.slice(0, -3);
-
-        if (apiToken) {
-          shortenedUrl = `${baseUrl}/st?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(nextTargetUrl)}`;
-        }
-      }
-
       if (shortenedUrl) {
         targetUrl = shortenedUrl;
         adFlyShortenedUrl = shortenedUrl;
@@ -2909,30 +2887,6 @@ Sitemap: ${baseUrl}/sitemap.xml`
     if (!shortenedUrl) {
       console.warn(`[Pipeline Step ${stepNum}] Retrying shortener API generation for ${currentApi?.name}...`);
       shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
-    }
-
-    // Fail-safe Quick Link generation: Ensure the visitor NEVER skips a step if the API call is delayed or throttled
-    if (!shortenedUrl && currentApi) {
-      let rawApiUrl = (currentApi.apiUrl || "").trim();
-      let apiToken = (currentApi.apiToken || "").trim();
-      if (!apiToken && rawApiUrl.includes("api=")) {
-        try {
-          const u = new URL(rawApiUrl.startsWith("http") ? rawApiUrl : "https://" + rawApiUrl);
-          apiToken = u.searchParams.get("api") || "";
-        } catch (e) {}
-      }
-      let baseUrl = rawApiUrl.split("?")[0].trim();
-      if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-        baseUrl = "https://" + baseUrl;
-      }
-      baseUrl = baseUrl.replace(/\/+$/, "");
-      if (baseUrl.endsWith("/api")) baseUrl = baseUrl.slice(0, -4);
-      if (baseUrl.endsWith("/st")) baseUrl = baseUrl.slice(0, -3);
-
-      if (apiToken) {
-        shortenedUrl = `${baseUrl}/st?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(nextTargetUrl)}`;
-        console.log(`[Pipeline Step ${stepNum}] Using Quick Link shortener URL for ${currentApi.name}: ${shortenedUrl}`);
-      }
     }
 
     res.setHeader("Referrer-Policy", "no-referrer");
