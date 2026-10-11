@@ -452,7 +452,8 @@ async function getExternalShortenedUrl(
   const queryPart = finalDestinationUrl.includes("?") ? finalDestinationUrl.substring(finalDestinationUrl.indexOf("?")) : "";
   let nextTargetUrl = `${publicOrigin}/${finalDestinationUrl.includes("faucet") ? "faucet-final" : "go-final"}/${code}${queryPart}`;
   if (requiredCount > 1 && code) {
-    nextTargetUrl = `${publicOrigin}/p/${code}?step=2`;
+    const joiner = queryPart.includes("?") ? "&" : "?";
+    nextTargetUrl = `${publicOrigin}/p/${code}${queryPart}${joiner}step=2`;
   }
 
   const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
@@ -2573,7 +2574,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     if (requiredSteps > 0) {
       const firstApi = enabledApis[0];
       const nextTargetUrl = requiredSteps > 1
-        ? `${publicBase}/p/${link.code}?step=2`
+        ? `${publicBase}/p/${link.code}?vtok=${encodeURIComponent(vtok)}&step=2`
         : finalLandingUrl;
 
       // 1. If link already has a valid shortened URL for this first shortener, use it
