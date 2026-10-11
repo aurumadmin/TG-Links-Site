@@ -5,6 +5,28 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
+    <!-- Extension Guard for window.fetch assignment -->
+    <script>
+      (function() {
+        try {
+          var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+          var fetchStorage = nativeFetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return fetchStorage || nativeFetch;
+            },
+            set: function(val) {
+              fetchStorage = val;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          // Ignore if environment prevents Object.defineProperty
+        }
+      })();
+    </script>
+
     <!-- Primary SEO Meta Tags -->
     <title>TG Links - #1 High CPM URL Shortener & Link Monetization Platform | Earn $10 CPM</title>
     <meta name="title" content="TG Links - #1 High CPM URL Shortener & Link Monetization Platform | Earn $10 CPM" />
