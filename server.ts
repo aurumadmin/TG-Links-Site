@@ -408,10 +408,6 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
               json.result?.shortenedUrl ||
               json.result?.url ||
               "";
-          } else if (json && (json.status === "error" || json.status === "fail")) {
-            console.warn(`[Shortener API] ${selectedApi.name} returned error status at ${endpoint}:`, json.message || json);
-            // Non-recoverable API error (e.g., invalid token) - stop trying other endpoints to save latency
-            break;
           }
         } catch (e) {
           // Plain text response (only if plain string starting with http:// and not HTML)
@@ -420,6 +416,21 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
             shortenedUrl = trimmedText;
           }
         }
+      }
+
+      if (!shortenedUrl) {
+        // Fallback: try plain text API format parameter (&format=text)
+        try {
+          const textApiUrl = `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}&format=text`;
+          const ctrl2 = new AbortController();
+          const t2 = setTimeout(() => ctrl2.abort(), 6000);
+          const r2 = await fetchFn(textApiUrl, { signal: ctrl2.signal, headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } });
+          clearTimeout(t2);
+          const txt2 = (await r2.text()).trim();
+          if (/^https?:\/\/[^\s"']+/i.test(txt2) && !txt2.includes("<")) {
+            shortenedUrl = txt2;
+          }
+        } catch (e2) {}
       }
 
       if (shortenedUrl) {
@@ -2593,8 +2604,14 @@ Sitemap: ${baseUrl}/sitemap.xml`
         ? `${platformBase}/p/${link.code}?vtok=${encodeURIComponent(vtok)}&step=2`
         : finalLandingUrl;
 
-      // 1. If link already has a valid shortened URL for this first shortener, use it
-      if (
+      // Always attempt to generate a fresh shortened URL for this session's unique vtok
+      const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
+      if (shortenedUrl) {
+        targetUrl = shortenedUrl;
+        adFlyShortenedUrl = shortenedUrl;
+        link.adFlyShortenedUrl = shortenedUrl;
+        link.adFlyShortenerId = firstApi.id;
+      } else if (
         link.adFlyShortenedUrl &&
         link.adFlyShortenerId === firstApi.id &&
         isValidShortenedUrl(link.adFlyShortenedUrl, nextTargetUrl, firstApi.apiUrl)
@@ -2602,19 +2619,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
         targetUrl = link.adFlyShortenedUrl;
         adFlyShortenedUrl = link.adFlyShortenedUrl;
       } else {
-        const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
-        if (shortenedUrl) {
-          targetUrl = shortenedUrl;
-          adFlyShortenedUrl = shortenedUrl;
-          link.adFlyShortenedUrl = shortenedUrl;
-          link.adFlyShortenerId = firstApi.id;
-        } else if (link.adFlyShortenedUrl && isValidShortenedUrl(link.adFlyShortenedUrl, nextTargetUrl, firstApi.apiUrl)) {
-          targetUrl = link.adFlyShortenedUrl;
-          adFlyShortenedUrl = link.adFlyShortenedUrl;
-        } else {
-          console.warn(`[Links Click] First API ${firstApi.name} generation notice. Redirecting to ${nextTargetUrl}`);
-          targetUrl = nextTargetUrl;
-        }
+        console.warn(`[Links Click] First API ${firstApi.name} generation notice. Redirecting to ${nextTargetUrl}`);
+        targetUrl = nextTargetUrl;
       }
     } else {
       link.adFlyShortenedUrl = undefined;
@@ -2845,7 +2851,11 @@ Sitemap: ${baseUrl}/sitemap.xml`
       ? finalLandingUrl
       : `${platformBase}/p/${link.code}?vtok=${encodeURIComponent(vtok)}&step=${stepNum + 1}`;
 
-    const shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
+    let shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
+    if (!shortenedUrl) {
+      console.warn(`[Pipeline Step ${stepNum}] Retrying shortener API generation for ${currentApi?.name}...`);
+      shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
+    }
 
     if (shortenedUrl) {
       link.adFlyShortenedUrl = shortenedUrl;
