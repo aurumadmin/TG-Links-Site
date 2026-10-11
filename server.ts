@@ -511,28 +511,30 @@ async function getExternalShortenedUrl(
   let publicOrigin = "https://tglinks.eu.cc";
 
   const queryPart = finalDestinationUrl.includes("?") ? finalDestinationUrl.substring(finalDestinationUrl.indexOf("?")) : "";
-  let nextTargetUrl = `${publicOrigin}/${finalDestinationUrl.includes("faucet") ? "faucet-final" : "go-final"}/${code}${queryPart}`;
-  if (requiredCount > 1 && code) {
-    const joiner = queryPart.includes("?") ? "&" : "?";
-    nextTargetUrl = `${publicOrigin}/p/${code}${queryPart}${joiner}step=2`;
-  }
+  let currentTarget = `${publicOrigin}/${finalDestinationUrl.includes("faucet") ? "faucet-final" : "go-final"}/${code}${queryPart}`;
 
-  const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
-  if (shortenedUrl) {
-    return {
-      id: firstApi.id,
-      url: shortenedUrl,
-      fullChainSuccess: true,
-      chainedCount: 1,
-      requiredCount
-    };
+  let successCount = 0;
+  // Pre-chain multi-step shorteners backwards from last step to step 1
+  for (let i = requiredCount - 1; i >= 0; i--) {
+    const api = enabledApis[i];
+    let shortened = await getSingleExternalShortenedUrl(api, currentTarget);
+    if (!shortened) {
+      shortened = await getSingleExternalShortenedUrl(api, currentTarget);
+    }
+    if (shortened) {
+      currentTarget = shortened;
+      successCount++;
+    } else if (code) {
+      const joiner = queryPart.includes("?") ? "&" : "?";
+      currentTarget = `${publicOrigin}/p/${code}${queryPart}${joiner}step=${i + 1}`;
+    }
   }
 
   return {
     id: firstApi.id,
-    url: nextTargetUrl,
-    fullChainSuccess: false,
-    chainedCount: 0,
+    url: currentTarget,
+    fullChainSuccess: successCount === requiredCount,
+    chainedCount: successCount,
     requiredCount
   };
 }
@@ -2646,34 +2648,29 @@ Sitemap: ${baseUrl}/sitemap.xml`
     let adFlyShortenedUrl: string | undefined = undefined;
 
     if (requiredSteps > 0) {
-      const firstApi = enabledApis[0];
-      const nextTargetUrl = requiredSteps > 1
-        ? `${platformBase}/p/${link.code}?vtok=${encodeURIComponent(vtok)}&step=2`
-        : finalLandingUrl;
+      let currentTarget = finalLandingUrl;
 
-      // Always attempt to generate a fresh shortened URL for this session's unique vtok (with retry)
-      let shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
-      if (!shortenedUrl) {
-        console.warn(`[Links Click] Retrying first shortener API generation for ${firstApi.name}...`);
-        shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
+      // Pre-chain multi-step shorteners backwards from last step (e.g. SoftURL) to step 1 (ShortXLinks)
+      for (let i = requiredSteps - 1; i >= 0; i--) {
+        const api = enabledApis[i];
+        let shortened = await getSingleExternalShortenedUrl(api, currentTarget);
+        if (!shortened) {
+          console.warn(`[Links Click] Retrying step ${i + 1} (${api.name}) shortener API generation...`);
+          shortened = await getSingleExternalShortenedUrl(api, currentTarget);
+        }
+        if (shortened) {
+          currentTarget = shortened;
+        } else {
+          console.warn(`[Links Click] Step ${i + 1} (${api.name}) API call failed. Falling back to /p route.`);
+          const joiner = currentTarget.includes("?") ? "&" : "?";
+          currentTarget = `${platformBase}/p/${link.code}?vtok=${encodeURIComponent(vtok)}&step=${i + 1}`;
+        }
       }
 
-      if (shortenedUrl) {
-        targetUrl = shortenedUrl;
-        adFlyShortenedUrl = shortenedUrl;
-        link.adFlyShortenedUrl = shortenedUrl;
-        link.adFlyShortenerId = firstApi.id;
-      } else if (
-        link.adFlyShortenedUrl &&
-        link.adFlyShortenerId === firstApi.id &&
-        isValidShortenedUrl(link.adFlyShortenedUrl, nextTargetUrl, firstApi.apiUrl)
-      ) {
-        targetUrl = link.adFlyShortenedUrl;
-        adFlyShortenedUrl = link.adFlyShortenedUrl;
-      } else {
-        console.warn(`[Links Click] First API ${firstApi.name} generation notice. Redirecting to ${nextTargetUrl}`);
-        targetUrl = nextTargetUrl;
-      }
+      targetUrl = currentTarget;
+      adFlyShortenedUrl = currentTarget;
+      link.adFlyShortenedUrl = currentTarget;
+      link.adFlyShortenerId = enabledApis[0]?.id;
     } else {
       link.adFlyShortenedUrl = undefined;
       link.adFlyShortenerId = undefined;
