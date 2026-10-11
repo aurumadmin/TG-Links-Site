@@ -335,17 +335,30 @@ function isValidShortenedUrl(url: string, targetUrl: string, candidateEndpoint: 
 
 // Single external shortener API caller helper
 async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string): Promise<string | null> {
-  if (!selectedApi || !selectedApi.apiUrl || !selectedApi.apiToken) {
+  if (!selectedApi || !selectedApi.apiUrl) {
     return null;
   }
 
-  let rawUrl = selectedApi.apiUrl.trim().split("?")[0].trim();
+  let rawApiUrl = selectedApi.apiUrl.trim();
+  let apiToken = (selectedApi.apiToken || "").trim();
+
+  // Extract apiToken from query params if not explicitly set
+  if (!apiToken && rawApiUrl.includes("api=")) {
+    try {
+      const u = new URL(rawApiUrl.startsWith("http") ? rawApiUrl : "https://" + rawApiUrl);
+      apiToken = u.searchParams.get("api") || "";
+    } catch (e) {}
+  }
+
+  if (!apiToken) {
+    return null;
+  }
+
+  let rawUrl = rawApiUrl.split("?")[0].trim();
   if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
     rawUrl = "https://" + rawUrl;
   }
   rawUrl = rawUrl.replace(/\/+$/, "");
-
-  const apiToken = selectedApi.apiToken.trim();
 
   // Generate candidate API endpoints ONLY (strictly exclude HTML form endpoints like /st)
   const candidateEndpoints: string[] = [];
