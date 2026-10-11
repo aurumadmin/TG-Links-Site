@@ -260,6 +260,35 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
   });
 }
 
+// Helper to check if extracted URL is a valid shortened link (and not an API/reCAPTCHA/asset URL)
+function isValidShortenedUrl(url: string, targetUrl: string, cleanApiUrl: string): boolean {
+  if (!url || typeof url !== "string") return false;
+  let clean = url.replace(/\\/g, "").trim();
+  if (!/^https?:\/\/[^\s"']+/i.test(clean)) return false;
+
+  const lower = clean.toLowerCase();
+  // Filter out reCAPTCHA, Cloudflare, assets, and API endpoint URLs
+  if (
+    lower.includes("google.com/recaptcha") ||
+    lower.includes("gstatic.com") ||
+    lower.includes("recaptcha.net") ||
+    lower.includes("cloudflare.com") ||
+    lower.includes("/api?api=") ||
+    lower.includes("/api/tasks") ||
+    lower.includes("recaptcha") ||
+    lower.endsWith(".js") ||
+    lower.endsWith(".css") ||
+    lower.endsWith(".png") ||
+    lower.endsWith(".jpg") ||
+    lower.endsWith(".svg") ||
+    clean === targetUrl ||
+    clean.startsWith(cleanApiUrl)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 // Single external shortener API caller helper
 async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string): Promise<string | null> {
   if (!selectedApi || !selectedApi.apiUrl || !selectedApi.apiToken) {
@@ -267,13 +296,13 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
   }
 
   let cleanApiUrl = selectedApi.apiUrl.trim();
+  // Remove any trailing query strings if user pasted full API example URL like https://domain.com/api?api=xxx&url=
+  cleanApiUrl = cleanApiUrl.split("?")[0].trim();
   if (!cleanApiUrl.startsWith("http://") && !cleanApiUrl.startsWith("https://")) {
     cleanApiUrl = "https://" + cleanApiUrl;
   }
-  if (cleanApiUrl.endsWith("/")) {
-    cleanApiUrl = cleanApiUrl.slice(0, -1);
-  }
-  if (!cleanApiUrl.includes("/api") && !cleanApiUrl.endsWith("/api")) {
+  cleanApiUrl = cleanApiUrl.replace(/\/+$/, "");
+  if (!cleanApiUrl.endsWith("/api")) {
     cleanApiUrl += "/api";
   }
 
@@ -303,42 +332,43 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
       const text = await response.text();
       let shortenedUrl = "";
 
-      try {
-        const json = JSON.parse(text);
-        if (json && json.status !== "error") {
-          shortenedUrl = 
-            json.shortenedUrl || 
-            json.shortened_url || 
-            json.shortUrl || 
-            json.short_url || 
-            json.url || 
-            json.link || 
-            json.shortlink ||
-            json.data?.shortenedUrl ||
-            json.data?.shortened_url ||
-            json.data?.url ||
-            json.data?.link ||
-            json.result?.shortenedUrl ||
-            json.result?.url ||
-            "";
-        }
-      } catch (e) {
-        const trimmedText = text.trim();
-        if (/^https?:\/\//i.test(trimmedText)) {
-          shortenedUrl = trimmedText;
-        } else {
-          const match = trimmedText.match(/https?:\/\/[^\s"']+/i);
-          if (match) {
-            shortenedUrl = match[0];
+      // Check if text is HTML (Cloudflare challenge, reCAPTCHA, 404/500 error pages)
+      const isHtml = /^\s*<(!DOCTYPE|html|head|body|script|div)/i.test(text);
+
+      if (!isHtml) {
+        try {
+          const json = JSON.parse(text);
+          if (json && (json.status === "success" || json.status !== "error")) {
+            shortenedUrl = 
+              json.shortenedUrl || 
+              json.shortened_url || 
+              json.shortUrl || 
+              json.short_url || 
+              json.url || 
+              json.link || 
+              json.shortlink ||
+              json.data?.shortenedUrl ||
+              json.data?.shortened_url ||
+              json.data?.url ||
+              json.data?.link ||
+              json.result?.shortenedUrl ||
+              json.result?.url ||
+              "";
+          }
+        } catch (e) {
+          // Plain text response (only if plain string starting with http:// and not HTML)
+          const trimmedText = text.trim();
+          if (/^https?:\/\/[^\s"']+/i.test(trimmedText) && !trimmedText.includes("<")) {
+            shortenedUrl = trimmedText;
           }
         }
       }
 
       if (shortenedUrl) {
-        shortenedUrl = shortenedUrl.replace(/\\/g, '');
+        shortenedUrl = shortenedUrl.replace(/\\/g, '').trim();
       }
 
-      if (shortenedUrl && /^https?:\/\//i.test(shortenedUrl) && !shortenedUrl.includes("/api?api=")) {
+      if (isValidShortenedUrl(shortenedUrl, targetUrl, cleanApiUrl)) {
         return shortenedUrl;
       }
     } catch (err) {
