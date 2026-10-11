@@ -347,17 +347,14 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
 
   const apiToken = selectedApi.apiToken.trim();
 
-  // Generate candidate endpoints (prefer /api FIRST as standard AdLinkFly/ShortXLinks endpoint, then /st)
+  // Generate candidate API endpoints ONLY (strictly exclude HTML form endpoints like /st)
   const candidateEndpoints: string[] = [];
   if (rawUrl.endsWith("/api")) {
     candidateEndpoints.push(rawUrl);
-    candidateEndpoints.push(rawUrl.slice(0, -4) + "/st");
   } else if (rawUrl.endsWith("/st")) {
     candidateEndpoints.push(rawUrl.slice(0, -3) + "/api");
-    candidateEndpoints.push(rawUrl);
   } else {
     candidateEndpoints.push(`${rawUrl}/api`);
-    candidateEndpoints.push(`${rawUrl}/st`);
     candidateEndpoints.push(rawUrl);
   }
 
@@ -369,80 +366,72 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
       };
 
   for (const endpoint of candidateEndpoints) {
-    try {
-      const apiRequestUrl = `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+    // Try both JSON API request and format=text API request for maximum compatibility
+    const urlVariants = [
+      `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`,
+      `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}&format=text`
+    ];
 
-      const response = await fetchFn(apiRequestUrl, { 
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "application/json, text/plain, */*"
+    for (const apiRequestUrl of urlVariants) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        const response = await fetchFn(apiRequestUrl, { 
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*"
+          }
+        });
+        clearTimeout(timeoutId);
+
+        const text = await response.text();
+        let shortenedUrl = "";
+
+        // Check if text is HTML (Cloudflare challenge, reCAPTCHA, 404/500 error pages, or forms)
+        const isHtml = /^\s*<(!DOCTYPE|html|head|body|script|div|form)/i.test(text);
+
+        if (!isHtml) {
+          try {
+            const json = JSON.parse(text);
+            if (json && (json.status === "success" || (json.status !== "error" && json.status !== "fail"))) {
+              shortenedUrl = 
+                json.shortenedUrl || 
+                json.shortened_url || 
+                json.shortUrl || 
+                json.short_url || 
+                json.url || 
+                json.link || 
+                json.shortlink ||
+                json.data?.shortenedUrl ||
+                json.data?.shortened_url ||
+                json.data?.url ||
+                json.data?.link ||
+                json.result?.shortenedUrl ||
+                json.result?.url ||
+                "";
+            }
+          } catch (e) {
+            // Plain text response (only if plain string starting with http:// and not HTML)
+            const trimmedText = text.trim();
+            if (/^https?:\/\/[^\s"']+/i.test(trimmedText) && !trimmedText.includes("<")) {
+              shortenedUrl = trimmedText;
+            }
+          }
         }
-      });
-      clearTimeout(timeoutId);
 
-      const text = await response.text();
-      let shortenedUrl = "";
-
-      // Check if text is HTML (Cloudflare challenge, reCAPTCHA, 404/500 error pages)
-      const isHtml = /^\s*<(!DOCTYPE|html|head|body|script|div)/i.test(text);
-
-      if (!isHtml) {
-        try {
-          const json = JSON.parse(text);
-          if (json && (json.status === "success" || (json.status !== "error" && json.status !== "fail"))) {
-            shortenedUrl = 
-              json.shortenedUrl || 
-              json.shortened_url || 
-              json.shortUrl || 
-              json.short_url || 
-              json.url || 
-              json.link || 
-              json.shortlink ||
-              json.data?.shortenedUrl ||
-              json.data?.shortened_url ||
-              json.data?.url ||
-              json.data?.link ||
-              json.result?.shortenedUrl ||
-              json.result?.url ||
-              "";
-          }
-        } catch (e) {
-          // Plain text response (only if plain string starting with http:// and not HTML)
-          const trimmedText = text.trim();
-          if (/^https?:\/\/[^\s"']+/i.test(trimmedText) && !trimmedText.includes("<")) {
-            shortenedUrl = trimmedText;
-          }
+        if (shortenedUrl) {
+          shortenedUrl = shortenedUrl.replace(/\\/g, '').replace(/^"+|"+$/g, '').trim();
         }
-      }
 
-      if (!shortenedUrl) {
-        // Fallback: try plain text API format parameter (&format=text)
-        try {
-          const textApiUrl = `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}&format=text`;
-          const ctrl2 = new AbortController();
-          const t2 = setTimeout(() => ctrl2.abort(), 6000);
-          const r2 = await fetchFn(textApiUrl, { signal: ctrl2.signal, headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } });
-          clearTimeout(t2);
-          const txt2 = (await r2.text()).trim();
-          if (/^https?:\/\/[^\s"']+/i.test(txt2) && !txt2.includes("<")) {
-            shortenedUrl = txt2;
-          }
-        } catch (e2) {}
+        if (isValidShortenedUrl(shortenedUrl, targetUrl, endpoint)) {
+          console.log(`[Shortener API] Successfully generated shortened URL for ${selectedApi.name}: ${shortenedUrl}`);
+          return shortenedUrl;
+        }
+      } catch (err: any) {
+        console.warn(`[Shortener API] Failed request to ${apiRequestUrl} for ${selectedApi.name}: ${err?.message || err}`);
       }
-
-      if (shortenedUrl) {
-        shortenedUrl = shortenedUrl.replace(/\\/g, '').replace(/^"+|"+$/g, '').trim();
-      }
-
-      if (isValidShortenedUrl(shortenedUrl, targetUrl, endpoint)) {
-        console.log(`[Shortener API] Successfully generated shortened URL for ${selectedApi.name}: ${shortenedUrl}`);
-        return shortenedUrl;
-      }
-    } catch (err: any) {
-      console.warn(`[Shortener API] Failed request to ${endpoint} for ${selectedApi.name}: ${err?.message || err}`);
     }
   }
 
