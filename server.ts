@@ -277,7 +277,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
       return [];
     }
 
-    // Flexible matching by ID, name, or domain
+    // Precision shortener matching for plan assigned IDs
     const matched = activeShorteners.filter((api: any) => {
       if (!api) return false;
       const apiId = String(api.id || "").toLowerCase();
@@ -286,38 +286,37 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
 
       return planShortenerIds.some((pId: string) => {
         const target = String(pId || "").toLowerCase();
-        if (target === apiId) return true;
+        if (target === apiId || target === apiName) return true;
         if (target.includes("softurl") && (apiName.includes("softurl") || apiUrl.includes("softurl"))) return true;
-        if (target.includes("shortx") && (apiName.includes("shortx") || apiUrl.includes("shortx"))) return true;
-        if (apiName && (target.includes(apiName) || apiName.includes(target))) return true;
+        if ((target === "api-shortxlinks-1" || target === "shortxlinks") && (apiId === "api-shortxlinks-1" || (apiName.includes("shortx") && !api.isFaucetApi))) return true;
         return false;
       });
     });
 
-    // Indestructible SoftURL inclusion check
+    // Ensure SoftURL is present for non-faucet multi-step plans
     const hasSoftUrlInSystem = activeShorteners.find((s: any) => 
       s && (String(s.name).toLowerCase().includes("softurl") || String(s.apiUrl).toLowerCase().includes("softurl"))
     );
     if (hasSoftUrlInSystem && !matched.some((m: any) => m.id === hasSoftUrlInSystem.id)) {
-      const planHasSoft = planShortenerIds.some((p: string) => String(p).toLowerCase().includes("softurl") || String(p).toLowerCase().includes("step2"));
-      if (planHasSoft || planShortenerIds.length >= 2 || !plan.isFaucetPlan) {
+      const planHasSoft = planShortenerIds.some((p: string) => String(p).toLowerCase().includes("softurl"));
+      if (planHasSoft || planShortenerIds.length >= 2) {
         matched.push(hasSoftUrlInSystem);
       }
     }
 
-    // Sort to preserve order of plan.shortenerIds or priority
-    matched.sort((a: any, b: any) => {
-      const idxA = planShortenerIds.findIndex((p: string) => {
-        const t = String(p).toLowerCase();
-        return t === String(a.id).toLowerCase() || (t.includes("shortx") && String(a.name).toLowerCase().includes("shortx"));
-      });
-      const idxB = planShortenerIds.findIndex((p: string) => {
-        const t = String(p).toLowerCase();
-        return t === String(b.id).toLowerCase() || (t.includes("softurl") && String(b.name).toLowerCase().includes("softurl"));
-      });
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-      return Number(b.priority || 0) - Number(a.priority || 0);
-    });
+    // Strict shortener step ranking: Rank 1 = ShortXLinks, Rank 2 = SoftURL, Rank 3+ = AdsLab/Others, Faucet = Last
+    function getShortenerRank(api: any): number {
+      if (!api) return 99;
+      if (api.isFaucetApi) return 90;
+      const apiId = String(api.id || "").toLowerCase();
+      const name = (String(api.name || "") + " " + String(api.apiUrl || "")).toLowerCase();
+      if (apiId === "api-shortxlinks-1" || (name.includes("shortx") && !name.includes("faucet"))) return 1;
+      if (apiId === "api-softurl-2" || name.includes("softurl") || name.includes("soft")) return 2;
+      if (name.includes("adslab")) return 3;
+      return 4;
+    }
+
+    matched.sort((a: any, b: any) => getShortenerRank(a) - getShortenerRank(b));
 
     return matched;
   }
