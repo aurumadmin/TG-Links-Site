@@ -1994,14 +1994,8 @@ function setupRoutes() {
 
     const userPlan = getPlanForUser(user, db);
     const isFaucetMode = checkIsFaucetMode(user, null, db);
-    const planShortenerIds = userPlan?.shortenerIds || [];
 
-    const enabledApis = (db.adFlyShorteners || []).filter((s: any) => {
-      if (!s.enabled) return false;
-      if (!!s.isFaucetApi !== isFaucetMode) return false;
-      if (planShortenerIds.length > 0) return planShortenerIds.includes(s.id);
-      return true;
-    });
+    const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
     const initVtok = createVerificationToken(code, String(req.ip || ""), requiredSteps);
     const targetPath = isFaucetMode ? "faucet" : "go-final";
@@ -2662,16 +2656,24 @@ Sitemap: ${baseUrl}/sitemap.xml`
     });
   });
 
-  // Handler for returning from Safelink / Faucet Blog pages (/p/:code or /callback/:code)
-  app.get(["/p/:code", "/callback/:code"], async (req, res, next) => {
+  // Handler for returning from Safelink / Faucet Blog pages (/p/:code, /go/:code, /faucet/:code, /callback/:code)
+  app.get(["/p/:code", "/go/:code", "/faucet/:code", "/callback/:code"], async (req, res, next) => {
     const { code } = req.params;
+    const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
+    const vtok = typeof rawVtok === "string" ? rawVtok.trim() : "";
+    const hasVtok = Boolean(vtok);
+
+    // If no verification token and no step param is in the URL, pass to next() so SPA or domain redirect handles the initial visit
+    if (!hasVtok && !req.query.step) {
+      return next();
+    }
+
     const ip = getClientIp(req);
     const db = loadDb();
 
     let link = db.links?.find((l: any) => l.code === code);
-    if (!link && (req.query.vtok || req.query.token)) {
-      const vtokStr = String(req.query.vtok || req.query.token);
-      const match = vtokStr.match(/^vtok[~_]([^~_]+)/);
+    if (!link && vtok) {
+      const match = vtok.match(/^vtok[~_]([^~_]+)/);
       if (match && match[1]) {
         const decodedCode = decodeURIComponent(match[1]);
         link = db.links?.find((l: any) => l.code === decodedCode);
@@ -2729,14 +2731,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const publicBase = getPublicBaseUrl(req, userPlan, db);
-
     const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
 
-    const vtok = createVerificationToken(link.code, String(ip), requiredSteps);
     const targetPath = isFaucetMode ? "faucet-final" : "go-final";
-    const finalLandingUrl = `${publicBase}/${targetPath}/${link.code}?vtok=${vtok}`;
+    const finalLandingUrl = `${publicBase}/${targetPath}/${link.code}?vtok=${encodeURIComponent(vtok)}`;
 
+    // If NO integrated shorteners are configured for this plan, redirect directly to final landing endpoint to verify token & redirect to originalUrl
     if (requiredSteps === 0) {
       res.setHeader("Referrer-Policy", "no-referrer");
       return res.redirect(302, finalLandingUrl);
@@ -2763,7 +2764,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const isLastStep = stepIndex === requiredSteps - 1;
     const nextTargetUrl = isLastStep
       ? finalLandingUrl
-      : `${publicBase}/p/${link.code}?step=${stepNum + 1}`;
+      : `${publicBase}/p/${link.code}?vtok=${encodeURIComponent(vtok)}&step=${stepNum + 1}`;
 
     const shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
 
@@ -2850,17 +2851,12 @@ Sitemap: ${baseUrl}/sitemap.xml`
   });
 
   // --- EXTERNAL SHORTENER CALLBACK AND LANDING ENDPOINT ---
-  app.get(["/go-final/:code", "/faucet-final/:code", "/faucet/:code"], async (req, res, next) => {
+  app.get(["/go-final/:code", "/faucet-final/:code"], async (req, res, next) => {
     const { code } = req.params;
     const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
     const vtok = typeof rawVtok === "string" ? rawVtok.trim() : "";
     const ip = getClientIp(req);
     const db = loadDb();
-
-    // If request to /faucet/:code has no vtok parameter, pass to next() so the SPA handles the landing page
-    if (req.path.startsWith("/faucet") && !vtok && !req.path.includes("final")) {
-      return next();
-    }
 
     let link = db.links.find((l: any) => l.code === code);
     if (!link && vtok) {
@@ -2888,10 +2884,16 @@ Sitemap: ${baseUrl}/sitemap.xml`
       targetUrl = "https://" + targetUrl;
     }
 
-    // Safeguard: Prevent destination URL loops if originalUrl points back to /faucet-final or /faucet
-    if (targetUrl.includes("/faucet-final") || targetUrl.includes("/go-final")) {
-      console.warn("[Loop Safeguard] Destination URL loops back to final landing page:", targetUrl);
-      targetUrl = "https://thunder-appz.eu.org";
+    // Safeguard: Prevent destination URL loops if originalUrl points back to /faucet-final, /go-final, /faucet, or /go
+    if (
+      targetUrl.includes("/faucet-final") ||
+      targetUrl.includes("/go-final") ||
+      targetUrl.includes("/faucet/") ||
+      targetUrl.includes("/go/") ||
+      targetUrl.includes("/p/")
+    ) {
+      console.warn("[Loop Safeguard] Destination URL loops back to faucet/go page:", targetUrl);
+      targetUrl = db.settings?.homepageTargetUrl || "https://thunder-appz.eu.org";
     }
 
     const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
