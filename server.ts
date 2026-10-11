@@ -240,17 +240,18 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
   let matched: any[] = [];
   if (planShortenerIds.length > 0) {
     matched = activeShorteners.filter((api: any) => planShortenerIds.includes(api.id));
+    // Preserve the EXACT order defined in plan.shortenerIds!
+    matched.sort((a: any, b: any) => planShortenerIds.indexOf(a.id) - planShortenerIds.indexOf(b.id));
+    return matched;
   }
 
-  if (matched.length === 0) {
-    matched = activeShorteners.filter((api: any) => {
-      if (isFaucetMode) {
-        return Boolean(api.isFaucetApi);
-      } else {
-        return !api.isFaucetApi;
-      }
-    });
-  }
+  matched = activeShorteners.filter((api: any) => {
+    if (isFaucetMode) {
+      return Boolean(api.isFaucetApi);
+    } else {
+      return !api.isFaucetApi;
+    }
+  });
 
   // Sort matched shorteners by priority/rank order (highest priority Rank 1 first)
   return matched.sort((a: any, b: any) => {
@@ -305,19 +306,17 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
 
   const apiToken = selectedApi.apiToken.trim();
 
-  // Generate candidate endpoints (some shortener services use /st, others use /api or direct path)
+  // Generate candidate endpoints (prefer /api FIRST as standard AdLinkFly/ShortXLinks endpoint, then /st)
   const candidateEndpoints: string[] = [];
-  if (rawUrl.endsWith("/st") || rawUrl.endsWith("/api")) {
+  if (rawUrl.endsWith("/api")) {
     candidateEndpoints.push(rawUrl);
-    if (rawUrl.endsWith("/st")) {
-      candidateEndpoints.push(rawUrl.slice(0, -3) + "/api");
-    } else {
-      candidateEndpoints.push(rawUrl.slice(0, -4) + "/st");
-    }
+    candidateEndpoints.push(rawUrl.slice(0, -4) + "/st");
+  } else if (rawUrl.endsWith("/st")) {
+    candidateEndpoints.push(rawUrl.slice(0, -3) + "/api");
+    candidateEndpoints.push(rawUrl);
   } else {
-    // Try /st first (for ShortXLinks, etc.), then /api (for AdLinkFly/ShrinkMe), then raw domain
-    candidateEndpoints.push(`${rawUrl}/st`);
     candidateEndpoints.push(`${rawUrl}/api`);
+    candidateEndpoints.push(`${rawUrl}/st`);
     candidateEndpoints.push(rawUrl);
   }
 
@@ -332,7 +331,7 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     try {
       const apiRequestUrl = `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const response = await fetchFn(apiRequestUrl, { 
         signal: controller.signal,
