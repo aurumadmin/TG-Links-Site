@@ -1208,14 +1208,15 @@ function loadDb() {
     const allShorteners = db.adFlyShorteners || [];
     const allIds = allShorteners.map((s: any) => s.id);
     const faucetIds = allShorteners.filter((s: any) => s.isFaucetApi).map((s: any) => s.id);
-    const defaultShorteners = faucetIds.length > 0 ? faucetIds : allIds;
+    const nonFaucetIds = allShorteners.filter((s: any) => !s.isFaucetApi).map((s: any) => s.id);
+    const defaultNonFaucetShorteners = nonFaucetIds.length > 0 ? nonFaucetIds : allIds.slice(0, 2);
 
     db.plans = [
       {
         id: "default",
         name: "Default Plan",
         cpm: 10.0,
-        shortenerIds: defaultShorteners,
+        shortenerIds: defaultNonFaucetShorteners,
         blogPageUrl: "https://thunder-appz.eu.org",
         description: "Default high-converting shortener pipeline with instant link generation and standard payout rates.",
         isDefault: true,
@@ -1239,7 +1240,7 @@ function loadDb() {
         id: "standard",
         name: "Standard Plan",
         cpm: 12.50,
-        shortenerIds: allIds.slice(0, 2),
+        shortenerIds: defaultNonFaucetShorteners,
         blogPageUrl: "https://thunder-appz.eu.org",
         description: "Optimized payout tier for active creators looking for higher CPM yield.",
         isDefault: false,
@@ -1251,7 +1252,7 @@ function loadDb() {
         id: "premium",
         name: "Premium Plan",
         cpm: 15.0,
-        shortenerIds: allIds.slice(2, 4).length > 0 ? allIds.slice(2, 4) : allIds.slice(0, 1),
+        shortenerIds: defaultNonFaucetShorteners,
         blogPageUrl: "https://thunder-appz.eu.org",
         description: "High-yield monetization plan engineered for targeted high quality publisher traffic.",
         isDefault: false,
@@ -1263,7 +1264,7 @@ function loadDb() {
         id: "vip",
         name: "VIP Publisher Plan",
         cpm: 20.0,
-        shortenerIds: defaultShorteners,
+        shortenerIds: defaultNonFaucetShorteners,
         blogPageUrl: "https://thunder-appz.eu.org",
         description: "Maximized CPM tier for top-tier volume publishers and network creators.",
         isDefault: false,
