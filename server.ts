@@ -2744,6 +2744,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const vtok = typeof rawVtok === "string" ? rawVtok.trim() : "";
     const hasVtok = Boolean(vtok);
 
+    console.log(`[ROUTE /p/:code DEBUG] path=${req.path}, step=${req.query.step}, vtok=${vtok}, host=${req.headers.host}`);
+
     // If no verification token and no step param is in the URL, pass to next() so SPA or domain redirect handles the initial visit
     if (!hasVtok && !req.query.step) {
       return next();
