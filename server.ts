@@ -237,25 +237,121 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
   // Consider shorteners that are enabled (enabled !== false)
   const activeShorteners = allShorteners.filter((api: any) => api && api.enabled !== false);
 
+  let matched: any[] = [];
   if (planShortenerIds.length > 0) {
-    const matched = activeShorteners.filter((api: any) => planShortenerIds.includes(api.id));
-    if (matched.length > 0) {
-      return matched;
-    }
+    matched = activeShorteners.filter((api: any) => planShortenerIds.includes(api.id));
   }
 
-  // Fallback: If no shortener IDs in plan matched, or if list was unpopulated,
-  // return active shorteners matching the mode (Faucet vs Non-Faucet)
-  return activeShorteners.filter((api: any) => {
-    if (isFaucetMode) {
-      return Boolean(api.isFaucetApi);
-    } else {
-      return !api.isFaucetApi;
-    }
+  if (matched.length === 0) {
+    matched = activeShorteners.filter((api: any) => {
+      if (isFaucetMode) {
+        return Boolean(api.isFaucetApi);
+      } else {
+        return !api.isFaucetApi;
+      }
+    });
+  }
+
+  // Sort matched shorteners by priority/rank order (highest priority Rank 1 first)
+  return matched.sort((a: any, b: any) => {
+    const pA = Number(a.priority || 0);
+    const pB = Number(b.priority || 0);
+    return pB - pA;
   });
 }
 
-// Helper to syndicate a link with external AdLinkFly shortener APIs dynamically based on Publisher Plan
+// Single external shortener API caller helper
+async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string): Promise<string | null> {
+  if (!selectedApi || !selectedApi.apiUrl || !selectedApi.apiToken) {
+    return null;
+  }
+
+  let cleanApiUrl = selectedApi.apiUrl.trim();
+  if (!cleanApiUrl.startsWith("http://") && !cleanApiUrl.startsWith("https://")) {
+    cleanApiUrl = "https://" + cleanApiUrl;
+  }
+  if (cleanApiUrl.endsWith("/")) {
+    cleanApiUrl = cleanApiUrl.slice(0, -1);
+  }
+  if (!cleanApiUrl.includes("/api") && !cleanApiUrl.endsWith("/api")) {
+    cleanApiUrl += "/api";
+  }
+
+  const apiToken = selectedApi.apiToken.trim();
+  const fetchFn = typeof globalThis.fetch === "function" 
+    ? globalThis.fetch 
+    : async (...args: any[]) => {
+        const { default: f } = await import("node-fetch");
+        return (f as any)(...args);
+      };
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const apiRequestUrl = `${cleanApiUrl}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      const response = await fetchFn(apiRequestUrl, { 
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*"
+        }
+      });
+      clearTimeout(timeoutId);
+
+      const text = await response.text();
+      let shortenedUrl = "";
+
+      try {
+        const json = JSON.parse(text);
+        if (json && json.status !== "error") {
+          shortenedUrl = 
+            json.shortenedUrl || 
+            json.shortened_url || 
+            json.shortUrl || 
+            json.short_url || 
+            json.url || 
+            json.link || 
+            json.shortlink ||
+            json.data?.shortenedUrl ||
+            json.data?.shortened_url ||
+            json.data?.url ||
+            json.data?.link ||
+            json.result?.shortenedUrl ||
+            json.result?.url ||
+            "";
+        }
+      } catch (e) {
+        const trimmedText = text.trim();
+        if (/^https?:\/\//i.test(trimmedText)) {
+          shortenedUrl = trimmedText;
+        } else {
+          const match = trimmedText.match(/https?:\/\/[^\s"']+/i);
+          if (match) {
+            shortenedUrl = match[0];
+          }
+        }
+      }
+
+      if (shortenedUrl) {
+        shortenedUrl = shortenedUrl.replace(/\\/g, '');
+      }
+
+      if (shortenedUrl && /^https?:\/\//i.test(shortenedUrl) && !shortenedUrl.includes("/api?api=")) {
+        return shortenedUrl;
+      }
+    } catch (err) {
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    }
+  }
+
+  return null;
+}
+
+// Helper to generate initial step shortener URL for link creation
 async function getExternalShortenedUrl(
   finalDestinationUrl: string, 
   db: any, 
@@ -269,107 +365,35 @@ async function getExternalShortenedUrl(
   if (enabledApis.length === 0) return null;
 
   const requiredCount = enabledApis.length;
+  const firstApi = enabledApis[0];
+  const codeMatch = finalDestinationUrl.match(/\/(?:go-final|faucet-final|faucet|go)\/([^?\/]+)/);
+  const code = codeMatch ? codeMatch[1] : "";
 
-  // Sort by priority/rank order (highest priority first). If equal, maintain set order (Rank #1, Rank #2, etc.)
-  const sortedApis = [...enabledApis].sort((a: any, b: any) => {
-    const pA = Number(a.priority || 0);
-    const pB = Number(b.priority || 0);
-    if (pB !== pA) {
-      return pB - pA;
-    }
-    return 0;
-  });
-
-  const fetchFn = typeof globalThis.fetch === "function" 
-    ? globalThis.fetch 
-    : async (...args: any[]) => {
-        const { default: f } = await import("node-fetch");
-        return (f as any)(...args);
-      };
-
-  // Chain active shorteners in sequence from Rank #1 down to the last Rank so visitor completes EVERY enabled shortener:
-  // Rank #1 -> Rank #2 -> Rank #3 ... -> finalDestinationUrl (/go-final/{code})
-  // To achieve this, we wrap starting from the last rank towards the first rank.
-  let currentTargetUrl = finalDestinationUrl;
-  let topSuccessfulApiId = "";
-  let chainedCount = 0;
-
-  const reversedApis = [...sortedApis].reverse();
-
-  for (const selectedApi of reversedApis) {
-    let apiSuccess = false;
-    let shortenedUrl = "";
-
-    let cleanApiUrl = selectedApi.apiUrl.trim();
-    if (!cleanApiUrl.startsWith("http://") && !cleanApiUrl.startsWith("https://")) {
-      cleanApiUrl = "https://" + cleanApiUrl;
-    }
-    if (cleanApiUrl.endsWith("/")) {
-      cleanApiUrl = cleanApiUrl.slice(0, -1);
-    }
-    if (!cleanApiUrl.includes("/api") && !cleanApiUrl.endsWith("/api")) {
-      cleanApiUrl += "/api";
-    }
-
-    // Retry up to 3 times per shortener API to handle transient timeouts
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const apiRequestUrl = `${cleanApiUrl}?api=${selectedApi.apiToken}&url=${encodeURIComponent(currentTargetUrl)}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-        const response = await fetchFn(apiRequestUrl, { 
-          signal: controller.signal,
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*"
-          }
-        });
-        clearTimeout(timeoutId);
-
-        const text = await response.text();
-
-        try {
-          const json = JSON.parse(text);
-          if (json && json.status !== "error") {
-            if (json.status === "success" || json.shortenedUrl || json.url) {
-              shortenedUrl = json.shortenedUrl || json.url || "";
-            }
-          }
-        } catch (e) {
-          const trimmedText = text.trim();
-          if (/^https?:\/\//i.test(trimmedText)) {
-            shortenedUrl = trimmedText;
-          }
-        }
-
-        if (shortenedUrl && /^https?:\/\//i.test(shortenedUrl)) {
-          apiSuccess = true;
-          break; // API successfully shortened!
-        }
-      } catch (err: any) {
-        if (attempt < 3) {
-          await new Promise((r) => setTimeout(r, 600));
-        }
-      }
-    }
-
-    if (apiSuccess && shortenedUrl) {
-      currentTargetUrl = shortenedUrl;
-      topSuccessfulApiId = selectedApi.id;
-      chainedCount++;
-    } else {
-      console.warn(`[SHORTENER API] Call to ${selectedApi.name} (${cleanApiUrl}) did not return a valid shortened URL. Skipping this shortener step.`);
-    }
+  let nextTargetUrl = finalDestinationUrl;
+  if (requiredCount > 1 && code) {
+    const protocol = finalDestinationUrl.startsWith("https") ? "https" : "http";
+    const hostMatch = finalDestinationUrl.match(/https?:\/\/([^\/]+)/);
+    const host = hostMatch ? hostMatch[1] : "thunder-appz.eu.org";
+    nextTargetUrl = `${protocol}://${host}/p/${code}?step=2`;
   }
 
-  const fullChainSuccess = chainedCount > 0 && currentTargetUrl !== finalDestinationUrl;
-  return { 
-    id: topSuccessfulApiId, 
-    url: currentTargetUrl, 
-    fullChainSuccess, 
-    chainedCount, 
-    requiredCount 
+  const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
+  if (shortenedUrl) {
+    return {
+      id: firstApi.id,
+      url: shortenedUrl,
+      fullChainSuccess: true,
+      chainedCount: 1,
+      requiredCount
+    };
+  }
+
+  return {
+    id: firstApi.id,
+    url: nextTargetUrl,
+    fullChainSuccess: false,
+    chainedCount: 0,
+    requiredCount
   };
 }
 
@@ -1078,7 +1102,7 @@ function loadDb() {
         name: "ShortXLinks",
         apiUrl: "https://shortxlinks.com/",
         apiToken: "b6ac099187a0572e9d24ce4a679e9eb10115b02d",
-        enabled: false,
+        enabled: true,
         priority: 6,
         isFaucetApi: false
       },
@@ -1087,7 +1111,7 @@ function loadDb() {
         name: "EasySky",
         apiUrl: "https://easysky.in/",
         apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
-        enabled: false,
+        enabled: true,
         priority: 5,
         isFaucetApi: false
       },
@@ -1096,7 +1120,7 @@ function loadDb() {
         name: "ShortXLinks-Faucet",
         apiUrl: "https://shortxlinks.com/",
         apiToken: "b6ac099187a0572e9d24ce4a679e9eb10115b02d",
-        enabled: false,
+        enabled: true,
         priority: 4,
         isFaucetApi: true
       },
@@ -1105,7 +1129,7 @@ function loadDb() {
         name: "EasySky-Faucet",
         apiUrl: "https://easysky.in/",
         apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
-        enabled: false,
+        enabled: true,
         priority: 3,
         isFaucetApi: true
       },
@@ -1114,7 +1138,7 @@ function loadDb() {
         name: "Oii",
         apiUrl: "https://oii.io/",
         apiToken: "1edc96d59f77f395d8efd79d5feebbc1f2e82bc2",
-        enabled: false,
+        enabled: true,
         priority: 2,
         isFaucetApi: true
       },
@@ -1123,7 +1147,7 @@ function loadDb() {
         name: "LinkNext",
         apiUrl: "https://linknext.io/",
         apiToken: "cbc6cb0ca4ebfc65f8bc87556094cf5e2fafeaee",
-        enabled: false,
+        enabled: true,
         priority: 1,
         isFaucetApi: true
       }
@@ -2458,28 +2482,30 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const targetPath = isFaucetMode ? "faucet-final" : "go-final";
     const finalLandingUrl = `${protocol}://${host}/${targetPath}/${link.code}?vtok=${vtok}`;
 
-    // Dynamically retrieve or re-evaluate the external shortened URL wrapping finalLandingUrl
+    let targetUrl = finalLandingUrl;
     let adFlyShortenedUrl: string | undefined = undefined;
 
     if (requiredSteps > 0) {
-      const external = await getExternalShortenedUrl(finalLandingUrl, db, user, user?.planId);
-      if (external && external.fullChainSuccess && external.url) {
-        adFlyShortenedUrl = external.url;
-        link.adFlyShortenedUrl = external.url;
-        link.adFlyShortenerId = external.id;
+      const firstApi = enabledApis[0];
+      const nextTargetUrl = requiredSteps > 1
+        ? `${protocol}://${host}/p/${link.code}?step=2`
+        : finalLandingUrl;
+
+      const shortenedUrl = await getSingleExternalShortenedUrl(firstApi, nextTargetUrl);
+      if (shortenedUrl) {
+        targetUrl = shortenedUrl;
+        adFlyShortenedUrl = shortenedUrl;
+        link.adFlyShortenedUrl = shortenedUrl;
+        link.adFlyShortenerId = firstApi.id;
       } else {
-        // Fallback gracefully to final landing URL if API shortener is unreachable
-        adFlyShortenedUrl = undefined;
+        targetUrl = nextTargetUrl;
       }
     } else {
-      adFlyShortenedUrl = undefined;
       link.adFlyShortenedUrl = undefined;
       link.adFlyShortenerId = undefined;
     }
 
     saveDb(db);
-
-    const targetUrl = adFlyShortenedUrl || finalLandingUrl;
 
     res.json({ 
       success: true, 
@@ -2552,7 +2578,6 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
 
-    const user = link.userId !== "guest" ? linkOwner : null;
     const protocol = getRequestProtocol(req);
     const host = getRequestHost(req);
 
@@ -2560,27 +2585,47 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const targetPath = isFaucetMode ? "faucet-final" : "go-final";
     const finalLandingUrl = `${protocol}://${host}/${targetPath}/${link.code}?vtok=${vtok}`;
 
-    if (requiredSteps > 0) {
-      // Plan HAS API shortlink(s) added from admin panel:
-      // Redirect them FIRST to complete those external shorteners!
-      const external = await getExternalShortenedUrl(finalLandingUrl, db, user, user?.planId);
-      if (external && external.fullChainSuccess && external.url) {
-        link.adFlyShortenedUrl = external.url;
-        link.adFlyShortenerId = external.id;
-        saveDb(db);
-        res.setHeader("Referrer-Policy", "no-referrer");
-        return res.redirect(302, external.url);
-      } else {
-        // Fallback: If external shortener API fails/times out, directly redirect to final landing URL so user is never blocked!
-        saveDb(db);
-        res.setHeader("Referrer-Policy", "no-referrer");
-        return res.redirect(302, finalLandingUrl);
-      }
-    } else {
-      // Plan has NO API shortlinks added from admin panel:
-      // DIRECTLY redirect them to final destination link via finalLandingUrl (which verifies vtok, records click, credits wallet, and 302 redirects to link.originalUrl)!
+    if (requiredSteps === 0) {
       res.setHeader("Referrer-Policy", "no-referrer");
       return res.redirect(302, finalLandingUrl);
+    }
+
+    // Determine current step index from query param ?step=N
+    const rawStep = req.query.step;
+    let stepNum = 1;
+    if (rawStep) {
+      const parsed = parseInt(String(rawStep), 10);
+      if (!isNaN(parsed) && parsed >= 1) {
+        stepNum = parsed;
+      }
+    }
+
+    const stepIndex = stepNum - 1;
+
+    if (stepIndex >= requiredSteps) {
+      res.setHeader("Referrer-Policy", "no-referrer");
+      return res.redirect(302, finalLandingUrl);
+    }
+
+    const currentApi = enabledApis[stepIndex];
+    const isLastStep = stepIndex === requiredSteps - 1;
+    const nextTargetUrl = isLastStep
+      ? finalLandingUrl
+      : `${protocol}://${host}/p/${link.code}?step=${stepNum + 1}`;
+
+    const shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
+
+    if (shortenedUrl) {
+      link.adFlyShortenedUrl = shortenedUrl;
+      link.adFlyShortenerId = currentApi.id;
+    }
+    saveDb(db);
+
+    res.setHeader("Referrer-Policy", "no-referrer");
+    if (shortenedUrl) {
+      return res.redirect(302, shortenedUrl);
+    } else {
+      return res.redirect(302, nextTargetUrl);
     }
   });
 
