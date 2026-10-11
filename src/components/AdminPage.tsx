@@ -5621,7 +5621,9 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
 
                   <div className="divide-y divide-slate-800">
                     {adminPlansList.map((plan) => {
-                      const matchedShortenerCount = plan.shortenerIds?.length || 0;
+                      const matchedShorteners = (plan.shortenerIds || [])
+                        .map((id: string) => externalApis.find(api => api.id === id && api.enabled !== false))
+                        .filter(Boolean);
                       return (
                         <div key={plan.id} className="p-4 hover:bg-slate-850/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="space-y-1">
@@ -5652,10 +5654,21 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                               {plan.description || "No description provided."}
                             </p>
 
-                            <div className="flex items-center gap-3 text-[11px] text-slate-500 pt-1 font-mono">
-                              <span>Shorteners: {matchedShortenerCount} assigned</span>
-                              <span>•</span>
-                              <span className="truncate max-w-[200px]">Blog: {plan.blogPageUrl ? plan.blogPageUrl.replace(/^https?:\/\//, "") : "thunder-appz.eu.org"}</span>
+                            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]">
+                              <span className="text-slate-500 font-mono font-bold">Shorteners ({matchedShorteners.length}):</span>
+                              {matchedShorteners.length === 0 ? (
+                                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                                  Direct Landing (No Shorteners)
+                                </span>
+                              ) : (
+                                matchedShorteners.map((s: any, idx: number) => (
+                                  <span key={s.id} className="text-[10px] font-bold text-indigo-300 bg-indigo-950/60 border border-indigo-800/40 px-2 py-0.5 rounded-md flex items-center gap-1">
+                                    <span className="text-slate-500 font-normal">#{idx + 1}</span> {s.name}
+                                  </span>
+                                ))
+                              )}
+                              <span className="text-slate-600 ml-1">•</span>
+                              <span className="truncate max-w-[200px] text-slate-500 font-mono">Blog: {plan.blogPageUrl ? plan.blogPageUrl.replace(/^https?:\/\//, "") : "thunder-appz.eu.org"}</span>
                             </div>
                           </div>
 

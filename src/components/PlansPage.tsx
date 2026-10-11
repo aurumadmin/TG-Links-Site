@@ -81,12 +81,13 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
   // Helper to get shortener names for a plan
   const getShortenerNames = (plan: PublisherPlan) => {
     if (!plan.shortenerIds || plan.shortenerIds.length === 0) {
-      return ["Default Integrated Shorteners"];
+      return ["Direct Landing (No Shorteners)"];
     }
-    const matched = shorteners
-      .filter(s => plan.shortenerIds.includes(s.id))
+    const matched = plan.shortenerIds
+      .map(id => shorteners.find(s => s.id === id && s.enabled !== false))
+      .filter((s): s is AdFlyShortener => Boolean(s))
       .map(s => s.name);
-    return matched.length > 0 ? matched : ["Default Integrated Shorteners"];
+    return matched.length > 0 ? matched : ["Direct Landing (No Shorteners)"];
   };
 
   return (
@@ -197,6 +198,25 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
                   <p className="text-xs text-slate-300 leading-relaxed mb-6">
                     {plan.description || "High conversion publisher shortener pipeline with instant view counting."}
                   </p>
+
+                  {/* Assigned Shorteners Pipeline */}
+                  <div className="pt-3 border-t border-slate-800/80 mb-6">
+                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider block mb-2">
+                      Shortener Chain ({shortenerList.length})
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {shortenerList.map((name, i) => (
+                        <span key={i} className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${
+                          name.includes("Direct") 
+                            ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                            : "bg-indigo-950/60 text-indigo-300 border-indigo-800/40"
+                        }`}>
+                          {!name.includes("Direct") && <span className="text-slate-500 font-normal mr-1">#{i + 1}</span>}
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
 
                   {/* Features & Details */}
                   <div className="space-y-4 mb-8 text-xs">

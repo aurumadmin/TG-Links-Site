@@ -2622,7 +2622,15 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const ip = getClientIp(req);
     const db = loadDb();
 
-    const link = db.links?.find((l: any) => l.code === code);
+    let link = db.links?.find((l: any) => l.code === code);
+    if (!link && (req.query.vtok || req.query.token)) {
+      const vtokStr = String(req.query.vtok || req.query.token);
+      const match = vtokStr.match(/^vtok[~_]([^~_]+)/);
+      if (match && match[1]) {
+        const decodedCode = decodeURIComponent(match[1]);
+        link = db.links?.find((l: any) => l.code === decodedCode);
+      }
+    }
     if (!link) return next();
 
     if (link.status === "suspended") {
