@@ -2602,6 +2602,52 @@ Sitemap: ${baseUrl}/sitemap.xml`
     } else {
       link.adFlyShortenedUrl = undefined;
       link.adFlyShortenerId = undefined;
+
+      // Direct destination: Return originalUrl directly without intermediate /faucet-final/ or /go-final/
+      let directTarget = link.originalUrl || "https://thunder-appz.eu.org";
+      if (!directTarget.startsWith("http://") && !directTarget.startsWith("https://")) {
+        directTarget = "https://" + directTarget;
+      }
+      targetUrl = directTarget;
+
+      // Record view & earnings directly since user completed main ad/faucet page
+      const hasPaidClickToday = db.clicksLog.some(
+        (c: any) => {
+          let loggedIp = c.ip;
+          if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+            loggedIp = loggedIp.split(",")[0].trim();
+          }
+          return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
+        }
+      );
+
+      const currentCpm = getCurrentCpmForLink(link, db);
+      const earningAmount = hasPaidClickToday ? 0 : (currentCpm / 1000);
+      const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || req.query.referrer || "Direct / Unknown") as string;
+
+      const clickId = "c-" + Math.random().toString(36).substring(2, 9);
+      const click: ClickLog = {
+        id: clickId,
+        linkId: link.id,
+        userId: link.userId,
+        timestamp: new Date().toISOString(),
+        ip: String(ip),
+        earning: earningAmount,
+        country: "Global",
+        referrer: rawReferrer
+      };
+      db.clicksLog.push(click);
+
+      link.clicks += 1;
+      link.earnings += earningAmount;
+
+      if (link.userId && link.userId !== "guest") {
+        const { user: linkUser } = getUserIdentifiers(db, link.userId);
+        if (linkUser && !linkUser.banned) {
+          linkUser.balance = Number(((linkUser.balance || 0) + earningAmount).toFixed(6));
+          linkUser.totalEarned = Number(((linkUser.totalEarned || 0) + earningAmount).toFixed(6));
+        }
+      }
     }
 
     saveDb(db);
