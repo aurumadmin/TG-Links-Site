@@ -289,6 +289,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
         if (target === apiId || target === apiName) return true;
         if (target.includes("softurl") && (apiName.includes("softurl") || apiUrl.includes("softurl"))) return true;
         if ((target === "api-shortxlinks-1" || target === "shortxlinks") && (apiId === "api-shortxlinks-1" || (apiName.includes("shortx") && !api.isFaucetApi))) return true;
+        if (target.includes("adslab") && (apiId.includes("adslab") || apiName.includes("adslab"))) return true;
         return false;
       });
     });
@@ -385,8 +386,24 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     } catch (e) {}
   }
 
-  if (!apiToken) {
+  if (!apiToken && !selectedApi.id?.includes("adslab") && !selectedApi.name?.toLowerCase().includes("adslab")) {
     return null;
+  }
+
+  // Handle AdsLab as Step 3 shortener / safelink captcha destination
+  if (selectedApi.id === "api-adslab-3" || String(selectedApi.name || "").toLowerCase().includes("adslab")) {
+    const codeMatch = targetUrl.match(/\/(?:go-final|faucet-final|p|faucet|go)\/([^?\/]+)/);
+    const code = codeMatch ? codeMatch[1] : "";
+    let vtok = "";
+    try {
+      const u = new URL(targetUrl.startsWith("http") ? targetUrl : "https://" + targetUrl);
+      vtok = u.searchParams.get("vtok") || "";
+    } catch (e) {}
+
+    const registeredDomain = "https://thunder-appz.eu.org";
+    if (code) {
+      return `${registeredDomain}/go/${code}${vtok ? `?vtok=${encodeURIComponent(vtok)}` : ""}`;
+    }
   }
 
   let rawUrl = rawApiUrl.split("?")[0].trim();
