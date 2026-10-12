@@ -327,14 +327,23 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     if (isFaucetMode) {
       return Boolean(api.isFaucetApi);
     } else {
-      return !api.isFaucetApi;
+      // Non-faucet shortener pipeline: strictly ShortXLinks and SoftURL
+      const name = (String(api.name || "") + " " + String(api.apiUrl || "") + " " + String(api.id || "")).toLowerCase();
+      return !api.isFaucetApi && (name.includes("shortx") || name.includes("softurl"));
     }
   });
 
   return matched.sort((a: any, b: any) => {
-    const pA = Number(a.priority || 0);
-    const pB = Number(b.priority || 0);
-    return pB - pA;
+    function getShortenerRank(api: any): number {
+      if (!api) return 99;
+      if (api.isFaucetApi) return 90;
+      const apiId = String(api.id || "").toLowerCase();
+      const name = (String(api.name || "") + " " + String(api.apiUrl || "")).toLowerCase();
+      if (apiId === "api-shortxlinks-1" || (name.includes("shortx") && !name.includes("faucet"))) return 1;
+      if (apiId === "api-softurl-2" || name.includes("softurl") || name.includes("soft")) return 2;
+      return 3;
+    }
+    return getShortenerRank(a) - getShortenerRank(b);
   });
 }
 
