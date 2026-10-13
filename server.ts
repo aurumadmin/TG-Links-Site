@@ -310,7 +310,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     }
   }
 
-  // Fallback default 2-step pipeline: ShortXLinks -> AdsLab
+  // Fallback default 3-step pipeline: ShortXLinks -> SoftURL -> AdsLab
   const shortx = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi) || {
     id: "api-shortxlinks-1",
     name: "ShortXLinks",
@@ -320,8 +320,17 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     isFaucetApi: false
   };
 
-  const adslab1 = {
-    id: "api-adslab-step2",
+  const softurl = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl")) || {
+    id: "api-softurl-2",
+    name: "SoftURL",
+    apiUrl: "https://softurl.in/api",
+    apiToken: "609c875b96d61f0592bfe5ae036b2db1df673680",
+    enabled: true,
+    isFaucetApi: false
+  };
+
+  const adslab = {
+    id: "api-adslab-step3",
     name: "AdsLab",
     apiUrl: "https://thunder-appz.eu.org/go",
     apiToken: db?.settings?.adslabApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
@@ -329,7 +338,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     isFaucetApi: false
   };
 
-  return [shortx, adslab1];
+  return [shortx, softurl, adslab];
 }
 
 // Helper to check if extracted URL is a valid shortened link (and not an API/reCAPTCHA/asset URL)
@@ -442,7 +451,7 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     for (const apiRequestUrl of urlVariants) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         const response = await fetchFn(apiRequestUrl, { 
           signal: controller.signal,
@@ -502,7 +511,14 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     }
   }
 
-  // If API requests fail, do NOT return invalid /st fallback URLs which cause "URL is invalid" errors in browser
+  // Fallback to official AdLinkFly QuickLink URL (/st) if API request fails/times out
+  let baseDomain = rawUrl.endsWith("/api") ? rawUrl.slice(0, -4) : rawUrl.replace(/\/st$/, "");
+  if (baseDomain && apiToken) {
+    const quickLink = `${baseDomain}/st?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`;
+    console.log(`[Shortener API] Using QuickLink fallback for ${selectedApi.name}: ${quickLink}`);
+    return quickLink;
+  }
+
   console.warn(`[Shortener API] Unable to generate shortened URL for ${selectedApi.name} via API endpoints.`);
   return null;
 }

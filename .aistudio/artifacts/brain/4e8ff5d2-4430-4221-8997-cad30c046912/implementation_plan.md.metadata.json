@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan for 3-step shortener pipeline (ShortXLinks -> SoftURL -> AdsLab -> Destination)",
+  "updatedAt": "2026-10-13T16:00:30.230270964Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
