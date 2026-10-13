@@ -271,80 +271,74 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
   // Consider shorteners that are active in the system (enabled !== false)
   const activeShorteners = allShorteners.filter((api: any) => api && api.enabled !== false);
 
-  if (plan && Array.isArray(plan.shortenerIds)) {
+  if (plan && Array.isArray(plan.shortenerIds) && plan.shortenerIds.length > 0) {
     const planShortenerIds: string[] = plan.shortenerIds;
-    if (planShortenerIds.length === 0) {
-      return [];
-    }
+    const result: any[] = [];
 
-    // Precision shortener matching for plan assigned IDs
-    const matched = activeShorteners.filter((api: any) => {
-      if (!api) return false;
-      const apiId = String(api.id || "").toLowerCase();
-      const apiName = String(api.name || "").toLowerCase();
-      const apiUrl = String(api.apiUrl || "").toLowerCase();
+    for (let idx = 0; idx < planShortenerIds.length; idx++) {
+      const pId = planShortenerIds[idx];
+      const target = String(pId || "").toLowerCase();
 
-      return planShortenerIds.some((pId: string) => {
-        const target = String(pId || "").toLowerCase();
-        if (target === apiId || target === apiName) return true;
-        if (target.includes("softurl") && (apiName.includes("softurl") || apiUrl.includes("softurl"))) return true;
-        if ((target === "api-shortxlinks-1" || target === "shortxlinks") && (apiId === "api-shortxlinks-1" || (apiName.includes("shortx") && !api.isFaucetApi))) return true;
-        if (target.includes("adslab") && (apiId.includes("adslab") || apiName.includes("adslab"))) return true;
-        return false;
+      let found = activeShorteners.find((s: any) => {
+        const sId = String(s.id || "").toLowerCase();
+        const sName = String(s.name || "").toLowerCase();
+        return sId === target || sName === target;
       });
-    });
 
-    // Ensure SoftURL is present for non-faucet multi-step plans
-    const hasSoftUrlInSystem = activeShorteners.find((s: any) => 
-      s && (String(s.name).toLowerCase().includes("softurl") || String(s.apiUrl).toLowerCase().includes("softurl"))
-    );
-    if (hasSoftUrlInSystem && !matched.some((m: any) => m.id === hasSoftUrlInSystem.id)) {
-      const planHasSoft = planShortenerIds.some((p: string) => String(p).toLowerCase().includes("softurl"));
-      if (planHasSoft || planShortenerIds.length >= 2) {
-        matched.push(hasSoftUrlInSystem);
+      if (!found && target.includes("adslab")) {
+        found = {
+          id: pId || `api-adslab-${idx + 1}`,
+          name: "AdsLab",
+          apiUrl: "https://thunder-appz.eu.org/go",
+          apiToken: db?.settings?.adslabApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
+          enabled: true,
+          isFaucetApi: false
+        };
+      } else if (!found && (target.includes("shortx") || target === "api-shortxlinks-1")) {
+        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi);
+      } else if (!found && (target.includes("softurl") || target === "api-softurl-2")) {
+        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl"));
+      }
+
+      if (found) {
+        result.push({ ...found, stepKey: `${found.id}-${idx}` });
       }
     }
 
-    // Strict shortener step ranking: Rank 1 = ShortXLinks, Rank 2 = SoftURL, Rank 3+ = AdsLab/Others, Faucet = Last
-    function getShortenerRank(api: any): number {
-      if (!api) return 99;
-      if (api.isFaucetApi) return 90;
-      const apiId = String(api.id || "").toLowerCase();
-      const name = (String(api.name || "") + " " + String(api.apiUrl || "")).toLowerCase();
-      if (apiId === "api-shortxlinks-1" || (name.includes("shortx") && !name.includes("faucet"))) return 1;
-      if (apiId === "api-softurl-2" || name.includes("softurl") || name.includes("soft")) return 2;
-      if (name.includes("adslab")) return 3;
-      return 4;
+    if (result.length > 0) {
+      return result;
     }
-
-    matched.sort((a: any, b: any) => getShortenerRank(a) - getShortenerRank(b));
-
-    return matched;
   }
 
-  // Fallback ONLY for legacy plans with no shortenerIds field at all
-  let matched = activeShorteners.filter((api: any) => {
-    if (isFaucetMode) {
-      return Boolean(api.isFaucetApi);
-    } else {
-      // Non-faucet shortener pipeline: strictly ShortXLinks and SoftURL
-      const name = (String(api.name || "") + " " + String(api.apiUrl || "") + " " + String(api.id || "")).toLowerCase();
-      return !api.isFaucetApi && (name.includes("shortx") || name.includes("softurl"));
-    }
-  });
+  // Fallback default pipeline: ShortXLinks -> AdsLab -> AdsLab (AdsLab appearing twice)
+  const shortx = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi) || {
+    id: "api-shortxlinks-1",
+    name: "ShortXLinks",
+    apiUrl: "https://shortxlinks.com/",
+    apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1",
+    enabled: true,
+    isFaucetApi: false
+  };
 
-  return matched.sort((a: any, b: any) => {
-    function getShortenerRank(api: any): number {
-      if (!api) return 99;
-      if (api.isFaucetApi) return 90;
-      const apiId = String(api.id || "").toLowerCase();
-      const name = (String(api.name || "") + " " + String(api.apiUrl || "")).toLowerCase();
-      if (apiId === "api-shortxlinks-1" || (name.includes("shortx") && !name.includes("faucet"))) return 1;
-      if (apiId === "api-softurl-2" || name.includes("softurl") || name.includes("soft")) return 2;
-      return 3;
-    }
-    return getShortenerRank(a) - getShortenerRank(b);
-  });
+  const adslab1 = {
+    id: "api-adslab-step2",
+    name: "AdsLab",
+    apiUrl: "https://thunder-appz.eu.org/go",
+    apiToken: db?.settings?.adslabApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
+    enabled: true,
+    isFaucetApi: false
+  };
+
+  const adslab2 = {
+    id: "api-adslab-step3",
+    name: "AdsLab",
+    apiUrl: "https://thunder-appz.eu.org/go",
+    apiToken: db?.settings?.adslabApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
+    enabled: true,
+    isFaucetApi: false
+  };
+
+  return [shortx, adslab1, adslab2];
 }
 
 // Helper to check if extracted URL is a valid shortened link (and not an API/reCAPTCHA/asset URL)
@@ -399,19 +393,25 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     return null;
   }
 
-  // Handle AdsLab as Step 3 shortener / safelink captcha destination
-  if (selectedApi.id === "api-adslab-3" || String(selectedApi.name || "").toLowerCase().includes("adslab")) {
+  // Handle AdsLab as Step shortener / safelink captcha destination (supports multiple AdsLab visits)
+  if (selectedApi.id?.includes("adslab") || String(selectedApi.name || "").toLowerCase().includes("adslab")) {
     const codeMatch = targetUrl.match(/\/(?:go-final|faucet-final|p|faucet|go)\/([^?\/]+)/);
     const code = codeMatch ? codeMatch[1] : "";
     let vtok = "";
+    let step = "";
     try {
       const u = new URL(targetUrl.startsWith("http") ? targetUrl : "https://" + targetUrl);
       vtok = u.searchParams.get("vtok") || "";
+      step = u.searchParams.get("step") || "";
     } catch (e) {}
 
     const registeredDomain = "https://thunder-appz.eu.org";
     if (code) {
-      return `${registeredDomain}/go/${code}${vtok ? `?vtok=${encodeURIComponent(vtok)}` : ""}`;
+      const params: string[] = [];
+      if (vtok) params.push(`vtok=${encodeURIComponent(vtok)}`);
+      if (step) params.push(`step=${encodeURIComponent(step)}`);
+      const qs = params.length > 0 ? `?${params.join("&")}` : "";
+      return `${registeredDomain}/go/${code}${qs}`;
     }
   }
 
@@ -451,7 +451,7 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     for (const apiRequestUrl of urlVariants) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
 
         const response = await fetchFn(apiRequestUrl, { 
           signal: controller.signal,
@@ -2946,11 +2946,14 @@ Sitemap: ${baseUrl}/sitemap.xml`
       ? finalLandingUrl
       : `${platformBase}/p/${link.code}?vtok=${encodeURIComponent(vtok)}&step=${stepNum + 1}`;
 
+    console.log(`[Pipeline Step ${stepNum}/${requiredSteps}] currentApi=${currentApi?.name} (${currentApi?.id}), nextTargetUrl=${nextTargetUrl}`);
+
     let shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
     if (!shortenedUrl) {
       console.warn(`[Pipeline Step ${stepNum}] Retrying shortener API generation for ${currentApi?.name}...`);
       shortenedUrl = await getSingleExternalShortenedUrl(currentApi, nextTargetUrl);
     }
+    console.log(`[Pipeline Step ${stepNum}] shortenedUrl result: ${shortenedUrl}`);
 
     res.setHeader("Referrer-Policy", "no-referrer");
     if (shortenedUrl) {
