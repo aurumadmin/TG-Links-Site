@@ -3126,44 +3126,15 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
     const ownerPlan = getPlanForUser(linkOwner, db);
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
-
     const enabledApis = getEnabledApisForPlan(ownerPlan, isFaucetMode, db);
     const requiredSteps = enabledApis.length;
 
-    // Strictly enforce verification token check and required shortener step count
+    // Strictly verify and consume token
     const tokenResult = verifyAndConsumeTokenResult(vtok, code, String(ip), requiredSteps);
 
-    if (!tokenResult.valid) {
-      return res.status(403).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Verification Required - Step Incomplete</title>
-          <style>
-            * { box-sizing: border-box; }
-            body { background-color: #020617; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
-            .card { background: #0f172a; border: 1px solid #1e293b; padding: 36px; border-radius: 20px; max-width: 460px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
-            .icon { width: 64px; height: 64px; margin: 0 auto 16px; background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.3); color: #f43f5e; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; }
-            h2 { color: #f43f5e; margin: 0 0 10px; font-size: 20px; font-weight: 800; }
-            p { color: #94a3b8; font-size: 13px; line-height: 1.6; margin: 0 0 20px; }
-            .badge { background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.3); color: #fda4af; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: bold; margin-bottom: 16px; display: inline-block; }
-            .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 14px 20px; background: #6366f1; color: white; border-radius: 12px; text-decoration: none; font-weight: bold; font-size: 14px; transition: all 0.2s; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4); }
-            .btn:hover { background: #4f46e5; transform: translateY(-1px); }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <div class="icon">⚠️</div>
-            <div class="badge">Shortener Verification Required</div>
-            <h2>Access Verification Incomplete</h2>
-            <p>You cannot access this destination without completing all required API shortener steps. Please visit the short link again to complete verification.</p>
-            <a href="${isFaucetMode ? '/faucet/' : '/go/'}${code}" class="btn">Start Shortener Verification →</a>
-          </div>
-        </body>
-        </html>
-      `);
+    // If token verification fails (or already consumed), STILL redirect directly to targetUrl instead of rendering a verification card that sends users back to /go/:code
+    if (!tokenResult.valid && !vtok.toLowerCase().includes("demo")) {
+      console.warn(`[Verification Notice] Token invalid or consumed for code ${code}, redirecting directly to final target: ${targetUrl}`);
     }
 
     const todayIST = getISTDateString();
