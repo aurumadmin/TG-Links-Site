@@ -2959,8 +2959,23 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const stepIndex = stepNum - 1;
 
     if (stepIndex >= requiredSteps) {
+      let directExternalTarget = link.originalUrl || "https://google.com";
+      if (!directExternalTarget.startsWith("http://") && !directExternalTarget.startsWith("https://")) {
+        directExternalTarget = "https://" + directExternalTarget;
+      }
+      if (
+        directExternalTarget.includes("thunder-appz.eu.org") ||
+        directExternalTarget.includes("/faucet-final") ||
+        directExternalTarget.includes("/go-final") ||
+        directExternalTarget.includes("/faucet") ||
+        directExternalTarget.includes("/go/") ||
+        directExternalTarget.includes("/p/")
+      ) {
+        directExternalTarget = "https://google.com";
+      }
+
       res.setHeader("Referrer-Policy", "no-referrer");
-      return res.redirect(302, finalLandingUrl);
+      return res.redirect(302, directExternalTarget);
     }
 
     const currentApi = enabledApis[stepIndex];

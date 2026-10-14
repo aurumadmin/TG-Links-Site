@@ -1,105 +1,55 @@
-# Implementation Plan: 3-Step Shortener Pipeline (ShortXLinks -> SoftURL -> AdsLab -> Destination)
+# Implementation Plan: Direct Target Redirection on Step 4 (Loop Elimination)
 
-Fix and configure the multi-step shortener pipeline so non-faucet plans execute the exact 3-step sequence requested by the user: **ShortXLinks (Step 1) -> SoftURL (Step 2) -> AdsLab (Step 3) -> Final Target Destination**.
+Ensure `/p/:code?step=4` (and any completion step where `stepIndex >= requiredSteps`) redirects **directly (HTTP 302) to the external target URL** (`https://google.com` or `link.originalUrl`) without routing through `thunder-appz.eu.org/go/:code`.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
 > **Confirmed Choices from Phase 1**:
-> - **Pipeline Sequence**: 3-Step Shortener Pipeline (**ShortXLinks -> SoftURL -> AdsLab -> Final Destination**).
-> - **SoftURL API Handling**: Do not failover or truncate timeout early. Ensure SoftURL API is invoked cleanly with generous 15s timeout and proper URL encoding so its API request succeeds every time.
+> - **Completion Target**: When `step=4` (or any completion step) is accessed, TG Links redirects `HTTP 302` directly to the external target URL (`link.originalUrl` / `https://google.com`).
+> - **Safelink Blog Excluded from Completion**: `thunder-appz.eu.org/go` is strictly reserved for initial step 1 clicks and is **never** invoked for step 3, step 4, or completion redirects.
 
-## 1. Overview & Core Concept
-
-When a visitor clicks a shortener link, TG Links routes them through three distinct monetization shorteners in order:
-1. **Step 1 (ShortXLinks)**: ShortXLinks API generates a shortlink targeting TG Links Step 2 (`/p/:code?vtok=...&step=2`).
-2. **Step 2 (SoftURL)**: Visitor completes ShortXLinks and lands on TG Links Step 2. TG Links dynamically calls **SoftURL API** targeting TG Links Step 3 (`/p/:code?vtok=...&step=3`). Visitor completes SoftURL (`softurl.in`).
-3. **Step 3 (AdsLab)**: Visitor completes SoftURL and lands on TG Links Step 3. TG Links redirects visitor to **AdsLab** safelink blog (`thunder-appz.eu.org/go/:code?vtok=...`).
-4. **Final Destination**: Visitor completes AdsLab and clicks "Get Final Destination Link". TG Links validates session token and redirects directly to the original destination URL (e.g. YouTube or destination link).
-
-## 2. User Experience & Visual Design
-
-### Step-by-Step Flow
+## 1. Core Logic Update
 
 ```
-┌─────────────────────────┐
-│ Safelink Blog / Button  │
-└────────────┬────────────┘
-             │ (Click)
-             ▼
-┌─────────────────────────┐
-│ Step 1: ShortXLinks     │
-│ (https://shortxlinks.in)│
-└────────────┬────────────┘
-             │ (Completes Step 1)
-             ▼
-┌─────────────────────────┐
-│ TG Links Step 2 Handler │
-│ (/p/:code?step=2)       │
-└────────────┬────────────┘
-             │ (Calls SoftURL API)
-             ▼
-┌─────────────────────────┐
-│ Step 2: SoftURL         │
-│ (https://softurl.in)    │
-└────────────┬────────────┘
-             │ (Completes Step 2)
-             ▼
-┌─────────────────────────┐
-│ TG Links Step 3 Handler │
-│ (/p/:code?step=3)       │
-└────────────┬────────────┘
-             │ (Routes to AdsLab)
-             ▼
-┌─────────────────────────┐
-│ Step 3: AdsLab          │
-│ (thunder-appz.eu.org)   │
-└────────────┬────────────┘
-             │ (Completes Step 3)
-             ▼
-┌─────────────────────────┐
-│ Final Target            │
-│ Destination Link        │
-└─────────────────────────┘
+                               ┌────────────────────────────────┐
+                               │ Visitor hits                   │
+                               │ /p/6k2UTA?vtok=...&step=4      │
+                               └───────────────┬────────────────┘
+                                               │
+                                               ▼
+                               ┌────────────────────────────────┐
+                               │ Step Check: step >= 3 (step>=2)│
+                               └───────────────┬────────────────┘
+                                               │
+                                               ▼
+                               ┌────────────────────────────────┐
+                               │ Redirect 302 DIRECTLY to:      │
+                               │ link.originalUrl               │
+                               │ (e.g. https://google.com)      │
+                               └────────────────────────────────┘
 ```
 
-## 3. Key Technical Decisions & Strategy
+## 2. Technical Modifications
 
-1. **Shortener Plan Assignment**:
-   - Update `shortenerIds` across all non-faucet plans in `data.json` to:
-     `["api-shortxlinks-1", "api-softurl-2", "api-adslab-step3"]`
-   - Preserve this exact 3-step order in `getEnabledApisForPlan()`.
+1. **`/p/:code` Step Handler (`server.ts`)**:
+   - When `stepIndex >= requiredSteps` (e.g. `step=3` or `step=4` or higher):
+     - Extract `link.originalUrl` (e.g. `https://google.com`).
+     - If `link.originalUrl` is missing or contains `thunder-appz.eu.org` / internal paths, fallback directly to `https://google.com`.
+     - Return `res.redirect(302, targetUrl)` immediately.
 
-2. **SoftURL API Call Optimization**:
-   - Increase API request timeout to 15,000ms (15s) in `getSingleExternalShortenedUrl()` so Cloud Run network latencies do not prematurely abort valid SoftURL API responses.
-   - Cleanly encode `targetUrl` parameter containing `vtok` and `step=3` parameters.
-   - Add detailed server logs for SoftURL API response parsing.
+2. **`/go-final/:code` Route (`server.ts`)**:
+   - Extract `link.originalUrl` and validate.
+   - Return `res.redirect(302, targetUrl)` directly to external destination (`https://google.com`).
 
-3. **AdsLab Step 3 Route Target**:
-   - When `currentApi` is AdsLab (`api-adslab-step3`), `getSingleExternalShortenedUrl()` returns the registered safelink blog domain (`https://thunder-appz.eu.org/go/:code?vtok=...`).
-   - Visitor completes AdsLab on `thunder-appz.eu.org` and is forwarded to `/go-final/:code?vtok=...`.
-   - `/go-final/:code` validates `vtok` and redirects directly to `link.originalUrl`.
+3. **Gateway Middleware Safeguard (`server.ts`)**:
+   - Strictly limit `thunder-appz.eu.org` redirects to initial step 1 clicks when no `step >= 2` or completion token exists.
 
-## 4. Proposed Changes
+## 3. Verification Plan
 
-### Configuration (`data.json`)
-- Set non-faucet plan `shortenerIds` to `["api-shortxlinks-1", "api-softurl-2", "api-adslab-step3"]`.
-- Ensure `api-shortxlinks-1`, `api-softurl-2`, and `api-adslab-step3` are present in `db.adFlyShorteners`.
-
-### Server Backend (`server.ts`)
-- Update `getEnabledApisForPlan()` to match and return the 3 shorteners in exact order `[ShortXLinks, SoftURL, AdsLab]`.
-- Update `getSingleExternalShortenedUrl()`:
-  - Increase timeout to 15s.
-  - Handle AdsLab Step 3 redirect generation.
-- Rebuild production server bundle (`npm run build` -> `dist/server.cjs`).
-
-## 5. Verification Plan
-
-1. **Step-by-Step API & Route Testing**:
-   - Call `/api/links/click` -> Verify Step 1 returns ShortXLinks link with `requiredSteps: 3`.
-   - Fetch `/p/6k2UTA?vtok=...&step=2` -> Verify returns HTTP 302 to SoftURL link (`softurl.in/...`).
-   - Fetch `/p/6k2UTA?vtok=...&step=3` -> Verify returns HTTP 302 to AdsLab blog (`thunder-appz.eu.org/go/6k2UTA?vtok=...`).
-   - Fetch `/go-final/6k2UTA?vtok=...` -> Verify returns HTTP 302 to final destination URL.
-2. **Compilation & Build**:
-   - Execute `npm run build` to output fresh `dist/server.cjs`.
-   - Run `lint_applet` and `compile_applet` to verify 0 build or syntax errors.
+1. **Route Testing**:
+   - Fetch `/p/6k2UTA?vtok=tg_token_demo&step=4` -> Verify response is `HTTP 302` with `Location: https://google.com` (or target destination URL).
+   - Fetch `/go-final/6k2UTA?vtok=tg_token_demo` -> Verify response is `HTTP 302` with `Location: https://google.com`.
+2. **Build Verification**:
+   - Rebuild `dist/server.cjs` with `npm run build`.
+   - Run `lint_applet` and `compile_applet` to confirm 0 compilation errors.
