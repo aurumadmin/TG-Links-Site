@@ -2790,6 +2790,34 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     console.log(`[ROUTE /p/:code DEBUG] path=${req.path}, step=${req.query.step}, vtok=${vtok}, host=${req.headers.host}`);
 
+    // Instant direct 302 redirection for step >= 3 or step >= 4 to user's final target destination URL
+    const rawStepVal = parseInt(String(req.query.step || "0"), 10);
+    if (!isNaN(rawStepVal) && rawStepVal >= 3) {
+      const db = loadDb();
+      let link = db.links?.find((l: any) => l.code === code);
+      let targetUrl = link?.originalUrl || "https://google.com";
+      if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+        targetUrl = "https://" + targetUrl;
+      }
+      if (
+        targetUrl.includes("thunder-appz.eu.org") ||
+        targetUrl.includes("/faucet-final") ||
+        targetUrl.includes("/go-final") ||
+        targetUrl.includes("/faucet") ||
+        targetUrl.includes("/go/") ||
+        targetUrl.includes("/p/")
+      ) {
+        targetUrl = "https://google.com";
+      }
+
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      console.log(`[Instant Direct Target Step ${rawStepVal}] Redirecting /p/${code}?step=${rawStepVal} directly to ${targetUrl}`);
+      return res.redirect(302, targetUrl);
+    }
+
     // If no verification token and no step param is in the URL, pass to next() so SPA or domain redirect handles the initial visit
     if (!hasVtok && !req.query.step) {
       return next();

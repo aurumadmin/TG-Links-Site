@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for direct 302 target redirection on step=4 and elimination of thunder-appz.eu.org loops",
-  "updatedAt": "2026-10-14T15:47:07.635987415Z",
+  "summary": "Implementation plan for guaranteed direct 302 target redirection on /p/:code?step=4 to user's final destination link",
+  "updatedAt": "2026-10-14T15:54:37.461964868Z",
   "requestFeedback": true,
   "userFacing": true
 }
