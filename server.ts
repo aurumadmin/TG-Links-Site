@@ -393,18 +393,9 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     return null;
   }
 
-  // Handle AdsLab as Step shortener / safelink captcha destination
+  // Handle AdsLab as Safelink Blog / Captcha Page route (thunder-appz.eu.org/go/:code)
   if (selectedApi.id?.includes("adslab") || String(selectedApi.name || "").toLowerCase().includes("adslab")) {
     const registeredDomain = "https://thunder-appz.eu.org";
-    const adslabToken = apiToken || selectedApi.apiToken || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr";
-    
-    // Official AdLinkFly QuickLink API format for AdsLab (raw unencoded targetUrl)
-    if (adslabToken && targetUrl) {
-      const quickLink = `${registeredDomain}/st?api=${adslabToken}&url=${targetUrl}`;
-      console.log(`[Shortener API] AdsLab QuickLink generated: ${quickLink}`);
-      return quickLink;
-    }
-
     const codeMatch = targetUrl.match(/\/(?:go-final|faucet-final|p|faucet|go)\/([^?\/]+)/);
     const code = codeMatch ? codeMatch[1] : "";
     let vtok = "";
@@ -420,7 +411,9 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
       if (vtok) params.push(`vtok=${encodeURIComponent(vtok)}`);
       if (step) params.push(`step=${encodeURIComponent(step)}`);
       const qs = params.length > 0 ? `?${params.join("&")}` : "";
-      return `${registeredDomain}/go/${code}${qs}`;
+      const adslabRoute = `${registeredDomain}/go/${code}${qs}`;
+      console.log(`[Shortener API] AdsLab Safelink Route generated: ${adslabRoute}`);
+      return adslabRoute;
     }
   }
 
