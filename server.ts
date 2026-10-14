@@ -233,6 +233,10 @@ function getPlanForUser(user: any, db: any): any {
 }
 
 function checkIsFaucetMode(user: any, link: any, db: any): boolean {
+  if (link && (link.isFaucetMode || link.isFaucetLink || link.isFaucetApi || link.mode === "faucet")) {
+    return true;
+  }
+
   let userObj = typeof user === "string" ? findUserInDb(db, user) : user;
   if (!userObj && link) {
     userObj = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
@@ -240,11 +244,10 @@ function checkIsFaucetMode(user: any, link: any, db: any): boolean {
 
   if (userObj) {
     const userPlan = getPlanForUser(userObj, db);
-    const isPlanFaucet = Boolean(userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode || userPlan.id === "faucet"));
-    return isPlanFaucet;
+    const isPlanFaucet = Boolean(userPlan && (userPlan.isFaucetPlan || userPlan.faucetMode || userPlan.id === "faucet" || userPlan.name?.toLowerCase().includes("faucet")));
+    if (isPlanFaucet) return true;
   }
 
-  if (link && link.isFaucetApi) return true;
   return false;
 }
 
@@ -266,11 +269,26 @@ function getCurrentCpmForLink(link: any, db: any): number {
 
 // Unified helper to retrieve active integrated shorteners for a given publisher plan & faucet mode
 function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[] {
+  const isFaucet = Boolean(isFaucetMode || plan?.isFaucetPlan);
   const allShorteners = db.adFlyShorteners || [];
 
   // Consider shorteners that are active in the system (enabled !== false)
   const activeShorteners = allShorteners.filter((api: any) => api && api.enabled !== false);
 
+  // FAUCET TRAFFIC: Strictly exclude non-faucet API shorteners (ShortXLinks, SoftURL)
+  if (isFaucet) {
+    if (plan && Array.isArray(plan.shortenerIds) && plan.shortenerIds.length > 0) {
+      const planShortenerIds: string[] = plan.shortenerIds;
+      const matchedFaucetApis = activeShorteners.filter((api: any) => 
+        api && api.isFaucetApi && planShortenerIds.includes(api.id)
+      );
+      return matchedFaucetApis;
+    }
+    // Fallback for faucet traffic: return dedicated faucet shorteners only (if any exist)
+    return activeShorteners.filter((api: any) => api && api.isFaucetApi);
+  }
+
+  // NON-FAUCET TRAFFIC: Use plan's shortenerIds or default ShortXLinks -> SoftURL pipeline
   if (plan && Array.isArray(plan.shortenerIds) && plan.shortenerIds.length > 0) {
     const planShortenerIds: string[] = plan.shortenerIds;
     const result: any[] = [];
@@ -310,7 +328,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     }
   }
 
-  // Fallback default 2-step pipeline: ShortXLinks -> SoftURL -> Final Link
+  // Fallback default 2-step pipeline for non-faucet traffic: ShortXLinks -> SoftURL
   const shortx = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi) || {
     id: "api-shortxlinks-1",
     name: "ShortXLinks",
@@ -3055,10 +3073,14 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     if (!link) {
       if (vtok) {
+        let defaultExternalTarget = db.settings?.homepageTargetUrl || "https://google.com";
+        if (defaultExternalTarget.includes("thunder-appz.eu.org") || defaultExternalTarget.includes("/go/") || defaultExternalTarget.includes("/p/")) {
+          defaultExternalTarget = "https://google.com";
+        }
         link = {
           id: "demo-" + code,
           code: code,
-          originalUrl: db.settings?.homepageTargetUrl || "https://thunder-appz.eu.org",
+          originalUrl: defaultExternalTarget,
           userId: "guest",
           cpm: 10,
           clicks: 0,
@@ -3078,21 +3100,22 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return res.status(410).send("This shortened link has expired and is no longer active.");
     }
 
-    let targetUrl = link.originalUrl;
+    let targetUrl = link.originalUrl || "https://google.com";
     if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
       targetUrl = "https://" + targetUrl;
     }
 
-    // Safeguard: Prevent destination URL loops if originalUrl points back to /faucet-final, /go-final, /faucet, or /go
+    // Safeguard: Prevent destination URL loops if targetUrl points back to safelink blog or go/p routes
     if (
+      targetUrl.includes("thunder-appz.eu.org") ||
       targetUrl.includes("/faucet-final") ||
       targetUrl.includes("/go-final") ||
       targetUrl.includes("/faucet/") ||
       targetUrl.includes("/go/") ||
       targetUrl.includes("/p/")
     ) {
-      console.warn("[Loop Safeguard] Destination URL loops back to faucet/go page:", targetUrl);
-      targetUrl = db.settings?.homepageTargetUrl || "https://thunder-appz.eu.org";
+      console.warn("[Loop Safeguard] Target URL points to internal route or safelink blog domain, overriding to external destination:", targetUrl);
+      targetUrl = "https://google.com";
     }
 
     const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
