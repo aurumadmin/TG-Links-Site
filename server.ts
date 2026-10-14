@@ -393,8 +393,18 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     return null;
   }
 
-  // Handle AdsLab as Step shortener / safelink captcha destination (supports multiple AdsLab visits)
+  // Handle AdsLab as Step shortener / safelink captcha destination
   if (selectedApi.id?.includes("adslab") || String(selectedApi.name || "").toLowerCase().includes("adslab")) {
+    const registeredDomain = "https://thunder-appz.eu.org";
+    const adslabToken = apiToken || selectedApi.apiToken || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr";
+    
+    // Official AdLinkFly QuickLink API format for AdsLab (raw unencoded targetUrl)
+    if (adslabToken && targetUrl) {
+      const quickLink = `${registeredDomain}/st?api=${adslabToken}&url=${targetUrl}`;
+      console.log(`[Shortener API] AdsLab QuickLink generated: ${quickLink}`);
+      return quickLink;
+    }
+
     const codeMatch = targetUrl.match(/\/(?:go-final|faucet-final|p|faucet|go)\/([^?\/]+)/);
     const code = codeMatch ? codeMatch[1] : "";
     let vtok = "";
@@ -405,7 +415,6 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
       step = u.searchParams.get("step") || "";
     } catch (e) {}
 
-    const registeredDomain = "https://thunder-appz.eu.org";
     if (code) {
       const params: string[] = [];
       if (vtok) params.push(`vtok=${encodeURIComponent(vtok)}`);
@@ -420,6 +429,14 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
     rawUrl = "https://" + rawUrl;
   }
   rawUrl = rawUrl.replace(/\/+$/, "");
+
+  // Generate official AdLinkFly QuickLink API URL directly (/st?api=...&url=https://...) for all shorteners
+  let baseDomain = rawUrl.endsWith("/api") ? rawUrl.slice(0, -4) : rawUrl.replace(/\/st$/, "");
+  if (baseDomain && apiToken) {
+    const quickLink = `${baseDomain}/st?api=${apiToken}&url=${targetUrl}`;
+    console.log(`[Shortener API] Direct QuickLink API URL generated for ${selectedApi.name}: ${quickLink}`);
+    return quickLink;
+  }
 
   // Generate candidate API endpoints ONLY (strictly exclude HTML form endpoints like /st)
   const candidateEndpoints: string[] = [];
@@ -509,14 +526,6 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
         console.warn(`[Shortener API] Failed request to ${apiRequestUrl} for ${selectedApi.name}: ${err?.message || err}`);
       }
     }
-  }
-
-  // Fallback to official AdLinkFly QuickLink URL (/st) if API request fails/times out
-  let baseDomain = rawUrl.endsWith("/api") ? rawUrl.slice(0, -4) : rawUrl.replace(/\/st$/, "");
-  if (baseDomain && apiToken) {
-    const quickLink = `${baseDomain}/st?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`;
-    console.log(`[Shortener API] Using QuickLink fallback for ${selectedApi.name}: ${quickLink}`);
-    return quickLink;
   }
 
   console.warn(`[Shortener API] Unable to generate shortened URL for ${selectedApi.name} via API endpoints.`);
