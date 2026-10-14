@@ -310,7 +310,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     }
   }
 
-  // Fallback default 3-step pipeline: ShortXLinks -> SoftURL -> AdsLab
+  // Fallback default 2-step pipeline: ShortXLinks -> SoftURL -> Final Link
   const shortx = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi) || {
     id: "api-shortxlinks-1",
     name: "ShortXLinks",
@@ -329,16 +329,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     isFaucetApi: false
   };
 
-  const adslab = {
-    id: "api-adslab-step3",
-    name: "AdsLab",
-    apiUrl: "https://thunder-appz.eu.org/go",
-    apiToken: db?.settings?.adslabApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
-    enabled: true,
-    isFaucetApi: false
-  };
-
-  return [shortx, softurl, adslab];
+  return [shortx, softurl];
 }
 
 // Helper to check if extracted URL is a valid shortened link (and not an API/reCAPTCHA/asset URL)
