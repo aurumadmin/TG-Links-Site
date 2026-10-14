@@ -1,53 +1,60 @@
-# Implementation Plan: Strict 2-Step Shortener Pipeline (ShortXLinks -> SoftURL -> Final Link)
+# Implementation Plan: Initial-Visit Blog Redirection & Direct Final Target Redirect
 
-Configure TG Links to strictly enforce a 2-step shortener progression for non-faucet links and eliminate any redirection to `thunder-appz.eu.org`.
+Ensure `https://thunder-appz.eu.org` is used **only** for the initial visit (`/go/:code` without a token). All subsequent shortener steps and completions stay on `tglinks.eu.cc` and redirect directly to the final destination link on completion.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> **Confirmed 2-Step Sequence**:
-> 1. **Step 1 (ShortXLinks)**: `https://shortxlinks.com/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=2`
-> 2. **Step 2 (SoftURL)**: `https://softurl.in/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3`
-> 3. **Final Destination**: SoftURL completion (`step=3` or `/go-final`) redirects `HTTP 302` directly to the user's shortened target URL (`link.originalUrl` / `https://google.com`).
-> - **AdsLab / Blog Domain (`thunder-appz.eu.org`)** is completely removed from the non-faucet pipeline.
+> **Confirmed Lifecyle Rules**:
+> 1. **Initial Visit (First Time Only)**: `https://tglinks.eu.cc/go/6k2UTA` (no `vtok`, no `step`) redirects to `https://thunder-appz.eu.org/go/6k2UTA` (Safelink Blog Page).
+> 2. **Button Click on Blog**: Button calls `/api/links/click` $\rightarrow$ generates **ShortXLinks (Step 1)** targeting `https://tglinks.eu.cc/p/6k2UTA?vtok=REAL_TOKEN&step=2`.
+> 3. **Step 2 (SoftURL)**: `https://tglinks.eu.cc/p/6k2UTA?vtok=REAL_TOKEN&step=2` redirects to **SoftURL** targeting `https://tglinks.eu.cc/p/6k2UTA?vtok=REAL_TOKEN&step=3`.
+> 4. **Step 3 (Completion)**: `https://tglinks.eu.cc/p/6k2UTA?vtok=REAL_TOKEN&step=3` (or `step=4` or any request with `vtok`) redirects **HTTP 302 DIRECTLY to the final target URL** (`https://google.com` / `link.originalUrl`). **Never** redirects back to `thunder-appz.eu.org`.
 
-## 1. Sequence Flow Diagram
+## 1. Lifecycle Diagram
 
 ```
-[ Visitor Clicks Link ]
-          │
-          ▼
- [ Step 1: ShortXLinks ]
-  https://shortxlinks.com/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=2
-          │
-          ▼ (Visitor completes ShortXLinks)
- [ Step 2: SoftURL ]
-  https://softurl.in/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3
-          │
-          ▼ (Visitor completes SoftURL)
- [ Final Destination Link ]
-  HTTP 302 directly to https://google.com (or user's originalUrl)
+[ User visits tglinks.eu.cc/go/6k2UTA (no token) ]
+                       │
+                       ▼ (First time only)
+[ Redirects to Safelink Blog: thunder-appz.eu.org/go/6k2UTA ]
+                       │
+                       ▼ (User clicks "Get Link" button)
+[ Calls /api/links/click -> Step 1: ShortXLinks ]
+  https://shortxlinks.com/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=TOKEN&step=2
+                       │
+                       ▼ (Completes ShortXLinks)
+[ Step 2: SoftURL ]
+  https://softurl.in/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=TOKEN&step=3
+                       │
+                       ▼ (Completes SoftURL)
+[ Step 3 / Completion ]
+  https://tglinks.eu.cc/p/6k2UTA?vtok=TOKEN&step=3
+                       │
+                       ▼
+[ HTTP 302 Directly to Final Target Link (https://google.com) ]
+  (NEVER redirects back to thunder-appz.eu.org)
 ```
 
 ## 2. Technical Modifications
 
-1. **Database Shorteners Config (`data.json`)**:
-   - Set active `shortenerIds` for all non-faucet plans to strictly `["api-shortxlinks-1", "api-softurl-2"]` (2 shorteners total).
-   - Ensure `link.originalUrl` and `homepageTargetUrl` are set to `https://google.com`.
+1. **Gateway Middleware (`server.ts`)**:
+   - `app.get(["/go/:code", "/faucet/:code"])`:
+     - If `req.query.vtok` OR `req.query.step` OR `req.path.startsWith("/p/")` OR `req.path.includes("final")` is present: **Never** redirect to `thunder-appz.eu.org`. Immediately call `next()`.
+     - Only redirect to `thunder-appz.eu.org/go/:code` if it is a pure initial visit (`/go/:code` with NO `vtok` and NO `step`).
 
-2. **Pipeline Helper (`server.ts`)**:
-   - Update `getEnabledApisForPlan` to return strictly `[ShortXLinks, SoftURL]` (2 steps) for non-faucet traffic.
-
-3. **Step Router (`server.ts`)**:
-   - When `step=2`, return SoftURL QuickLink URL: `https://softurl.in/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3`.
-   - When `step >= 3` (completion of SoftURL), return `HTTP 302 Location: link.originalUrl` (`https://google.com`) directly with `Cache-Control: no-store` headers.
+2. **Step Handler (`server.ts`)**:
+   - At the top of `/p/:code`:
+     - If `step >= 3` or `vtok` is present on completion step:
+       - Set `Cache-Control: no-store, no-cache, must-revalidate`.
+       - Return `res.redirect(302, directTargetUrl)` (`https://google.com` / `link.originalUrl`).
 
 ## 3. Verification Plan
 
-1. **Pipeline Trace Verification**:
-   - `GET /api/links/click` -> Verify Step 1 returns ShortXLinks QuickLink targeting `/p/6k2UTA?step=2`.
-   - `GET /p/6k2UTA?step=2` -> Verify Step 2 returns SoftURL QuickLink targeting `/p/6k2UTA?step=3`.
-   - `GET /p/6k2UTA?step=3` -> Verify returns `HTTP 302 Location: https://google.com` directly.
-2. **Build Verification**:
+1. **Initial Visit Verification**:
+   - `GET http://localhost:3000/go/6k2UTA` (no token) -> Verify initial blog redirect.
+2. **Step Completion Verification**:
+   - `GET http://localhost:3000/p/6k2UTA?vtok=tg_token_demo&step=3` -> Verify returns `HTTP 302` to `https://google.com` directly (0 blog redirects).
+3. **Build Verification**:
    - Rebuild `dist/server.cjs` via `npm run build`.
    - Run `lint_applet` and `compile_applet` to confirm 0 compilation errors.

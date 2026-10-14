@@ -3038,6 +3038,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
       // User is returning WITH a verification token from the safelink blog! DO NOT redirect back to safelink blog domain!
       return next();
     }
+    if (req.query.step) {
+      // User has a step parameter in the URL! DO NOT redirect back to safelink blog domain!
+      return next();
+    }
     const hostHeader = getRequestHost(req);
     const isProd = !hostHeader.includes("localhost") && !hostHeader.includes("127.0.0.1") && !hostHeader.includes("ais-dev") && !hostHeader.includes("ais-pre");
     

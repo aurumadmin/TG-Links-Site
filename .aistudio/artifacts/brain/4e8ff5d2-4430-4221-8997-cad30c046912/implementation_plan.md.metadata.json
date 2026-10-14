@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for strict 2-step pipeline (ShortXLinks -> SoftURL -> Final Link) eliminating thunder-appz.eu.org redirects",
-  "updatedAt": "2026-10-14T16:03:53.274030826Z",
+  "summary": "Implementation plan for initial-visit-only blog redirection and direct target completion on step >= 3",
+  "updatedAt": "2026-10-14T16:11:19.148738854Z",
   "requestFeedback": true,
   "userFacing": true
 }
