@@ -2808,10 +2808,14 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
     if (!link) {
       if (hasVtok || req.query.step) {
+        let fallbackUrl = db.settings?.homepageTargetUrl || "https://google.com";
+        if (fallbackUrl.includes("thunder-appz.eu.org") || fallbackUrl.includes("/go") || fallbackUrl.includes("/p/")) {
+          fallbackUrl = "https://google.com";
+        }
         link = {
           id: "demo-" + code,
           code: code,
-          originalUrl: db.settings?.homepageTargetUrl || "https://thunder-appz.eu.org",
+          originalUrl: fallbackUrl,
           userId: "guest",
           cpm: 10,
           clicks: 0,
@@ -2923,18 +2927,19 @@ Sitemap: ${baseUrl}/sitemap.xml`
         saveDb(db);
       }
 
-      let directTarget = link.originalUrl || "https://thunder-appz.eu.org";
+      let directTarget = link.originalUrl || "https://google.com";
       if (!directTarget.startsWith("http://") && !directTarget.startsWith("https://")) {
         directTarget = "https://" + directTarget;
       }
       if (
+        directTarget.includes("thunder-appz.eu.org") ||
         directTarget.includes("/faucet-final") ||
         directTarget.includes("/go-final") ||
         directTarget.includes("/faucet") ||
         directTarget.includes("/go/") ||
         directTarget.includes("/p/")
       ) {
-        directTarget = db.settings?.homepageTargetUrl || "https://thunder-appz.eu.org";
+        directTarget = "https://google.com";
       }
 
       res.setHeader("Referrer-Policy", "no-referrer");
