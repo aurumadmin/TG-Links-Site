@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for guaranteed direct 302 target redirection on /p/:code?step=4 to user's final destination link",
-  "updatedAt": "2026-10-14T15:54:37.461964868Z",
+  "summary": "Implementation plan for strict 2-step pipeline (ShortXLinks -> SoftURL -> Final Link) eliminating thunder-appz.eu.org redirects",
+  "updatedAt": "2026-10-14T16:03:53.274030826Z",
   "requestFeedback": true,
   "userFacing": true
 }
