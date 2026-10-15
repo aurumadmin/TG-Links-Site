@@ -2784,8 +2784,24 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     console.log(`[ROUTE /p/:code DEBUG] path=${req.path}, step=${req.query.step}, vtok=${vtok}, host=${req.headers.host}`);
 
-    // Instant direct 302 redirection for step >= 3 or step >= 4 to user's final target destination URL
     const rawStepVal = parseInt(String(req.query.step || "0"), 10);
+
+    // Hardcoded Step 2 Interceptor: For ALL non-faucet links when step=2, unconditionally redirect to SoftURL QuickLink API URL
+    if (rawStepVal === 2) {
+      const platformBase = getPlatformBaseUrl(req, loadDb());
+      const softurlToken = "609c875b96d61f0592bfe5ae036b2db1df673680";
+      const nextTargetUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(vtok)}&step=3`;
+      const softurlQuickLink = `https://softurl.in/st?api=${softurlToken}&url=${nextTargetUrl}`;
+
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      console.log(`[Hardcoded Step 2 SoftURL] Redirecting /p/${code}?step=2 directly to SoftURL API: ${softurlQuickLink}`);
+      return res.redirect(302, softurlQuickLink);
+    }
+
+    // Instant direct 302 redirection for step >= 3 or step >= 4 to user's final target destination URL
     if (!isNaN(rawStepVal) && rawStepVal >= 3) {
       const db = loadDb();
       let link = db.links?.find((l: any) => l.code === code);

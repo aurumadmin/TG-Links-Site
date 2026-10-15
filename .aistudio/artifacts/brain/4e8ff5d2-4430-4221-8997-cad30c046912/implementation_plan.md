@@ -1,52 +1,53 @@
-# Implementation Plan: Step 2 SoftURL Redirection & Direct Final Target Completion
+# Implementation Plan: Hardcoded 2-Step Shortener Pipeline (ShortXLinks -> SoftURL -> Direct Final Target)
 
-Ensure `/p/6k2UTA?vtok=...&step=2` redirects directly to the **SoftURL API** (`softurl.in/st?api=...`), and SoftURL completion redirects back to `tglinks.eu.cc`, which forwards directly to the final destination link (`https://google.com` / `link.originalUrl`).
+Hardcode the non-faucet shortener pipeline logic in `/p/:code` and `/api/links/click` so that Step 2 is **unconditionally hardcoded** to SoftURL (`softurl.in`), and Step 3 is **unconditionally hardcoded** to redirect HTTP 302 directly to the final target URL (`link.originalUrl` / `https://google.com`).
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> **Confirmed Workflow**:
-> 1. **Step 1 (ShortXLinks)**: `https://shortxlinks.com/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=2`
-> 2. **Step 2 (SoftURL)**: `https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=2` redirects directly to **SoftURL**:
->    `https://softurl.in/st?api=609c875b96d61f0592bfe5ae036b2db1df673680&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3`
-> 3. **Final Destination Target**: SoftURL completion redirects to `https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3`, which returns **HTTP 302 directly to the final destination URL** (`https://google.com` / `link.originalUrl`).
-> - **AdsLab / Blog Domain (`thunder-appz.eu.org`)** is completely removed from `step=2`.
+> **Hardcoded Non-Faucet Execution Rules**:
+> 1. **Step 1 (`/api/links/click`)**: Generates ShortXLinks QuickLink API URL targeting `/p/:code?vtok=TOKEN&step=2`:
+>    `https://shortxlinks.com/st?api=b6ac095e9373906c9e461860400e64a7de4536f1&url=https://tglinks.eu.cc/p/6k2UTA?vtok=TOKEN&step=2`
+> 2. **Step 2 (`/p/:code?step=2`)**: Unconditionally hardcoded to generate SoftURL QuickLink API URL targeting `/p/:code?vtok=TOKEN&step=3`:
+>    `https://softurl.in/st?api=609c875b96d61f0592bfe5ae036b2db1df673680&url=https://tglinks.eu.cc/p/6k2UTA?vtok=TOKEN&step=3`
+> 3. **Step 3 / Completion (`/p/:code?step=3`)**: Unconditionally hardcoded to return `HTTP 302 Location: link.originalUrl` (`https://google.com`) directly with `Cache-Control: no-store` headers.
 
-## 1. Sequence Flow Diagram
+## 1. Hardcoded Flow Diagram
 
 ```
-[ Visitor Completes ShortXLinks (Step 1) ]
-                  │
-                  ▼
-[ Arrives on tglinks.eu.cc/p/6k2UTA?vtok=...&step=2 ]
-                  │
-                  ▼
-[ Redirects HTTP 302 directly to SoftURL API ]
-https://softurl.in/st?api=609c...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3
-                  │
-                  ▼ (Visitor completes SoftURL)
-[ Redirects back to tglinks.eu.cc/p/6k2UTA?vtok=...&step=3 ]
-                  │
-                  ▼
-[ HTTP 302 directly to Final Destination Link (https://google.com) ]
+[ Visitor Clicks Link ]
+          │
+          ▼
+ [ Step 1: ShortXLinks ]
+ https://shortxlinks.com/st?api=b6ac...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=TOKEN&step=2
+          │
+          ▼ (Visitor completes ShortXLinks -> Arrives on /p/6k2UTA?step=2)
+ [ Step 2: SoftURL (Hardcoded) ]
+ https://softurl.in/st?api=609c...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=TOKEN&step=3
+          │
+          ▼ (Visitor completes SoftURL -> Arrives on /p/6k2UTA?step=3)
+ [ Step 3: Completion (Hardcoded) ]
+ HTTP 302 directly to https://google.com (or user's originalUrl)
 ```
 
 ## 2. Technical Modifications
 
-1. **Shortener Pipeline Config (`server.ts`)**:
-   - Filter `getEnabledApisForPlan` to strictly return `[ShortXLinks, SoftURL]` (2 steps) for non-faucet plans, excluding AdsLab from step 2.
+1. **Explicit Step Interceptor in `/p/:code` (`server.ts`)**:
+   - `if (req.query.step === "2" || stepNum === 2)`:
+     - Generate SoftURL QuickLink API URL directly:
+       `https://softurl.in/st?api=609c875b96d61f0592bfe5ae036b2db1df673680&url=${platformBase}/p/${code}?vtok=${encodeURIComponent(vtok)}&step=3`
+     - Set `Cache-Control: no-store` headers and return `res.redirect(302, softUrlQuickLink)`.
+   - `if (req.query.step >= "3" || stepNum >= 3)`:
+     - Extract `link.originalUrl` (e.g. `https://google.com`).
+     - Set `Cache-Control: no-store` headers and return `res.redirect(302, targetUrl)`.
 
-2. **Step 2 Handler (`server.ts`)**:
-   - For `step=2`, generate the QuickLink URL for SoftURL:
-     `https://softurl.in/st?api=609c875b96d61f0592bfe5ae036b2db1df673680&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3`
-
-3. **Step 3 Completion Handler (`server.ts`)**:
-   - On `step=3` or `step >= requiredSteps`, return `HTTP 302 Location: link.originalUrl` (`https://google.com`) directly with `Cache-Control: no-store` headers.
+2. **First Step Generator in `/api/links/click` (`server.ts`)**:
+   - For non-faucet links, generate ShortXLinks QuickLink API URL targeting `${platformBase}/p/${code}?vtok=${vtok}&step=2`.
 
 ## 3. Verification Plan
 
-1. **Trace Verification**:
-   - `GET /p/6k2UTA?vtok=tg_token_demo&step=2` -> Verify returns `302` to `https://softurl.in/st?api=...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3`.
+1. **Node Test Execution**:
+   - `GET /p/6k2UTA?vtok=tg_token_demo&step=2` -> Verify returns `302` to `https://softurl.in/st?api=609c...&url=https://tglinks.eu.cc/p/6k2UTA?vtok=...&step=3`.
    - `GET /p/6k2UTA?vtok=tg_token_demo&step=3` -> Verify returns `302` to `https://google.com`.
 2. **Build Verification**:
    - Rebuild `dist/server.cjs` via `npm run build`.
