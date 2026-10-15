@@ -288,7 +288,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     return activeShorteners.filter((api: any) => api && api.isFaucetApi);
   }
 
-  // NON-FAUCET TRAFFIC: Use plan's shortenerIds or default ShortXLinks -> SoftURL pipeline
+  // NON-FAUCET TRAFFIC: Strictly 2 steps (ShortXLinks -> SoftURL)
   if (plan && Array.isArray(plan.shortenerIds) && plan.shortenerIds.length > 0) {
     const planShortenerIds: string[] = plan.shortenerIds;
     const result: any[] = [];
@@ -297,22 +297,16 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
       const pId = planShortenerIds[idx];
       const target = String(pId || "").toLowerCase();
 
+      // Skip AdsLab in non-faucet pipeline
+      if (target.includes("adslab")) continue;
+
       let found = activeShorteners.find((s: any) => {
         const sId = String(s.id || "").toLowerCase();
         const sName = String(s.name || "").toLowerCase();
         return sId === target || sName === target;
       });
 
-      if (!found && target.includes("adslab")) {
-        found = {
-          id: pId || `api-adslab-${idx + 1}`,
-          name: "AdsLab",
-          apiUrl: "https://thunder-appz.eu.org/go",
-          apiToken: db?.settings?.adslabApiKey || "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
-          enabled: true,
-          isFaucetApi: false
-        };
-      } else if (!found && (target.includes("shortx") || target === "api-shortxlinks-1")) {
+      if (!found && (target.includes("shortx") || target === "api-shortxlinks-1")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi);
       } else if (!found && (target.includes("softurl") || target === "api-softurl-2")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl"));
