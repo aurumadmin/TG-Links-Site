@@ -310,6 +310,15 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi);
       } else if (!found && (target.includes("softurl") || target === "api-softurl-2")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl"));
+      } else if (!found && (target.includes("arolinks") || target === "api-arolinks-3")) {
+        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("arolinks")) || {
+          id: "api-arolinks-3",
+          name: "AroLinks",
+          apiUrl: "https://arolinks.com/api",
+          apiToken: "d2c8261beff4b98ff674d7f306f2fe205bb5c25d",
+          enabled: true,
+          isFaucetApi: false
+        };
       }
 
       if (found) {
@@ -322,7 +331,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     }
   }
 
-  // Fallback default 2-step pipeline for non-faucet traffic: ShortXLinks -> SoftURL
+  // Fallback default 3-step pipeline for non-faucet traffic: ShortXLinks -> SoftURL -> AroLinks
   const shortx = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi) || {
     id: "api-shortxlinks-1",
     name: "ShortXLinks",
@@ -341,7 +350,16 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     isFaucetApi: false
   };
 
-  return [shortx, softurl];
+  const arolinks = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("arolinks")) || {
+    id: "api-arolinks-3",
+    name: "AroLinks",
+    apiUrl: "https://arolinks.com/api",
+    apiToken: "d2c8261beff4b98ff674d7f306f2fe205bb5c25d",
+    enabled: true,
+    isFaucetApi: false
+  };
+
+  return [shortx, softurl, arolinks];
 }
 
 // Helper to check if extracted URL is a valid shortened link (and not an API/reCAPTCHA/asset URL)
@@ -2801,8 +2819,23 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return res.redirect(302, softurlQuickLink);
     }
 
-    // Instant direct 302 redirection for step >= 3 or step >= 4 to user's final target destination URL
-    if (!isNaN(rawStepVal) && rawStepVal >= 3) {
+    // Hardcoded Step 3 Interceptor: For ALL non-faucet links when step=3, unconditionally redirect to AroLinks API URL
+    if (rawStepVal === 3) {
+      const platformBase = getPlatformBaseUrl(req, loadDb());
+      const arolinksToken = "d2c8261beff4b98ff674d7f306f2fe205bb5c25d";
+      const nextTargetUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(vtok)}&step=4`;
+      const arolinksQuickLink = `https://arolinks.com/st?api=${arolinksToken}&url=${nextTargetUrl}`;
+
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      console.log(`[Hardcoded Step 3 AroLinks] Redirecting /p/${code}?step=3 directly to AroLinks API: ${arolinksQuickLink}`);
+      return res.redirect(302, arolinksQuickLink);
+    }
+
+    // Instant direct 302 redirection for step >= 4 to user's final target destination URL
+    if (!isNaN(rawStepVal) && rawStepVal >= 4) {
       const db = loadDb();
       let link = db.links?.find((l: any) => l.code === code);
       let targetUrl = link?.originalUrl || "https://google.com";
