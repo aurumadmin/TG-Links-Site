@@ -1,53 +1,25 @@
 /**
- * TG Links - cPanel & Production Application Entry Point
+ * TG Links - cPanel & Production Entry Point
  * 
- * Specifically configured for:
- * - cPanel Node.js Application Manager (CloudLinux / Phusion Passenger)
- * - Node.js 20+ Runtime
- * - Preserving Standalone VPS / Docker / Cloud Run Deployments
- * 
- * IMPORTANT: This entry point loads the compiled production application
- * from 'dist/server.cjs'. Run 'npm run build' before starting the app in cPanel.
+ * Synchronous CommonJS/ESM bridge without top-level await.
+ * This file delegates directly to app.cjs so that both:
+ * 1. Startup file set to "app.js" (Node 20 require-ESM compatible without top-level await)
+ * 2. Startup file set to "app.cjs" (Pure CommonJS compatible with all lsnode.js versions)
+ * work seamlessly without ERR_REQUIRE_ASYNC_MODULE.
  */
 
-import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 
-// Ensure NODE_ENV is set to production for app.js entry point
-process.env.NODE_ENV = "production";
+process.env.NODE_ENV = process.env.NODE_ENV || process.env.PASSENGER_APP_ENV || "production";
 
-// Locate compiled production server bundle across candidate paths
-const bundleCandidates = [
-  path.join(__dirname, "dist", "server.cjs"),
-  path.join(process.cwd(), "dist", "server.cjs")
-];
-
-const bundlePath = bundleCandidates.find(p => {
-  try {
-    return fs.existsSync(p);
-  } catch {
-    return false;
-  }
-});
-
-if (!bundlePath) {
-  console.error("=================================================================");
-  console.error("[TG Links Startup Error] Compiled production server bundle not found!");
-  console.error("Expected path: " + path.join(__dirname, "dist", "server.cjs"));
-  console.error("");
-  console.error("Please run the production build command in your project directory:");
-  console.error("  npm run build");
-  console.error("=================================================================");
-  process.exit(1);
-}
-
-// Import and launch the compiled application
-const serverModule = await import(pathToFileURL(bundlePath).href);
-const app = serverModule.default || serverModule;
+// Synchronously load the CommonJS launcher (app.cjs)
+const app = require("./app.cjs");
 
 export default app;
 export { app };

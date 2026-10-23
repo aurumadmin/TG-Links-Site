@@ -1,15 +1,17 @@
 # TG Links - cPanel Node.js Deployment Guide
 
-This guide explains how to deploy **TG Links** on any web hosting provider with **cPanel Node.js Application Manager** (CloudLinux / Phusion Passenger), while preserving your existing VPS and container deployments.
+This guide explains how to deploy **TG Links** on any web hosting provider with **cPanel Node.js Application Manager** (CloudLinux / LiteSpeed `lsnode.js` / Phusion Passenger), while preserving your existing VPS and container deployments.
 
 ---
 
-## 1. Quick Overview
+## 1. Quick Overview & Architecture
 
 TG Links features a hybrid architecture:
-- **Frontend**: High-performance React 19 SPA bundled with Vite into `dist/`.
-- **Backend**: Express server bundled into `dist/server.cjs`.
-- **cPanel Startup Entry Point**: `app.js` (launches the pre-bundled server with cPanel's dynamic port/socket).
+- **Frontend**: React 19 SPA bundled with Vite into `dist/` (`dist/index.html` & `dist/assets/`).
+- **Backend**: Express server bundled by esbuild into `dist/server.cjs` (CommonJS).
+- **cPanel Startup Entry Points**:
+  - **`app.cjs`** *(Primary CommonJS launcher)*: Directly loads `dist/server.cjs` synchronously. 100% compatible with LiteSpeed (`/usr/local/lsws/fcgi-bin/lsnode.js`) and Phusion Passenger without ESM loader conflicts.
+  - **`app.js`** *(Synchronous ESM bridge)*: Delegates synchronously to `app.cjs` without top-level await to prevent `ERR_REQUIRE_ASYNC_MODULE`.
 - **Database**: File-based persistence in `data.json` (or via custom `DB_PATH`).
 
 ---
@@ -23,11 +25,11 @@ TG Links features a hybrid architecture:
 
 | Field | Recommended Value | Notes |
 | :--- | :--- | :--- |
-| **Node.js Version** | **20.x** (or latest 20 LTS) | Node.js 20+ required for ES modules & modern runtime. |
-| **Application Mode** | **Production** | Ensures static asset serving and caching optimizations. |
+| **Node.js Version** | **20.x** (e.g. 20.19+) | Node.js 20 LTS. |
+| **Application Mode** | **Production** | Serves compiled static assets and enables production optimizations. |
 | **Application Root** | `tglinks` (or your chosen path) | The directory relative to `/home/username/`. |
 | **Application URL** | `yourdomain.com` | Your domain or subdomain configured in cPanel. |
-| **Application Startup File** | `app.js` | Points directly to the production entry point. |
+| **Application Startup File** | **`app.cjs`** *(or `app.js`)* | Use `app.cjs` for direct CommonJS compatibility with LiteSpeed's `lsnode.js`. |
 
 5. Click **Create** to initialize the application.
 
@@ -35,26 +37,29 @@ TG Links features a hybrid architecture:
 
 ## 3. Uploading & Building Application Files
 
-### Option A: Upload Pre-Built Files (Recommended for Fast Deployment)
+### Option A: Upload Pre-Built Files (Recommended)
 If you build locally before uploading:
 1. In your local development folder, run:
    ```bash
    npm install
    npm run build
    ```
+   *Verifies `dist/server.cjs` and `dist/index.html` are generated.*
 2. Upload the following files/folders to your **Application Root** directory in cPanel (via File Manager or FTP):
-   - `app.js` *(cPanel startup file)*
+   - `app.cjs` *(Primary CommonJS startup launcher)*
+   - `app.js` *(Synchronous ESM bridge)*
    - `package.json`
-   - `dist/` *(contains compiled frontend and `dist/server.cjs`)*
-   - `data.json` *(initial database)*
+   - `dist/` *(contains compiled frontend assets and `dist/server.cjs`)*
+   - `data.json` *(database)*
    - `.env` *(optional environment variables)*
    - `public/` *(static favicon & assets)*
-3. In cPanel **Setup Node.js App**, click **Run NPM Install** (or install production dependencies).
-4. Click **Restart Application**.
+3. In cPanel **Setup Node.js App**, click **Run NPM Install** (or run `npm install --omit=dev` via terminal).
+4. Set **Application Startup File** to `app.cjs` (or `app.js`).
+5. Click **Restart Application**.
 
 ---
 
-### Option B: Build Directly on cPanel (via cPanel Terminal or Web Terminal)
+### Option B: Build Directly on cPanel (via Terminal)
 If your cPanel account provides Terminal access:
 1. Enter the virtual environment command shown at the top of the cPanel Node.js page:
    ```bash
@@ -68,7 +73,7 @@ If your cPanel account provides Terminal access:
    ```bash
    npm run build
    ```
-   *This command runs `vite build` to bundle frontend assets to `dist/` and `esbuild` to compile `server.ts` to `dist/server.cjs`.*
+   *This command runs `vite build` (frontend assets to `dist/`) and `esbuild` (`server.ts` to `dist/server.cjs`).*
 4. Restart the application via cPanel UI or touch `tmp/restart.txt`.
 
 ---
@@ -81,7 +86,7 @@ In cPanel, open your application in **Setup Node.js App** and scroll to **Enviro
 | :--- | :--- | :--- |
 | `NODE_ENV` | `production` | Set to `production` for optimal performance. |
 | `DB_PATH` | *(optional)* `./data.json` | Specify an absolute path if you prefer storing database outside the web root (e.g., `/home/username/tglinks_data/data.json`). |
-| `PORT` | *(auto-assigned)* | **Do not manually set `PORT`** on cPanel unless needed. cPanel Passenger automatically injects its internal socket/port. |
+| `PORT` | *(auto-assigned)* | **Do not manually set `PORT`** on cPanel. LiteSpeed/Passenger automatically injects its internal socket/port. |
 
 ---
 
@@ -101,11 +106,10 @@ In cPanel, open your application in **Setup Node.js App** and scroll to **Enviro
 
 Whenever you update files or change environment variables:
 - **Method 1 (cPanel UI)**: Go to **Setup Node.js App** and click the **Restart** button.
-- **Method 2 (Passenger Hot Restart)**: In cPanel File Manager or terminal, create or touch the file:
+- **Method 2 (LiteSpeed / Passenger Hot Restart)**: In cPanel File Manager or terminal, create or touch the file:
   ```bash
   mkdir -p tmp && touch tmp/restart.txt
   ```
-  Phusion Passenger will automatically reload worker processes without dropping active requests.
 
 ---
 
