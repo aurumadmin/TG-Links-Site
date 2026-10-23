@@ -17,7 +17,9 @@ import type {
   SystemSettings 
 } from "./src/types.ts";
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const rawPort = process.env.PORT || 3000;
+const isNumericPort = typeof rawPort === "number" || (!isNaN(Number(rawPort)) && !isNaN(parseInt(String(rawPort), 10)));
+const PORT: number | string = isNumericPort ? parseInt(String(rawPort), 10) : String(rawPort);
 const isVercel = !!process.env.VERCEL;
 
 // We check multiple locations to locate the read-only template data.json in serverless or bundled environments
@@ -5440,9 +5442,58 @@ function normalizeAndMigrateDatabase(rawData: any): any {
   });
 
 
-  // --- VITE MIDDLEWARE HANDLING ---
+  // --- PRODUCTION STATIC ASSET SERVING & VITE DEV MIDDLEWARE ---
   
-  if (process.env.NODE_ENV !== "production" && !isVercel) {
+  function mountStaticFrontend(expressApp: express.Express) {
+    const potentialDistPaths = [
+      path.join(process.cwd(), "dist"),
+      path.join(__dirname, "dist"),
+      path.resolve(__dirname, "..", "dist"),
+      path.resolve(__dirname)
+    ];
+
+    let resolvedDist = potentialDistPaths.find(p => {
+      try {
+        return fs.existsSync(path.join(p, "index.html"));
+      } catch {
+        return false;
+      }
+    }) || path.join(process.cwd(), "dist");
+
+    console.log("[TG Links] Mounting production static assets from:", resolvedDist);
+    expressApp.use(express.static(resolvedDist));
+    expressApp.get("*", (req, res, next) => {
+      if (
+        req.path.startsWith("/api") || 
+        req.path.startsWith("/go") || 
+        req.path.startsWith("/p/") || 
+        req.path.startsWith("/faucet") ||
+        req.path.startsWith("/r")
+      ) {
+        return next();
+      }
+      const indexPath = path.join(resolvedDist, "index.html");
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send(`
+          <!DOCTYPE html>
+          <html>
+            <head><meta charset="utf-8"><title>TG Links - Production Setup</title></head>
+            <body style="font-family: system-ui, sans-serif; background: #020617; color: #f8fafc; padding: 48px; text-align: center;">
+              <h2>Frontend Build Missing</h2>
+              <p style="color: #94a3b8;">Frontend static files were not found in <code>dist/index.html</code>.</p>
+              <p style="color: #cbd5e1;">Please build production assets by running: <code style="background:#1e293b; padding:4px 8px; border-radius:4px;">npm run build</code></p>
+            </body>
+          </html>
+        `);
+      }
+    });
+  }
+
+  const isProduction = process.env.NODE_ENV === "production" || process.env.PASSENGER_APP_ENV === "production";
+
+  if (!isProduction && !isVercel) {
     import("vite").then(({ createServer: createViteServer }) => {
       createViteServer({
         server: { middlewareMode: true },
@@ -5450,24 +5501,30 @@ function normalizeAndMigrateDatabase(rawData: any): any {
       }).then((vite) => {
         app.use(vite.middlewares);
       }).catch(err => {
-        console.error("Vite server error:", err);
+        console.error("Vite server error, falling back to static assets:", err);
+        mountStaticFrontend(app);
       });
     }).catch(err => {
-      console.error("Failed to dynamically import Vite:", err);
+      console.warn("Vite not available in environment, serving production static assets:", err?.message || err);
+      mountStaticFrontend(app);
     });
   } else if (!isVercel) {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    mountStaticFrontend(app);
   }
 
   if (!isVercel) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`[TG Links] Server booting up on http://0.0.0.0:${PORT}`);
-      startEmailBackupScheduler();
-    });
+    if (typeof PORT === "number") {
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`[TG Links] Server booting up on http://0.0.0.0:${PORT}`);
+        startEmailBackupScheduler();
+      });
+    } else {
+      // Unix domain socket or named pipe provided by cPanel Node.js Selector (Phusion Passenger)
+      app.listen(PORT, () => {
+        console.log(`[TG Links] Server booting up on socket/pipe: ${PORT}`);
+        startEmailBackupScheduler();
+      });
+    }
   }
 }
 
