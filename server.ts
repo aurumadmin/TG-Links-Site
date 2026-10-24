@@ -182,12 +182,12 @@ function getPlatformBaseUrl(req?: express.Request, db?: any): string {
     const proto = getRequestProtocol(req);
     if (host && !host.includes("localhost") && !host.includes("127.0.0.1") && !host.includes("ais-dev") && !host.includes("ais-pre")) {
       if (host.includes("thunder-appz.eu.org")) {
-        return "https://tglinks.eu.cc";
+        return "https://tglinks.tech";
       }
       return `${proto}://${host}`;
     }
   }
-  return "https://tglinks.eu.cc";
+  return "https://tglinks.tech";
 }
 
 function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): number {
@@ -566,7 +566,7 @@ async function getExternalShortenedUrl(
   const codeMatch = finalDestinationUrl.match(/\/(?:go-final|faucet-final|faucet|go)\/([^?\/]+)/);
   const code = codeMatch ? codeMatch[1] : "";
 
-  let publicOrigin = "https://tglinks.eu.cc";
+  let publicOrigin = "https://tglinks.tech";
 
   const queryPart = finalDestinationUrl.includes("?") ? finalDestinationUrl.substring(finalDestinationUrl.indexOf("?")) : "";
   let nextTargetUrl = `${publicOrigin}/${finalDestinationUrl.includes("faucet") ? "faucet-final" : "go-final"}/${code}${queryPart}`;
@@ -2225,7 +2225,7 @@ function setupRoutes() {
   // --- SEO ROUTES (robots.txt & sitemap.xml) ---
   app.get("/robots.txt", (req, res) => {
     const protocol = req.headers["x-forwarded-proto"] || "https";
-    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.eu.cc";
+    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.tech";
     const baseUrl = `${protocol}://${host}`;
 
     res.type("text/plain");
@@ -2249,7 +2249,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   app.get("/sitemap.xml", (req, res) => {
     const protocol = req.headers["x-forwarded-proto"] || "https";
-    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.eu.cc";
+    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.tech";
     const baseUrl = `${protocol}://${host}`;
     const today = new Date().toISOString().split("T")[0];
 
@@ -3076,7 +3076,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   // --- GATEWAY AND REFERRER REDIRECTIONS ---
   
-  // Redirect visitors from shortlink domains (e.g. tglinks.eu.cc) to the registered safelink blog domain (thunder-appz.eu.org)
+  // Redirect visitors from shortlink domains (e.g. tglinks.tech) to the registered safelink blog domain (thunder-appz.eu.org)
   app.get(["/go/:code", "/faucet/:code"], (req, res, next) => {
     const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
     if (rawVtok && typeof rawVtok === "string" && rawVtok.trim().length > 0) {
