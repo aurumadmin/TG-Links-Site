@@ -312,12 +312,15 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi);
       } else if (!found && (target.includes("softurl") || target === "api-softurl-2")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl"));
-      } else if (!found && (target.includes("arolinks") || target === "api-arolinks-3")) {
-        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("arolinks")) || {
-          id: "api-arolinks-3",
-          name: "AroLinks",
-          apiUrl: "https://arolinks.com/api",
-          apiToken: "d2c8261beff4b98ff674d7f306f2fe205bb5c25d",
+      } else if (!found && (target.includes("sharedisk") || target.includes("arolinks") || target === "api-sharedisklinks-3" || target === "api-arolinks-3")) {
+        found = activeShorteners.find((s: any) => {
+          const sName = String(s.name || "").toLowerCase();
+          return sName.includes("sharedisk") || sName.includes("arolinks");
+        }) || {
+          id: "api-sharedisklinks-3",
+          name: "ShareDiskLinks",
+          apiUrl: "https://sharedisklinks.com/api",
+          apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
           enabled: true,
           isFaucetApi: false
         };
@@ -333,7 +336,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     }
   }
 
-  // Fallback default 3-step pipeline for non-faucet traffic: ShortXLinks -> SoftURL -> AroLinks
+  // Fallback default 3-step pipeline for non-faucet traffic: ShortXLinks -> SoftURL -> ShareDiskLinks
   const shortx = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi) || {
     id: "api-shortxlinks-1",
     name: "ShortXLinks",
@@ -352,16 +355,19 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     isFaucetApi: false
   };
 
-  const arolinks = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("arolinks")) || {
-    id: "api-arolinks-3",
-    name: "AroLinks",
-    apiUrl: "https://arolinks.com/api",
-    apiToken: "d2c8261beff4b98ff674d7f306f2fe205bb5c25d",
+  const sharedisk = activeShorteners.find((s: any) => {
+    const sName = String(s.name || "").toLowerCase();
+    return sName.includes("sharedisk") || sName.includes("arolinks");
+  }) || {
+    id: "api-sharedisklinks-3",
+    name: "ShareDiskLinks",
+    apiUrl: "https://sharedisklinks.com/api",
+    apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
     enabled: true,
     isFaucetApi: false
   };
 
-  return [shortx, softurl, arolinks];
+  return [shortx, softurl, sharedisk];
 }
 
 // Helper to check if extracted URL is a valid shortened link (and not an API/reCAPTCHA/asset URL)
@@ -2821,19 +2827,19 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return res.redirect(302, softurlQuickLink);
     }
 
-    // Hardcoded Step 3 Interceptor: For ALL non-faucet links when step=3, unconditionally redirect to AroLinks API URL
+    // Hardcoded Step 3 Interceptor: For ALL non-faucet links when step=3, unconditionally redirect to ShareDiskLinks API URL
     if (rawStepVal === 3) {
       const platformBase = getPlatformBaseUrl(req, loadDb());
-      const arolinksToken = "d2c8261beff4b98ff674d7f306f2fe205bb5c25d";
+      const shareDiskToken = "271c129bc7585bddfe6a026a2536116403e057ac";
       const nextTargetUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(vtok)}&step=4`;
-      const arolinksQuickLink = `https://arolinks.com/st?api=${arolinksToken}&url=${nextTargetUrl}`;
+      const shareDiskQuickLink = `https://sharedisklinks.com/st?api=${shareDiskToken}&url=${nextTargetUrl}`;
 
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
       res.setHeader("Referrer-Policy", "no-referrer");
-      console.log(`[Hardcoded Step 3 AroLinks] Redirecting /p/${code}?step=3 directly to AroLinks API: ${arolinksQuickLink}`);
-      return res.redirect(302, arolinksQuickLink);
+      console.log(`[Hardcoded Step 3 ShareDiskLinks] Redirecting /p/${code}?step=3 directly to ShareDiskLinks API: ${shareDiskQuickLink}`);
+      return res.redirect(302, shareDiskQuickLink);
     }
 
     // Instant direct 302 redirection for step >= 4 to user's final target destination URL

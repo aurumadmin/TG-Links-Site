@@ -5189,12 +5189,12 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     <input
                       required
                       type="url"
-                      placeholder="https://arolinks.com/"
+                      placeholder="https://sharedisklinks.com/"
                       value={apiUrl}
                       onChange={(e) => setApiUrl(e.target.value)}
                       className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition text-sm text-white font-mono text-xs"
                     />
-                    <p className="text-[10px] text-slate-500 font-medium mt-1">Please enter the shortener's base domain (e.g., <code>https://arolinks.com/</code>).</p>
+                    <p className="text-[10px] text-slate-500 font-medium mt-1">Please enter the shortener's base domain (e.g., <code>https://sharedisklinks.com/</code>).</p>
                   </div>
 
                   <div>

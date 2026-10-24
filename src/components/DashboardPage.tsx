@@ -1601,7 +1601,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate, 
               {/* API Info & Format Section */}
               <div className="space-y-4">
                 <p className="text-slate-300 text-sm leading-relaxed">
-                  For developers, <span className="text-white font-extrabold">{settings?.siteName || "AroLinks.com"}</span> prepared a robust shortening API which returns responses in either <span className="text-indigo-400 font-bold">JSON</span> or <span className="text-indigo-400 font-bold">TEXT</span> format.
+                  For developers, <span className="text-white font-extrabold">{settings?.siteName || "TG Links"}</span> prepared a robust shortening API which returns responses in either <span className="text-indigo-400 font-bold">JSON</span> or <span className="text-indigo-400 font-bold">TEXT</span> format.
                 </p>
                 
                 <p className="text-slate-300 text-sm leading-relaxed">
