@@ -138,9 +138,8 @@ export default function App() {
         targetHost = new URL(registeredDomain).hostname;
       } catch (e) {}
 
-      if (isProd && !isReturnRoute && hostname !== targetHost) {
-        const routePrefix = isFaucetPath ? "faucet" : "go";
-        window.location.replace(`${registeredDomain}/${routePrefix}/${goMatch[1]}${window.location.search}`);
+      if (isProd && isFaucetPath && !isReturnRoute && hostname !== targetHost) {
+        window.location.replace(`${registeredDomain}/faucet/${goMatch[1]}${window.location.search}`);
         return;
       }
       setShortCode(goMatch[1]);

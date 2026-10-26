@@ -180,10 +180,7 @@ function getPlatformBaseUrl(req?: express.Request, db?: any): string {
   if (req) {
     const host = getRequestHost(req);
     const proto = getRequestProtocol(req);
-    if (host && !host.includes("localhost") && !host.includes("127.0.0.1") && !host.includes("ais-dev") && !host.includes("ais-pre")) {
-      if (host.includes("thunder-appz.eu.org")) {
-        return "https://tglinks.tech";
-      }
+    if (host && !host.includes("thunder-appz.eu.org")) {
       return `${proto}://${host}`;
     }
   }
@@ -290,7 +287,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     return activeShorteners.filter((api: any) => api && api.isFaucetApi);
   }
 
-  // NON-FAUCET TRAFFIC: Strictly 2 steps (ShortXLinks -> SoftURL)
+  // NON-FAUCET TRAFFIC: 1-step pipeline (ShortXLinks only)
   if (plan && Array.isArray(plan.shortenerIds) && plan.shortenerIds.length > 0) {
     const planShortenerIds: string[] = plan.shortenerIds;
     const result: any[] = [];
@@ -299,8 +296,8 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
       const pId = planShortenerIds[idx];
       const target = String(pId || "").toLowerCase();
 
-      // Skip AdsLab in non-faucet pipeline
-      if (target.includes("adslab")) continue;
+      // Skip other shorteners in non-faucet pipeline
+      if (target.includes("adslab") || target.includes("softurl") || target.includes("sharedisk") || target.includes("arolinks")) continue;
 
       let found = activeShorteners.find((s: any) => {
         const sId = String(s.id || "").toLowerCase();
@@ -310,20 +307,6 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
 
       if (!found && (target.includes("shortx") || target === "api-shortxlinks-1")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi);
-      } else if (!found && (target.includes("softurl") || target === "api-softurl-2")) {
-        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl"));
-      } else if (!found && (target.includes("sharedisk") || target.includes("arolinks") || target === "api-sharedisklinks-3" || target === "api-arolinks-3")) {
-        found = activeShorteners.find((s: any) => {
-          const sName = String(s.name || "").toLowerCase();
-          return sName.includes("sharedisk") || sName.includes("arolinks");
-        }) || {
-          id: "api-sharedisklinks-3",
-          name: "ShareDiskLinks",
-          apiUrl: "https://sharedisklinks.com/api",
-          apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
-          enabled: true,
-          isFaucetApi: false
-        };
       }
 
       if (found) {
@@ -336,7 +319,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     }
   }
 
-  // Fallback default 3-step pipeline for non-faucet traffic: ShortXLinks -> SoftURL -> ShareDiskLinks
+  // Fallback default 1-step pipeline for non-faucet traffic: ShortXLinks only
   const shortx = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi) || {
     id: "api-shortxlinks-1",
     name: "ShortXLinks",
@@ -346,28 +329,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
     isFaucetApi: false
   };
 
-  const softurl = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl")) || {
-    id: "api-softurl-2",
-    name: "SoftURL",
-    apiUrl: "https://softurl.in/api",
-    apiToken: "609c875b96d61f0592bfe5ae036b2db1df673680",
-    enabled: true,
-    isFaucetApi: false
-  };
-
-  const sharedisk = activeShorteners.find((s: any) => {
-    const sName = String(s.name || "").toLowerCase();
-    return sName.includes("sharedisk") || sName.includes("arolinks");
-  }) || {
-    id: "api-sharedisklinks-3",
-    name: "ShareDiskLinks",
-    apiUrl: "https://sharedisklinks.com/api",
-    apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
-    enabled: true,
-    isFaucetApi: false
-  };
-
-  return [shortx, softurl, sharedisk];
+  return [shortx];
 }
 
 // Helper to check if extracted URL is a valid shortened link (and not an API/reCAPTCHA/asset URL)
@@ -455,7 +417,8 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
   // Generate official AdLinkFly QuickLink API URL directly (/st?api=...&url=https://...) for all shorteners
   let baseDomain = rawUrl.endsWith("/api") ? rawUrl.slice(0, -4) : rawUrl.replace(/\/st$/, "");
   if (baseDomain && apiToken) {
-    const quickLink = `${baseDomain}/st?api=${apiToken}&url=${targetUrl}`;
+    const encodedTarget = encodeURIComponent(targetUrl);
+    const quickLink = `${baseDomain}/st?api=${encodeURIComponent(apiToken)}&url=${encodedTarget}`;
     console.log(`[Shortener API] Direct QuickLink API URL generated for ${selectedApi.name}: ${quickLink}`);
     return quickLink;
   }
@@ -791,6 +754,110 @@ function verifyAndConsumeTokenResult(
   }
 
   return { valid: false, isAlreadyConsumed: false };
+}
+
+// Helper to render on-domain TG Links destination ready completion page
+function renderTgLinksCompletionPage(code: string, targetUrl: string): string {
+  let displayUrl = targetUrl;
+  try {
+    const u = new URL(targetUrl);
+    displayUrl = u.hostname + (u.pathname !== "/" ? u.pathname : "");
+  } catch {}
+
+  const safeTargetUrl = targetUrl.replace(/"/g, "&quot;");
+  const safeDisplayUrl = displayUrl.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const year = new Date().getFullYear();
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Link is Ready! - TG Links</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.25; transform: scale(1); }
+      50% { opacity: 0.55; transform: scale(1.05); }
+    }
+    .pulse-glow { animation: pulseGlow 4s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white font-sans antialiased">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center text-white font-black text-sm shadow-lg shadow-indigo-500/30">
+        TG
+      </div>
+      <span class="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">TG Links</span>
+    </div>
+    <div class="flex items-center gap-2 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+      <span>Link Verified</span>
+    </div>
+  </header>
+
+  <!-- Main Content Card -->
+  <main class="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
+    <!-- Ambient Background Glow -->
+    <div class="absolute w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none pulse-glow"></div>
+    <div class="absolute -bottom-10 -right-10 w-80 h-80 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none"></div>
+
+    <div class="relative w-full max-w-md bg-slate-900/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl shadow-indigo-950/50 backdrop-blur-xl text-center space-y-6">
+      
+      <!-- Verified Badge Icon -->
+      <div class="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-indigo-500/20 border border-emerald-500/30 flex items-center justify-center shadow-lg shadow-emerald-500/10">
+        <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+        </svg>
+      </div>
+
+      <!-- Title & Description -->
+      <div class="space-y-2">
+        <h1 class="text-2xl font-black text-white tracking-tight">Your Destination is Ready!</h1>
+        <p class="text-slate-400 text-sm leading-relaxed">
+          Shortlink step completed successfully. Click the button below to open your target link.
+        </p>
+      </div>
+
+      <!-- Target URL Box -->
+      <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-left space-y-1">
+        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Destination URL</div>
+        <div class="font-mono text-xs text-indigo-300 truncate font-semibold">
+          ${safeDisplayUrl}
+        </div>
+      </div>
+
+      <!-- Open Destination Button -->
+      <div class="pt-2">
+        <a 
+          id="destBtn"
+          href="${safeTargetUrl}" 
+          rel="noreferrer noopener"
+          class="w-full inline-flex items-center justify-center gap-2.5 px-6 py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-bold text-base shadow-xl shadow-indigo-500/25 hover:shadow-indigo-500/40 transform active:scale-[0.98] transition-all cursor-pointer group"
+        >
+          <span>Open Destination</span>
+          <svg class="w-5 h-5 text-indigo-200 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+          </svg>
+        </a>
+      </div>
+
+      <div class="text-[11px] text-slate-500 font-medium">
+        Powered by <span class="text-slate-400 font-semibold">TG Links Network</span> &bull; 100% Verified
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-900/80 px-6 py-4 text-center text-xs text-slate-500">
+    &copy; ${year} TG Links. All rights reserved.
+  </footer>
+</body>
+</html>`;
 }
 
 // Helper to resolve all identifier aliases (id, email, username, emailPrefix) for a given user ID/email/username
@@ -2812,40 +2879,18 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     const rawStepVal = parseInt(String(req.query.step || "0"), 10);
 
-    // Hardcoded Step 2 Interceptor: For ALL non-faucet links when step=2, unconditionally redirect to SoftURL QuickLink API URL
-    if (rawStepVal === 2) {
-      const platformBase = getPlatformBaseUrl(req, loadDb());
-      const softurlToken = "609c875b96d61f0592bfe5ae036b2db1df673680";
-      const nextTargetUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(vtok)}&step=3`;
-      const softurlQuickLink = `https://softurl.in/st?api=${softurlToken}&url=${nextTargetUrl}`;
-
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.setHeader("Referrer-Policy", "no-referrer");
-      console.log(`[Hardcoded Step 2 SoftURL] Redirecting /p/${code}?step=2 directly to SoftURL API: ${softurlQuickLink}`);
-      return res.redirect(302, softurlQuickLink);
-    }
-
-    // Hardcoded Step 3 Interceptor: For ALL non-faucet links when step=3, unconditionally redirect to ShareDiskLinks API URL
-    if (rawStepVal === 3) {
-      const platformBase = getPlatformBaseUrl(req, loadDb());
-      const shareDiskToken = "271c129bc7585bddfe6a026a2536116403e057ac";
-      const nextTargetUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(vtok)}&step=4`;
-      const shareDiskQuickLink = `https://sharedisklinks.com/st?api=${shareDiskToken}&url=${nextTargetUrl}`;
-
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.setHeader("Referrer-Policy", "no-referrer");
-      console.log(`[Hardcoded Step 3 ShareDiskLinks] Redirecting /p/${code}?step=3 directly to ShareDiskLinks API: ${shareDiskQuickLink}`);
-      return res.redirect(302, shareDiskQuickLink);
-    }
-
-    // Instant direct 302 redirection for step >= 4 to user's final target destination URL
-    if (!isNaN(rawStepVal) && rawStepVal >= 4) {
+    // Completion Handler: When visitor completes ShortXLinks (step >= 2 or with vtok on /p/:code or /callback/:code)
+    if (rawStepVal >= 2 || (hasVtok && (req.path.startsWith("/p/") || req.path.startsWith("/callback/")))) {
       const db = loadDb();
       let link = db.links?.find((l: any) => l.code === code);
+      if (!link && vtok) {
+        const match = vtok.match(/^vtok[~_]([^~_]+)/);
+        if (match && match[1]) {
+          const decodedCode = decodeURIComponent(match[1]);
+          link = db.links?.find((l: any) => l.code === decodedCode);
+        }
+      }
+
       let targetUrl = link?.originalUrl || "https://google.com";
       if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
         targetUrl = "https://" + targetUrl;
@@ -2861,17 +2906,55 @@ Sitemap: ${baseUrl}/sitemap.xml`
         targetUrl = "https://google.com";
       }
 
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.setHeader("Referrer-Policy", "no-referrer");
-      console.log(`[Instant Direct Target Step ${rawStepVal}] Redirecting /p/${code}?step=${rawStepVal} directly to ${targetUrl}`);
-      return res.redirect(302, targetUrl);
-    }
+      // Record view & earnings if not already consumed
+      const ip = getClientIp(req);
+      if (vtok) {
+        const tokenResult = verifyAndConsumeTokenResult(vtok, code, String(ip), 1);
+        if (!tokenResult.isAlreadyConsumed) {
+          const todayIST = getISTDateString();
+          const hasPaidClickToday = db.clicksLog.some(
+            (c: any) => {
+              let loggedIp = c.ip;
+              if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+                loggedIp = loggedIp.split(",")[0].trim();
+              }
+              return c.linkId === link?.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
+            }
+          );
+          const currentCpm = getCurrentCpmForLink(link, db);
+          const earningAmount = hasPaidClickToday ? 0 : (currentCpm / 1000);
+          const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || "ShortXLinks") as string;
+          const clickId = "c-" + Math.random().toString(36).substring(2, 9);
+          const click: ClickLog = {
+            id: clickId,
+            linkId: link?.id || code,
+            userId: link?.userId || "guest",
+            timestamp: new Date().toISOString(),
+            ip: String(ip),
+            earning: earningAmount,
+            country: "Global",
+            referrer: rawReferrer
+          };
+          db.clicksLog.push(click);
+          if (link) {
+            link.clicks += 1;
+            link.earnings += earningAmount;
+            if (link.userId && link.userId !== "guest") {
+              const { user } = getUserIdentifiers(db, link.userId);
+              if (user && !user.banned) {
+                user.balance = Number(((user.balance || 0) + earningAmount).toFixed(6));
+                user.totalEarned = Number(((user.totalEarned || 0) + earningAmount).toFixed(6));
+              }
+            }
+          }
+          saveDb(db);
+        }
+      }
 
-    // If no verification token and no step param is in the URL, pass to next() so SPA or domain redirect handles the initial visit
-    if (!hasVtok && !req.query.step) {
-      return next();
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
+      return res.send(renderTgLinksCompletionPage(code, targetUrl));
     }
 
     const ip = getClientIp(req);
@@ -2886,7 +2969,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       }
     }
     if (!link) {
-      if (hasVtok || req.query.step) {
+      if (hasVtok || req.query.step || req.path.startsWith("/go/")) {
         let fallbackUrl = db.settings?.homepageTargetUrl || "https://google.com";
         if (fallbackUrl.includes("thunder-appz.eu.org") || fallbackUrl.includes("/go") || fallbackUrl.includes("/p/")) {
           fallbackUrl = "https://google.com";
@@ -2917,6 +3000,40 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
     const userPlan = getPlanForUser(linkOwner, db);
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
+
+    // DIRECT REDIRECT FOR NON-FAUCET PLAN:
+    // When a user visits a non-faucet short link (e.g. /go/:code), immediately redirect (302)
+    // straight to ShortXLinks without loading thunder-appz blog page or any other intermediate page!
+    if (!isFaucetMode && (req.path.startsWith("/go/") || req.path === `/go/${code}`)) {
+      const platformBase = getPlatformBaseUrl(req, db);
+      const newVtok = createVerificationToken(code, String(ip), 1);
+      const completionUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(newVtok)}&step=2`;
+
+      // Single shortlink: ShortXLinks
+      const shortxApi = (db.externalApis || []).find((a: any) => 
+        a.id === "api-shortxlinks-1" || 
+        a.name?.toLowerCase().includes("shortx") || 
+        a.apiUrl?.includes("shortxlinks.com")
+      ) || {
+        id: "api-shortxlinks-1",
+        name: "ShortXLinks",
+        apiUrl: "https://shortxlinks.com/api",
+        apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1"
+      };
+
+      const token = shortxApi.apiToken || "b6ac095e9373906c9e461860400e64a7de4536f1";
+      const shortXUrl = `https://shortxlinks.com/st?api=${encodeURIComponent(token)}&url=${encodeURIComponent(completionUrl)}`;
+
+      console.log(`[Non-Faucet Direct] Direct 302 redirect for /go/${code} to ShortXLinks: ${shortXUrl}`);
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      return res.redirect(302, shortXUrl);
+    }
+
+    // If no verification token and no step param is in the URL, pass to next() for faucet mode handling
+    if (!hasVtok && !req.query.step) {
+      return next();
+    }
 
     const todayIST = getISTDateString();
     const hasCompletedToday = db.clicksLog.some(
@@ -3102,6 +3219,11 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const linkOwner = link ? (findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail)) : null;
     const userPlan = linkOwner ? getPlanForUser(linkOwner, db) : null;
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
+
+    // Non-faucet links must NEVER be redirected to thunder-appz blog domain
+    if (!isFaucetMode) {
+      return next();
+    }
 
     const registeredDomain = (userPlan?.blogPageUrl || db.settings?.adslabRegisteredDomain || "https://thunder-appz.eu.org").replace(/\/+$/, "");
     let targetHost = "thunder-appz.eu.org";
@@ -3321,7 +3443,15 @@ Sitemap: ${baseUrl}/sitemap.xml`
       saveDb(db);
     }
 
-    // Direct HTTP 302 redirect to original destination URL
+    // For non-faucet links, serve the branded TG Links completion page on-domain
+    if (!isFaucetMode) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
+      return res.send(renderTgLinksCompletionPage(code, targetUrl));
+    }
+
+    // Direct HTTP 302 redirect to original destination URL (for faucet mode)
     res.setHeader("Referrer-Policy", "no-referrer");
     return res.redirect(302, targetUrl);
   });

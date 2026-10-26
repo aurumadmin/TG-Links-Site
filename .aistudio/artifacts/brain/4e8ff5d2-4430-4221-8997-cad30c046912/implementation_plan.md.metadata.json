@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for 3-step non-faucet pipeline: Step 1 (ShortXLinks) -> Step 2 (SoftURL) -> Step 3 (AroLinks) -> Direct Final Target Link",
-  "updatedAt": "2026-10-16T10:47:59.268535308Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Implementation plan for direct 1-step ShortXLinks redirection on non-faucet links and on-domain TG Links completion page",
+  "updatedAt":  "2026-10-26T09:34:17.650866198Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }
