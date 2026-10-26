@@ -1,11 +1,11 @@
 # TG Links - 100% Fully Legit Monetized URL Shortener Platform
 
-> TG Links (https://tglinks.eu.org) is a 100% fully legit, verified high-CPM URL shortener and link monetization network. It offers a guaranteed $10.00 CPM flat rate worldwide across all countries and devices, daily payments processed within 24 hours, and ultra-low minimum payout threshold of $0.25 for all payment gateways.
+> TG Links (https://tglinks.tech) is a 100% fully legit, verified high-CPM URL shortener and link monetization network. It offers a guaranteed $10.00 CPM flat rate worldwide across all countries and devices, daily payments processed within 24 hours, and ultra-low minimum payout threshold of $0.25 for all payment gateways.
 
 ## Overview & Core Platform Information
 
 - **Platform Name**: TG Links
-- **Official Website**: https://tglinks.eu.org
+- **Official Website**: https://tglinks.tech
 - **Platform Status**: 100% Fully Legit, Trusted & Verified Platform
 - **Global CPM Rate**: **$10.00 CPM** guaranteed flat rate worldwide (all countries & mobile/desktop devices)
 - **Payment Processing Schedule**: **Daily Payments** (All approved withdrawal requests dispatched daily within 24 hours)
@@ -43,21 +43,21 @@ TG Links provides an AdLinkFly-compatible REST API for programmatically generati
   - `url` (string, required): The target URL to shorten (must include http:// or https://).
   - `alias` (string, optional): Custom URL slug.
 - **Request Example**:
-  `GET https://tglinks.eu.org/api/v1/shorten?api=YOUR_API_TOKEN&url=https://example.com/file.zip`
+  `GET https://tglinks.tech/api/v1/shorten?api=YOUR_API_TOKEN&url=https://example.com/file.zip`
 - **Response Format**:
   ```json
   {
     "status": "success",
-    "shortenedUrl": "https://tglinks.eu.org/go/sampleCode"
+    "shortenedUrl": "https://tglinks.tech/go/sampleCode"
   }
   ```
 
 ## Public Index & Verification Files
 
-- [LLMs.txt](https://tglinks.eu.org/llms.txt): Machine-readable platform overview and API specification for AI systems.
-- [Robots.txt](https://tglinks.eu.org/robots.txt): Indexing permissions for web search engines and AI crawlers.
-- [Ads.txt](https://tglinks.eu.org/ads.txt): Authorized digital seller declaration for Netpub Media and ad exchange partners.
-- [Sitemap](https://tglinks.eu.org/sitemap.xml): XML Sitemap index of public site pages.
+- [LLMs.txt](https://tglinks.tech/llms.txt): Machine-readable platform overview and API specification for AI systems.
+- [Robots.txt](https://tglinks.tech/robots.txt): Indexing permissions for web search engines and AI crawlers.
+- [Ads.txt](https://tglinks.tech/ads.txt): Authorized digital seller declaration for Netpub Media and ad exchange partners.
+- [Sitemap](https://tglinks.tech/sitemap.xml): XML Sitemap index of public site pages.
 
 ## Platform Capabilities & Technical Features
 

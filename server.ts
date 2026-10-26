@@ -184,7 +184,7 @@ function getPlatformBaseUrl(req?: express.Request, db?: any): string {
       return `${proto}://${host}`;
     }
   }
-  return "https://tglinks.eu.org";
+  return "https://tglinks.tech";
 }
 
 function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): number {
@@ -535,7 +535,7 @@ async function getExternalShortenedUrl(
   const codeMatch = finalDestinationUrl.match(/\/(?:go-final|faucet-final|faucet|go)\/([^?\/]+)/);
   const code = codeMatch ? codeMatch[1] : "";
 
-  let publicOrigin = "https://tglinks.eu.org";
+  let publicOrigin = "https://tglinks.tech";
 
   const queryPart = finalDestinationUrl.includes("?") ? finalDestinationUrl.substring(finalDestinationUrl.indexOf("?")) : "";
   let nextTargetUrl = `${publicOrigin}/${finalDestinationUrl.includes("faucet") ? "faucet-final" : "go-final"}/${code}${queryPart}`;
@@ -1346,17 +1346,12 @@ function loadDb() {
     }
   };
 
-  if (initialDbSeedNeeded || !db) {
-    try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2));
-    } catch (err) {
-      console.error("[TG Links] Failed to write initial database:", err);
-    }
-    cachedDbInMemory = initialDb;
-    return initialDb;
-  }
-
   let changed = false;
+
+  if (initialDbSeedNeeded || !db) {
+    db = JSON.parse(JSON.stringify(initialDb));
+    changed = true;
+  }
   
   if (!db.users) {
     db.users = initialDb.users;
@@ -1387,6 +1382,15 @@ function loadDb() {
         apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1",
         enabled: true,
         priority: 6,
+        isFaucetApi: false
+      },
+      {
+        id: "api-sharedisklinks-3",
+        name: "ShareDiskLinks",
+        apiUrl: "https://sharedisklinks.com/api",
+        apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
+        enabled: false,
+        priority: 5,
         isFaucetApi: false
       },
       {
@@ -2298,7 +2302,7 @@ function setupRoutes() {
   // --- SEO ROUTES (robots.txt & sitemap.xml) ---
   app.get("/robots.txt", (req, res) => {
     const protocol = req.headers["x-forwarded-proto"] || "https";
-    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.eu.org";
+    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.tech";
     const baseUrl = `${protocol}://${host}`;
 
     res.type("text/plain");
@@ -2322,7 +2326,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   app.get("/sitemap.xml", (req, res) => {
     const protocol = req.headers["x-forwarded-proto"] || "https";
-    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.eu.org";
+    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.tech";
     const baseUrl = `${protocol}://${host}`;
     const today = new Date().toISOString().split("T")[0];
 
@@ -2953,7 +2957,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      console.log(`[TG Links Completion Page] Serving completion page on tglinks.eu.org for code ${code} -> ${targetUrl}`);
+      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
       return res.send(renderTgLinksCompletionPage(code, targetUrl));
     }
 
@@ -3201,7 +3205,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   // --- GATEWAY AND REFERRER REDIRECTIONS ---
   
-  // Redirect visitors from shortlink domains (e.g. tglinks.eu.org) to the registered safelink blog domain (thunder-appz.eu.org)
+  // Redirect visitors from shortlink domains (e.g. tglinks.tech) to the registered safelink blog domain (thunder-appz.eu.org)
   app.get(["/go/:code", "/faucet/:code"], (req, res, next) => {
     const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
     if (rawVtok && typeof rawVtok === "string" && rawVtok.trim().length > 0) {
@@ -3449,7 +3453,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     if (!isFaucetMode) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      console.log(`[TG Links Completion Page] Serving completion page on tglinks.eu.org for code ${code} -> ${targetUrl}`);
+      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
       return res.send(renderTgLinksCompletionPage(code, targetUrl));
     }
 

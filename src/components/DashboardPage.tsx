@@ -63,9 +63,10 @@ import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
 import TopLoadingBar from "./TopLoadingBar";
 
 const getBaseShortUrl = () => {
-  const hostname = window.location.hostname;
-  const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
-  return isProd ? "https://tglinks.eu.org" : window.location.origin;
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "https://tglinks.tech";
 };
 
 interface DashboardPageProps {
