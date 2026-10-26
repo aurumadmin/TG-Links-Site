@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for direct 1-step ShortXLinks redirection on non-faucet links and on-domain TG Links completion page",
-  "updatedAt":  "2026-10-26T09:34:17.650866198Z",
+  "summary":  "Implementation plan for adding 'Plan 2' with SoftURL as a dedicated single-shortener plan ($5.00 CPM) alongside the Default Plan (ShortXLinks). Features direct 302 redirection to SoftURL without blog pages and on-domain TG Links destination unlock screen.",
+  "updatedAt":  "2026-10-26T15:33:17.103701331Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

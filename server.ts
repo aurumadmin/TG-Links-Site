@@ -297,7 +297,7 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
       const target = String(pId || "").toLowerCase();
 
       // Skip other shorteners in non-faucet pipeline
-      if (target.includes("adslab") || target.includes("softurl") || target.includes("sharedisk") || target.includes("arolinks")) continue;
+      if (target.includes("adslab") || target.includes("sharedisk") || target.includes("arolinks")) continue;
 
       let found = activeShorteners.find((s: any) => {
         const sId = String(s.id || "").toLowerCase();
@@ -307,6 +307,9 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
 
       if (!found && (target.includes("shortx") || target === "api-shortxlinks-1")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("shortx") && !s.isFaucetApi);
+      }
+      if (!found && (target.includes("softurl") || target === "api-softurl-2")) {
+        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl") && !s.isFaucetApi);
       }
 
       if (found) {
@@ -1463,8 +1466,8 @@ function loadDb() {
       {
         id: "default",
         name: "Default Plan",
-        cpm: 10.0,
-        shortenerIds: defaultNonFaucetShorteners,
+        cpm: 5.0,
+        shortenerIds: ["api-shortxlinks-1"],
         blogPageUrl: "https://thunder-appz.eu.org",
         description: "Default high-converting shortener pipeline with instant link generation and standard payout rates.",
         isDefault: true,
@@ -1473,9 +1476,21 @@ function loadDb() {
         requirements: "All traffic allowed. 100% completed view counting."
       },
       {
+        id: "plan-2",
+        name: "Plan 2",
+        cpm: 5.0,
+        shortenerIds: ["api-softurl-2"],
+        blogPageUrl: "https://thunder-appz.eu.org",
+        description: "Single-step high conversion plan using SoftURL with direct redirection.",
+        isDefault: false,
+        enabled: true,
+        isFaucetPlan: false,
+        requirements: "All traffic allowed. 100% completed view counting."
+      },
+      {
         id: "faucet",
         name: "Faucet Mode Plan",
-        cpm: 8.0,
+        cpm: 4.0,
         shortenerIds: [], // Direct claim landing with zero external shorteners
         blogPageUrl: "https://thunder-appz.eu.org",
         description: "Dedicated crypto faucet traffic monetization plan routing via /faucet/ with direct claim landing.",
@@ -3007,33 +3022,42 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     // DIRECT REDIRECT FOR NON-FAUCET PLAN:
     // When a user visits a non-faucet short link (e.g. /go/:code), immediately redirect (302)
-    // straight to ShortXLinks without loading thunder-appz blog page or any other intermediate page!
+    // straight to the assigned shortener (ShortXLinks for Default Plan, SoftURL for Plan 2)
+    // without loading thunder-appz blog page or any other intermediate page!
     if (!isFaucetMode && (req.path.startsWith("/go/") || req.path === `/go/${code}`)) {
       const platformBase = getPlatformBaseUrl(req, db);
       const newVtok = createVerificationToken(code, String(ip), 1);
-      // Directly land on TG Links branded completion page upon finishing the single ShortXLinks step
+      // Directly land on TG Links branded completion page upon finishing the single shortener step
       const completionUrl = `${platformBase}/go-final/${code}?vtok=${newVtok}`;
 
-      // Single shortlink: ShortXLinks
-      const shortxApi = (db.externalApis || []).find((a: any) => 
-        a.id === "api-shortxlinks-1" || 
-        a.name?.toLowerCase().includes("shortx") || 
-        a.apiUrl?.includes("shortxlinks.com")
-      ) || {
-        id: "api-shortxlinks-1",
-        name: "ShortXLinks",
-        apiUrl: "https://shortxlinks.com/api",
-        apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1"
-      };
+      const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
+      const assignedApi = (enabledApis && enabledApis.length > 0) ? enabledApis[0] : null;
 
-      const token = shortxApi.apiToken || "b6ac095e9373906c9e461860400e64a7de4536f1";
-      // Raw :// URL parameter (ShortXLinks strictly requires :// instead of %3A%2F%2F)
-      const shortXUrl = `https://shortxlinks.com/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
+      let directShortUrl = "";
+      if (assignedApi) {
+        let rawApiUrl = String(assignedApi.apiUrl || "").trim();
+        let baseDomain = rawApiUrl.replace(/\/+$/, "");
+        if (baseDomain.endsWith("/api")) {
+          baseDomain = baseDomain.slice(0, -4);
+        } else if (baseDomain.endsWith("/st")) {
+          baseDomain = baseDomain.slice(0, -3);
+        }
+        if (!baseDomain.startsWith("http://") && !baseDomain.startsWith("https://")) {
+          baseDomain = "https://" + baseDomain;
+        }
+        const token = assignedApi.apiToken || "";
+        // Raw :// URL parameter (AdLinkFly strictly requires :// instead of %3A%2F%2F)
+        directShortUrl = `${baseDomain}/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
+        console.log(`[Non-Faucet Direct] Direct 302 redirect for /go/${code} using plan "${userPlan?.name || 'Default'}" (${assignedApi.name}): ${directShortUrl}`);
+      } else {
+        const token = "b6ac095e9373906c9e461860400e64a7de4536f1";
+        directShortUrl = `https://shortxlinks.com/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
+        console.log(`[Non-Faucet Direct] Fallback direct 302 redirect for /go/${code} to ShortXLinks: ${directShortUrl}`);
+      }
 
-      console.log(`[Non-Faucet Direct] Direct 302 redirect for /go/${code} to ShortXLinks: ${shortXUrl}`);
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Referrer-Policy", "no-referrer");
-      return res.redirect(302, shortXUrl);
+      return res.redirect(302, directShortUrl);
     }
 
     // If no verification token and no step param is in the URL, pass to next() for faucet mode handling
