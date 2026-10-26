@@ -11,7 +11,7 @@ import GlassmorphismTheme from "./home_themes/GlassmorphismTheme";
 const getBaseShortUrl = () => {
   const hostname = window.location.hostname;
   const isProd = !hostname.includes("localhost") && !hostname.includes("127.0.0.1") && !hostname.includes("ais-dev") && !hostname.includes("ais-pre");
-  return isProd ? "https://tglinks.tech" : window.location.origin;
+  return isProd ? "https://tglinks.eu.org" : window.location.origin;
 };
 
 interface LandingPageProps {

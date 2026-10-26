@@ -60,7 +60,7 @@ User-agent: YouBot
 Allow: /
 
 # Sitemap Location
-Sitemap: https://tglinks.tech/sitemap.xml
+Sitemap: https://tglinks.eu.org/sitemap.xml
 
 # LLM Information Index
-# Location: https://tglinks.tech/llms.txt
+# Location: https://tglinks.eu.org/llms.txt

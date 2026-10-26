@@ -184,7 +184,7 @@ function getPlatformBaseUrl(req?: express.Request, db?: any): string {
       return `${proto}://${host}`;
     }
   }
-  return "https://tglinks.tech";
+  return "https://tglinks.eu.org";
 }
 
 function getCpmFromRequest(req: express.Request, user: any, dbSettings: any): number {
@@ -417,8 +417,8 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
   // Generate official AdLinkFly QuickLink API URL directly (/st?api=...&url=https://...) for all shorteners
   let baseDomain = rawUrl.endsWith("/api") ? rawUrl.slice(0, -4) : rawUrl.replace(/\/st$/, "");
   if (baseDomain && apiToken) {
-    const encodedTarget = encodeURIComponent(targetUrl);
-    const quickLink = `${baseDomain}/st?api=${encodeURIComponent(apiToken)}&url=${encodedTarget}`;
+    // AdLinkFly QuickLinks strictly require raw :// in url= (rejects %3A%2F%2F with "URL is invalid.")
+    const quickLink = `${baseDomain}/st?api=${encodeURIComponent(apiToken)}&url=${targetUrl}`;
     console.log(`[Shortener API] Direct QuickLink API URL generated for ${selectedApi.name}: ${quickLink}`);
     return quickLink;
   }
@@ -535,7 +535,7 @@ async function getExternalShortenedUrl(
   const codeMatch = finalDestinationUrl.match(/\/(?:go-final|faucet-final|faucet|go)\/([^?\/]+)/);
   const code = codeMatch ? codeMatch[1] : "";
 
-  let publicOrigin = "https://tglinks.tech";
+  let publicOrigin = "https://tglinks.eu.org";
 
   const queryPart = finalDestinationUrl.includes("?") ? finalDestinationUrl.substring(finalDestinationUrl.indexOf("?")) : "";
   let nextTargetUrl = `${publicOrigin}/${finalDestinationUrl.includes("faucet") ? "faucet-final" : "go-final"}/${code}${queryPart}`;
@@ -2298,7 +2298,7 @@ function setupRoutes() {
   // --- SEO ROUTES (robots.txt & sitemap.xml) ---
   app.get("/robots.txt", (req, res) => {
     const protocol = req.headers["x-forwarded-proto"] || "https";
-    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.tech";
+    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.eu.org";
     const baseUrl = `${protocol}://${host}`;
 
     res.type("text/plain");
@@ -2322,7 +2322,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   app.get("/sitemap.xml", (req, res) => {
     const protocol = req.headers["x-forwarded-proto"] || "https";
-    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.tech";
+    const host = req.headers["x-forwarded-host"] || req.headers.host || "tglinks.eu.org";
     const baseUrl = `${protocol}://${host}`;
     const today = new Date().toISOString().split("T")[0];
 
@@ -2953,7 +2953,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
+      console.log(`[TG Links Completion Page] Serving completion page on tglinks.eu.org for code ${code} -> ${targetUrl}`);
       return res.send(renderTgLinksCompletionPage(code, targetUrl));
     }
 
@@ -3007,7 +3007,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
     if (!isFaucetMode && (req.path.startsWith("/go/") || req.path === `/go/${code}`)) {
       const platformBase = getPlatformBaseUrl(req, db);
       const newVtok = createVerificationToken(code, String(ip), 1);
-      const completionUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(newVtok)}&step=2`;
+      // Directly land on TG Links branded completion page upon finishing the single ShortXLinks step
+      const completionUrl = `${platformBase}/go-final/${code}?vtok=${newVtok}`;
 
       // Single shortlink: ShortXLinks
       const shortxApi = (db.externalApis || []).find((a: any) => 
@@ -3022,7 +3023,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
       };
 
       const token = shortxApi.apiToken || "b6ac095e9373906c9e461860400e64a7de4536f1";
-      const shortXUrl = `https://shortxlinks.com/st?api=${encodeURIComponent(token)}&url=${encodeURIComponent(completionUrl)}`;
+      // Raw :// URL parameter (ShortXLinks strictly requires :// instead of %3A%2F%2F)
+      const shortXUrl = `https://shortxlinks.com/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
 
       console.log(`[Non-Faucet Direct] Direct 302 redirect for /go/${code} to ShortXLinks: ${shortXUrl}`);
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -3171,7 +3173,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       }
 
       res.setHeader("Referrer-Policy", "no-referrer");
-      return res.redirect(302, directExternalTarget);
+      return res.redirect(302, finalLandingUrl);
     }
 
     const currentApi = enabledApis[stepIndex];
@@ -3199,7 +3201,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   // --- GATEWAY AND REFERRER REDIRECTIONS ---
   
-  // Redirect visitors from shortlink domains (e.g. tglinks.tech) to the registered safelink blog domain (thunder-appz.eu.org)
+  // Redirect visitors from shortlink domains (e.g. tglinks.eu.org) to the registered safelink blog domain (thunder-appz.eu.org)
   app.get(["/go/:code", "/faucet/:code"], (req, res, next) => {
     const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
     if (rawVtok && typeof rawVtok === "string" && rawVtok.trim().length > 0) {
@@ -3447,7 +3449,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     if (!isFaucetMode) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
+      console.log(`[TG Links Completion Page] Serving completion page on tglinks.eu.org for code ${code} -> ${targetUrl}`);
       return res.send(renderTgLinksCompletionPage(code, targetUrl));
     }
 
