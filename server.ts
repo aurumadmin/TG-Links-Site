@@ -1182,12 +1182,131 @@ function getISTMonthString(dateInput: Date | string | number = new Date()): stri
   return getISTDateString(dateInput).substring(0, 7);
 }
 
-// Helper to load/save database
-function loadDb() {
+
+let lastDbFileMtime = 0;
+
+function getDbFileMtime(): number {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      return fs.statSync(DB_FILE).mtimeMs;
+    }
+  } catch (e) {}
+  return 0;
+}
+
+function isInternalLoopUrl(targetUrl: string, hostHeader?: string): boolean {
+  if (!targetUrl || typeof targetUrl !== "string") return false;
+  let trimmed = targetUrl.trim();
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    trimmed = "https://" + trimmed;
+  }
+  
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    const pathname = parsed.pathname.toLowerCase();
+    
+    const internalHosts = [
+      "tglinks.tech",
+      "www.tglinks.tech",
+      "thunder-appz.eu.org",
+      "www.thunder-appz.eu.org",
+      "localhost",
+      "127.0.0.1"
+    ];
+    if (hostHeader) {
+      const cleanReqHost = hostHeader.split(":")[0].toLowerCase();
+      if (!internalHosts.includes(cleanReqHost)) {
+        internalHosts.push(cleanReqHost);
+      }
+    }
+    
+    const isOurHost = internalHosts.some(h => host === h || host.endsWith("." + h));
+    if (!isOurHost) {
+      return false; // Definitely external target, NOT an internal loop!
+    }
+
+    // It's on an internal host - check if pathname points to redirect/landing routes
+    if (
+      pathname.startsWith("/go/") ||
+      pathname.startsWith("/p/") ||
+      pathname.startsWith("/faucet") ||
+      pathname.startsWith("/go-final") ||
+      pathname.startsWith("/faucet-final") ||
+      pathname.startsWith("/callback/")
+    ) {
+      return true;
+    }
+  } catch (e) {
+    if (
+      trimmed.startsWith("/go/") ||
+      trimmed.startsWith("/p/") ||
+      trimmed.startsWith("/faucet") ||
+      trimmed.startsWith("/go-final") ||
+      trimmed.startsWith("/faucet-final")
+    ) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+function findLinkByCode(db: any, codeToFind: string): any {
+  if (!db || !Array.isArray(db.links) || !codeToFind) return null;
+  const clean = String(codeToFind).trim();
+  let found = db.links.find((l: any) => l && l.code === clean);
+  if (found) return found;
+  return db.links.find((l: any) => l && String(l.code).toLowerCase() === clean.toLowerCase()) || null;
+}
+
+function extractTargetUrlFromApiRequest(req: any): string {
+  if (req.body && typeof req.body.url === "string" && req.body.url.trim()) {
+    return req.body.url.trim();
+  }
+
+  const rawUrl = req.originalUrl || req.url || "";
+  const queryIdx = rawUrl.indexOf("?");
+  if (queryIdx === -1) {
+    return String(req.query?.url || req.query?.link || req.query?.destination || "").trim();
+  }
+
+  const rawQuery = rawUrl.substring(queryIdx + 1);
+  const match = rawQuery.match(/(?:^|&)(?:url|link|destination)=([^]*)$/i);
+  if (!match) {
+    return String(req.query?.url || req.query?.link || req.query?.destination || "").trim();
+  }
+
+  let fullUrlPart = match[1];
+
+  if (req.query?.api && fullUrlPart.endsWith("&api=" + req.query.api)) {
+    fullUrlPart = fullUrlPart.slice(0, -("&api=" + req.query.api).length);
+  } else if (req.query?.api_token && fullUrlPart.endsWith("&api_token=" + req.query.api_token)) {
+    fullUrlPart = fullUrlPart.slice(0, -("&api_token=" + req.query.api_token).length);
+  }
+  if (req.query?.format && fullUrlPart.endsWith("&format=" + req.query.format)) {
+    fullUrlPart = fullUrlPart.slice(0, -("&format=" + req.query.format).length);
+  }
+  if (req.query?.alias && fullUrlPart.endsWith("&alias=" + req.query.alias)) {
+    fullUrlPart = fullUrlPart.slice(0, -("&alias=" + req.query.alias).length);
+  }
+
+  try {
+    if (fullUrlPart.includes("%3A") || fullUrlPart.includes("%2F") || fullUrlPart.includes("%3a") || fullUrlPart.includes("%2f")) {
+      fullUrlPart = decodeURIComponent(fullUrlPart);
+    }
+  } catch (e) {}
+
+  return fullUrlPart.trim();
+}
+
+// Helper to load/save database with multi-process cPanel cache invalidation
+function loadDb(forceReload = false): any {
   let db: any = null;
   let initialDbSeedNeeded = false;
 
-  if (cachedDbInMemory) {
+  const currentMtime = getDbFileMtime();
+  if (!forceReload && cachedDbInMemory && currentMtime > 0 && currentMtime <= lastDbFileMtime) {
     db = cachedDbInMemory;
   } else {
     let dbContent = "";
@@ -1689,6 +1808,7 @@ function loadDb() {
     saveDb(db);
   }
 
+  lastDbFileMtime = getDbFileMtime() || Date.now();
   cachedDbInMemory = db;
   return db;
 }
@@ -1731,12 +1851,13 @@ function cleanupInactiveApiLinks(db: any): boolean {
 }
 
 function saveDb(data: any) {
-  cachedDbInMemory = data;
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+    lastDbFileMtime = getDbFileMtime() || Date.now();
   } catch (err) {
     console.error("[TG Links] Failed to save database file:", err);
   }
+  cachedDbInMemory = data;
 
   if (gdriveSyncEnabled) {
     // Chain background sync
@@ -2149,8 +2270,8 @@ function setupRoutes() {
     res.json({ user });
   });
 
-  // --- DEVELOPER PROGRAMMATIC SHORTENING API (GET & POST) ---
-  app.all(["/api", "/api/"], async (req, res) => {
+  // --- DEVELOPER PROGRAMMATIC SHORTENING API & QUICKLINK (GET & POST) ---
+  app.all(["/api", "/api/", "/api/v1/shorten", "/api/shorten", "/st", "/st/"], async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -2160,9 +2281,10 @@ function setupRoutes() {
     }
 
     const api = String(req.query.api || req.body?.api || req.query.api_token || req.body?.api_token || "").trim();
-    const url = String(req.query.url || req.body?.url || "").trim();
+    let url = extractTargetUrlFromApiRequest(req);
     const alias = String(req.query.alias || req.body?.alias || "").trim();
-    const format = String(req.query.format || req.body?.format || "json").toLowerCase().trim();
+    const isQuickLink = req.path.startsWith("/st");
+    const format = String(req.query.format || req.body?.format || (isQuickLink ? "redirect" : "json")).toLowerCase().trim();
 
     if (!api) {
       if (format === "text") return res.status(400).send("");
@@ -2174,7 +2296,16 @@ function setupRoutes() {
       return res.status(400).json({ status: "error", message: "Destination URL is required" });
     }
 
-    const db = loadDb();
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      url = "https://" + url;
+    }
+
+    if (isInternalLoopUrl(url, req.headers.host)) {
+      if (format === "text") return res.status(400).send("");
+      return res.status(400).json({ status: "error", message: "Destination URL cannot be an internal platform loop route" });
+    }
+
+    const db = loadDb(true);
     let user = db.users.find((u: any) => u.apiToken === api && !u.banned);
     if (!user && api === "d2c8261beff4b98ff674d7f306f2fe205bb5c25d") {
       // Fallback/legacy support for external shortener token to first admin user
@@ -2260,6 +2391,10 @@ function setupRoutes() {
     saveDb(db);
 
     const shortenedUrl = `${protocol}://${host}/go/${code}`;
+
+    if (format === "redirect" || (isQuickLink && format !== "json" && format !== "text")) {
+      return res.redirect(302, shortenedUrl);
+    }
 
     if (format === "text") {
       return res.send(shortenedUrl);
@@ -2900,13 +3035,25 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     // Completion Handler: When visitor completes ShortXLinks (step >= 2 or with vtok on /p/:code or /callback/:code)
     if (rawStepVal >= 2 || (hasVtok && (req.path.startsWith("/p/") || req.path.startsWith("/callback/")))) {
-      const db = loadDb();
-      let link = db.links?.find((l: any) => l.code === code);
+      let db = loadDb();
+      let link = findLinkByCode(db, code);
       if (!link && vtok) {
         const match = vtok.match(/^vtok[~_]([^~_]+)/);
         if (match && match[1]) {
           const decodedCode = decodeURIComponent(match[1]);
-          link = db.links?.find((l: any) => l.code === decodedCode);
+          link = findLinkByCode(db, decodedCode);
+        }
+      }
+      // Multi-worker reload if not in memory
+      if (!link) {
+        db = loadDb(true);
+        link = findLinkByCode(db, code);
+        if (!link && vtok) {
+          const match = vtok.match(/^vtok[~_]([^~_]+)/);
+          if (match && match[1]) {
+            const decodedCode = decodeURIComponent(match[1]);
+            link = findLinkByCode(db, decodedCode);
+          }
         }
       }
 
@@ -2914,14 +3061,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
         targetUrl = "https://" + targetUrl;
       }
-      if (
-        targetUrl.includes("thunder-appz.eu.org") ||
-        targetUrl.includes("/faucet-final") ||
-        targetUrl.includes("/go-final") ||
-        targetUrl.includes("/faucet") ||
-        targetUrl.includes("/go/") ||
-        targetUrl.includes("/p/")
-      ) {
+      if (isInternalLoopUrl(targetUrl, req.headers.host)) {
         targetUrl = "https://google.com";
       }
 
@@ -2979,18 +3119,30 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const ip = getClientIp(req);
     const db = loadDb();
 
-    let link = db.links?.find((l: any) => l.code === code);
+    let link = findLinkByCode(db, code);
     if (!link && vtok) {
       const match = vtok.match(/^vtok[~_]([^~_]+)/);
       if (match && match[1]) {
         const decodedCode = decodeURIComponent(match[1]);
-        link = db.links?.find((l: any) => l.code === decodedCode);
+        link = findLinkByCode(db, decodedCode);
+      }
+    }
+    // Force disk reload for cPanel multi-process workers
+    if (!link) {
+      db = loadDb(true);
+      link = findLinkByCode(db, code);
+      if (!link && vtok) {
+        const match = vtok.match(/^vtok[~_]([^~_]+)/);
+        if (match && match[1]) {
+          const decodedCode = decodeURIComponent(match[1]);
+          link = findLinkByCode(db, decodedCode);
+        }
       }
     }
     if (!link) {
       if (hasVtok || req.query.step || req.path.startsWith("/go/")) {
         let fallbackUrl = db.settings?.homepageTargetUrl || "https://google.com";
-        if (fallbackUrl.includes("thunder-appz.eu.org") || fallbackUrl.includes("/go") || fallbackUrl.includes("/p/")) {
+        if (isInternalLoopUrl(fallbackUrl, req.headers.host)) {
           fallbackUrl = "https://google.com";
         }
         link = {
@@ -3157,14 +3309,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       if (!directTarget.startsWith("http://") && !directTarget.startsWith("https://")) {
         directTarget = "https://" + directTarget;
       }
-      if (
-        directTarget.includes("thunder-appz.eu.org") ||
-        directTarget.includes("/faucet-final") ||
-        directTarget.includes("/go-final") ||
-        directTarget.includes("/faucet") ||
-        directTarget.includes("/go/") ||
-        directTarget.includes("/p/")
-      ) {
+      if (isInternalLoopUrl(directTarget, req.headers.host)) {
         directTarget = "https://google.com";
       }
 
@@ -3189,14 +3334,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       if (!directExternalTarget.startsWith("http://") && !directExternalTarget.startsWith("https://")) {
         directExternalTarget = "https://" + directExternalTarget;
       }
-      if (
-        directExternalTarget.includes("thunder-appz.eu.org") ||
-        directExternalTarget.includes("/faucet-final") ||
-        directExternalTarget.includes("/go-final") ||
-        directExternalTarget.includes("/faucet") ||
-        directExternalTarget.includes("/go/") ||
-        directExternalTarget.includes("/p/")
-      ) {
+      if (isInternalLoopUrl(directExternalTarget, req.headers.host)) {
         directExternalTarget = "https://google.com";
       }
 
@@ -3317,19 +3455,32 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const ip = getClientIp(req);
     const db = loadDb();
 
-    let link = db.links.find((l: any) => l.code === code);
+    let link = findLinkByCode(db, code);
     if (!link && vtok) {
       const match = vtok.match(/^vtok[~_]([^~_]+)/);
       if (match && match[1]) {
         const decodedCode = decodeURIComponent(match[1]);
-        link = db.links.find((l: any) => l.code === decodedCode);
+        link = findLinkByCode(db, decodedCode);
+      }
+    }
+
+    // Force reload from disk in case another cPanel Passenger worker wrote it
+    if (!link) {
+      db = loadDb(true);
+      link = findLinkByCode(db, code);
+      if (!link && vtok) {
+        const match = vtok.match(/^vtok[~_]([^~_]+)/);
+        if (match && match[1]) {
+          const decodedCode = decodeURIComponent(match[1]);
+          link = findLinkByCode(db, decodedCode);
+        }
       }
     }
 
     if (!link) {
       if (vtok) {
         let defaultExternalTarget = db.settings?.homepageTargetUrl || "https://google.com";
-        if (defaultExternalTarget.includes("thunder-appz.eu.org") || defaultExternalTarget.includes("/go/") || defaultExternalTarget.includes("/p/")) {
+        if (isInternalLoopUrl(defaultExternalTarget, req.headers.host)) {
           defaultExternalTarget = "https://google.com";
         }
         link = {
@@ -3360,15 +3511,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
       targetUrl = "https://" + targetUrl;
     }
 
-    // Safeguard: Prevent destination URL loops if targetUrl points back to safelink blog or go/p routes
-    if (
-      targetUrl.includes("thunder-appz.eu.org") ||
-      targetUrl.includes("/faucet-final") ||
-      targetUrl.includes("/go-final") ||
-      targetUrl.includes("/faucet/") ||
-      targetUrl.includes("/go/") ||
-      targetUrl.includes("/p/")
-    ) {
+    // Safeguard: Only prevent actual loops back into internal platform redirect routes
+    if (isInternalLoopUrl(targetUrl, req.headers.host)) {
       console.warn("[Loop Safeguard] Target URL points to internal route or safelink blog domain, overriding to external destination:", targetUrl);
       targetUrl = "https://google.com";
     }
