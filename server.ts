@@ -3117,7 +3117,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const ip = getClientIp(req);
-    const db = loadDb();
+    let db = loadDb();
 
     let link = findLinkByCode(db, code);
     if (!link && vtok) {
@@ -3453,7 +3453,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const rawVtok = (req.query.vtok || req.query.VTOK || req.query.token || req.query.v || req.query.t) as string;
     const vtok = typeof rawVtok === "string" ? rawVtok.trim() : "";
     const ip = getClientIp(req);
-    const db = loadDb();
+    let db = loadDb();
 
     let link = findLinkByCode(db, code);
     if (!link && vtok) {
