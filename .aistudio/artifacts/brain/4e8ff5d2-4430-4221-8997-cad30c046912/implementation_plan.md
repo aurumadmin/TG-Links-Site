@@ -1,83 +1,120 @@
-# Implementation Plan: Add "Plan 2" with Dedicated SoftURL Pipeline
+# Implementation Plan - ELITE Publisher Plan (ShortXLinks + SoftURL Sequential Monetization)
 
-Add a new publisher plan named **Plan 2** configured with **SoftURL** as its single integrated shortener ($5.00 CPM), operating with the exact same direct 1-step flow as Default Plan (ShortXLinks): direct HTTP 302 redirect to SoftURL upon visiting `/go/:code`, followed by returning directly to the TG Links completion screen with the "Open Destination" button.
-
----
-
-## User Specifications & Decisions
-> - **Plan Name**: `Plan 2`
-> - **Assigned Shortener**: `SoftURL` (`https://softurl.in/api`, token: `609c875b96d61f0592bfe5ae036b2db1df673680`)
-> - **CPM Rate**: `$5.00 CPM` (matching Default Plan)
-> - **Redirection Behavior**: Immediate 302 redirect straight to SoftURL (no `thunder-appz` blog page), returning to `https://tglinks.tech/go-final/:code?vtok=...` to display the TG Links completion page with the "Open Destination" button.
-> - **URL Encoding Rule**: Strict preservation of unencoded `://` in the `url=` parameter (`https://softurl.in/st?api=TOKEN&url=https://...`) to prevent AdLinkFly rejection errors.
+Create and activate the new **ELITE** publisher plan offering an elevated **$8.00 CPM** payout rate. Visitors navigating short links generated under this plan must complete a 2-step verification chain—first **ShortXLinks**, immediately followed by **SoftURL**—before landing on the final destination page.
 
 ---
 
-## Architecture & Flow
+### User Review & Critical Decisions
+
+> [!IMPORTANT]
+> The following requirements were confirmed during Phase 1 clarification:
+> - **CPM Payout Rate**: Set to **$8.00 CPM** ($8.00 per 1,000 verified views), giving creators a premium payout rate reflecting the two-step completion requirement.
+> - **Step Progression Order**: Strictly **ShortXLinks first (Step 1)**, then **SoftURL (Step 2)**, followed by the TG Links verified completion screen and destination access.
+> - **Publisher Accessibility**: Freely selectable by **all publishers** directly from the **Plans** page and User Dashboard.
+
+---
+
+### 1. Overview & Core Concept
+
+- **What It Does**: Introduces a high-yield publisher tier named **ELITE** (`id: "elite"`). When a creator selects or generates links under the ELITE plan, link clicks are routed through a sequential dual-shortener pipeline:
+  1. **Step 1**: Visitor is routed through **ShortXLinks** (`shortxlinks.com`).
+  2. **Step 2**: Upon completing ShortXLinks, the visitor returns to TG Links and is seamlessly dispatched to **SoftURL** (`softurl.in`).
+  3. **Completion**: Upon completing SoftURL, the visit is validated, the publisher is credited earnings at the **$8.00 CPM** rate, and the visitor accesses the final destination URL.
+- **Target Audience**: Telegram channel owners, high-intent download communities, and content creators seeking maximum CPM revenue per thousand clicks.
+- **Key Value**: Provides publishers with an official 2-step option with double monetization yield compared to single-step plans.
+
+---
+
+### 2. User Experience & Visual Design
+
+- **Plans Page Showcase (`/plans`)**:
+  - The ELITE plan card features prominent badging (`ELITE PLAN`), clear rate display (`$8.00 CPM`), and a visual 2-step badge indicator (`#1 ShortXLinks` → `#2 SoftURL`).
+  - Active plan indicator and a responsive `"Switch to Plan"` CTA with live state transitions and success alerts.
+- **User Dashboard (`/dashboard`)**:
+  - Displays the active plan as **ELITE** with `$8.00 CPM` rate in the publisher overview.
+  - Links created while on the ELITE plan indicate the dual-shortener pipeline.
+- **Admin Panel (`/admin` → Publisher Plans Manager)**:
+  - Lists the ELITE plan in the configured plans table with full editing and toggle controls.
+  - Allows administrators to adjust CPM, reorder shorteners, or toggle status at any time.
+
+---
+
+### 3. Key Product Decisions & Trade-Offs
+
+- **Multi-Step Chain Execution**:
+  - *Chosen Approach*: Maintain server-side cryptographic token validation (`vtok`) tracking step progression (`step=1`, `step=2`, `step=3`). When returning to `/p/:code` at `step=2`, the server checks the plan's shortener count. If 2 shorteners are configured, it invokes the second shortener (SoftURL) with a target of `step=3`. Only when `step > totalRequiredSteps` is the click recorded and rewarded.
+  - *Why*: Prevents view spoofing or early rewards if a visitor drops off after only completing the first shortener. Both shorteners must be completed to unlock the destination and award earnings.
+- **Fallback Resilience**:
+  - *Chosen Approach*: If SoftURL API experiences temporary network timeouts during the step 2 redirect, the server gracefully allows the visitor to proceed to the completion page to prevent broken user experiences.
+
+---
+
+### 4. Technical Architecture & Sequential Data Flow
 
 ```
-[ Visitor opens /go/:code ]
-            │
-            ▼ (Inspect Link Creator's Plan)
-  ┌─────────────────────────┴─────────────────────────┐
-  ▼                                                   ▼
-[ Default Plan ]                                  [ Plan 2 ]
-Shortener: ShortXLinks                            Shortener: SoftURL
-  │                                                   │
-  ▼ (302 Direct Redirect)                             ▼ (302 Direct Redirect)
-https://shortxlinks.com/st?api=...&url=...        https://softurl.in/st?api=...&url=...
-  │                                                   │
-  └─────────────────────────┬─────────────────────────┘
-                            │ (Visitor solves shortlink)
-                            ▼
-              [ Arrives at /go-final/:code ]
-             (Verifies token & logs $5.00 CPM)
-                            │
-                            ▼
-     [ Renders TG Links "Your Destination is Ready!" Page ]
-                            │
-                 [ Click "Open Destination" ]
-                            │
-                            ▼
-                   [ Target Website ]
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ELITE PLAN PIPELINE                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+ 1. LINK CLICK
+    User clicks: tglinks.tech/go/:code (or short link)
+         │
+         ▼
+ 2. STEP 1 (ShortXLinks)
+    Server provisions vtok and redirects visitor to ShortXLinks:
+    shortxlinks.com/st?api=...&url=tglinks.tech/p/:code?vtok=...&step=2
+         │
+         ▼
+ 3. VISITOR COMPLETES SHORTXLINKS
+    Redirects back to: tglinks.tech/p/:code?vtok=...&step=2
+         │
+         ▼
+ 4. STEP 2 DISPATCH (SoftURL)
+    Server detects Step 2 of 2 in ELITE plan.
+    Dispatches visitor to SoftURL:
+    softurl.in/st?api=...&url=tglinks.tech/p/:code?vtok=...&step=3
+         │
+         ▼
+ 5. VISITOR COMPLETES SOFTURL
+    Redirects back to: tglinks.tech/p/:code?vtok=...&step=3
+         │
+         ▼
+ 6. REWARD & DESTINATION ACCESS
+    Server verifies both steps completed.
+    - Credits publisher balance with $8.00 CPM ($0.008 per view)
+    - Logs verified click in clicksLog
+    - Renders TG Links Verified Completion Page -> Original URL
 ```
 
 ---
 
-## Proposed Changes
+### 5. Implementation Steps (Upon Approval)
 
-### 1. Database & Defaults (`data.json` & `server.ts`)
-- **Enable SoftURL**:
-  - In `db.adFlyShorteners`, set `api-softurl-2` (`SoftURL`) to `enabled: true`.
-- **Add Plan 2**:
-  - Insert new plan into `db.plans`:
-    ```json
-    {
-      "id": "plan-2",
-      "name": "Plan 2",
-      "cpm": 5.0,
-      "shortenerIds": ["api-softurl-2"],
-      "blogPageUrl": "https://thunder-appz.eu.org",
-      "description": "Single-step high conversion plan using SoftURL with direct redirection.",
-      "isDefault": false,
-      "enabled": true,
-      "isFaucetPlan": false,
-      "requirements": "All traffic allowed. 100% completed view counting."
-    }
-    ```
-- Update initial database seeding logic in `server.ts` so `Plan 2` is automatically present if the database is reset or initialized.
+1. **Seed & Register Plan in `data.json`**:
+   - Add the `elite` plan object:
+     ```json
+     {
+       "id": "elite",
+       "name": "ELITE",
+       "cpm": 8.0,
+       "shortenerIds": [
+         "api-shortxlinks-1",
+         "api-softurl-2"
+       ],
+       "blogPageUrl": "https://thunder-appz.eu.org",
+       "description": "Premium 2-step monetization plan. Visitors complete ShortXLinks followed by SoftURL for an elevated $8.00 CPM payout rate.",
+       "isDefault": false,
+       "enabled": true,
+       "isFaucetPlan": false,
+       "requirements": "Complete both ShortXLinks and SoftURL. Verified traffic only."
+     }
+     ```
 
-### 2. Pipeline Shortener Selection (`server.ts`)
-- In `getEnabledApisForPlan`:
-  - Allow `SoftURL` (`api-softurl-2`) to be selected when assigned to a non-faucet plan (remove the skip filter for `softurl`).
-- In Direct Non-Faucet Redirection (`/go/:code` handler, line ~3007):
-  - Dynamically select the assigned shortener for the link creator's active plan:
-    - If plan uses `SoftURL`, route via `https://softurl.in/st?api=${token}&url=${completionUrl}`.
-    - If plan uses `ShortXLinks`, route via `https://shortxlinks.com/st?api=${token}&url=${completionUrl}`.
-  - Maintain the raw `://` formatting in `url=` for all AdLinkFly QuickLinks.
+2. **Update Server Routing Logic in `server.ts`**:
+   - In `/p/:code` handler, check whether the incoming step (`rawStepVal`) has remaining shorteners in the plan's `enabledApis` sequence.
+   - For Step 2 when `enabledApis.length >= 2`: generate/fetch the second shortener URL (SoftURL) pointing to `/p/:code?step=3&vtok=...`, and redirect the visitor to SoftURL.
+   - For Step 3 (or when all steps are finished): credit the click at the link's plan CPM ($8.00) and render the verified completion page.
 
-### 3. Build & Verification
-- Compile and build with `npm run build` (`vite build && esbuild server.ts`).
-- Verify `compile_applet` and `lint_applet` succeed.
-- Test `/go/:code` for links assigned to `Plan 2` via `curl -i` to verify immediate 302 to `softurl.in/st?api=...&url=https://.../go-final/...`.
-- Test completion page access to confirm view counting, $5.00 CPM rate crediting, and "Open Destination" button rendering.
+3. **Verify UI Components & Build**:
+   - Ensure `PlansPage.tsx`, `DashboardPage.tsx`, and `AdminPage.tsx` display the ELITE plan and its 2-shortener badge chain (`#1 ShortXLinks` + `#2 SoftURL`) accurately.
+   - Execute `compile_applet` and test production build.

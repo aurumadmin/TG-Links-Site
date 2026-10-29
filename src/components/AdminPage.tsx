@@ -2782,7 +2782,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 Select the active visual theme and design for the public Homepage. All themes preserve slogans (Daily payment, $10 CPM Rate, $0.25 Min Payout) and shortener functionality with distinct, production-grade visual designs.
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-2">
                 {/* Theme 1: Default Dark Indigo */}
                 <div 
                   onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'default' })}
@@ -2793,18 +2793,39 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Default Theme</span>
+                    <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Default Pro</span>
                     {(sysSettings.homeTheme || 'default') === 'default' && (
                       <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
                     )}
                   </div>
-                  <h4 className="font-extrabold text-white text-sm">Classic Dark Indigo</h4>
+                  <h4 className="font-extrabold text-white text-sm">Modern Indigo Pro</h4>
                   <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                    Original deep slate and indigo layout with hero vector artwork and curved feature cards.
+                    Refined executive dark slate & indigo layout with interactive revenue simulator and clean typography.
                   </p>
                 </div>
 
-                {/* Theme 2: Cyberpunk Neon Grid */}
+                {/* Theme 2: Obsidian Apex (New) */}
+                <div 
+                  onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'obsidian' })}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    sysSettings.homeTheme === 'obsidian'
+                      ? 'bg-amber-950/40 border-amber-400 ring-2 ring-amber-400/30 shadow-lg shadow-amber-950/50'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Obsidian (New)</span>
+                    {sysSettings.homeTheme === 'obsidian' && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                    )}
+                  </div>
+                  <h4 className="font-extrabold text-white text-sm">Obsidian Apex</h4>
+                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                    Ultra-sleek luxury dark titanium aesthetic with live yield forecast terminal and developer API preview.
+                  </p>
+                </div>
+
+                {/* Theme 3: Cyberpunk Neon Grid */}
                 <div 
                   onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'cyberpunk' })}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
@@ -2825,7 +2846,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   </p>
                 </div>
 
-                {/* Theme 3: Emerald Pro Fintech */}
+                {/* Theme 4: Emerald Pro Fintech */}
                 <div 
                   onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'emerald' })}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
@@ -2846,7 +2867,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   </p>
                 </div>
 
-                {/* Theme 4: Glassmorphism Horizon */}
+                {/* Theme 5: Glassmorphism Horizon */}
                 <div 
                   onClick={() => setSysSettings({ ...sysSettings, homeTheme: 'glassmorphism' })}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${

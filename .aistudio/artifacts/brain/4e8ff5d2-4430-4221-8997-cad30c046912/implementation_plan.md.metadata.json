@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for adding 'Plan 2' with SoftURL as a dedicated single-shortener plan ($5.00 CPM) alongside the Default Plan (ShortXLinks). Features direct 302 redirection to SoftURL without blog pages and on-domain TG Links destination unlock screen.",
-  "updatedAt":  "2026-10-26T15:33:17.103701331Z",
+  "summary":  "Implementation plan for creating the new ELITE publisher plan with two-step sequential shortener routing (ShortXLinks then SoftURL) at an $8.00 CPM payout rate, available to all publishers.",
+  "updatedAt":  "2026-10-29T09:53:27.255268246Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

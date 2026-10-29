@@ -3033,7 +3033,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     const rawStepVal = parseInt(String(req.query.step || "0"), 10);
 
-    // Completion Handler: When visitor completes ShortXLinks (step >= 2 or with vtok on /p/:code or /callback/:code)
+    // Completion & Multi-Step Handler: When visitor completes a shortener step (step >= 2 or with vtok on /p/:code or /callback/:code)
     if (rawStepVal >= 2 || (hasVtok && (req.path.startsWith("/p/") || req.path.startsWith("/callback/")))) {
       let db = loadDb();
       let link = findLinkByCode(db, code);
@@ -3057,6 +3057,43 @@ Sitemap: ${baseUrl}/sitemap.xml`
         }
       }
 
+      const linkOwner = findUserInDb(db, link?.userId) || findUserInDb(db, link?.userEmail);
+      const isFaucet = checkIsFaucetMode(linkOwner, link, db);
+      const userPlan = getPlanForUser(linkOwner, db);
+      const enabledApis = getEnabledApisForPlan(userPlan, isFaucet, db);
+      const totalRequiredSteps = enabledApis.length;
+
+      const currentStep = rawStepVal || 2;
+
+      // MULTI-STEP PIPELINE: If there are more steps remaining in this plan (e.g. ELITE plan Step 2 = SoftURL)
+      if (totalRequiredSteps > 1 && currentStep <= totalRequiredSteps) {
+        const platformBase = getPlatformBaseUrl(req, db);
+        const apiIndex = currentStep - 1;
+        const currentApi = enabledApis[apiIndex];
+        if (currentApi) {
+          const nextStep = currentStep + 1;
+          const nextTargetUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(vtok)}&step=${nextStep}`;
+
+          let rawApiUrl = String(currentApi.apiUrl || "").trim();
+          let baseDomain = rawApiUrl.replace(/\/+$/, "");
+          if (baseDomain.endsWith("/api")) {
+            baseDomain = baseDomain.slice(0, -4);
+          } else if (baseDomain.endsWith("/st")) {
+            baseDomain = baseDomain.slice(0, -3);
+          }
+          if (!baseDomain.startsWith("http://") && !baseDomain.startsWith("https://")) {
+            baseDomain = "https://" + baseDomain;
+          }
+          const token = currentApi.apiToken || "";
+          const directShortUrl = `${baseDomain}/st?api=${encodeURIComponent(token)}&url=${nextTargetUrl}`;
+          console.log(`[Multi-Step Chain] Step ${currentStep} of ${totalRequiredSteps} routing via ${currentApi.name}: ${directShortUrl}`);
+
+          res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+          res.setHeader("Referrer-Policy", "no-referrer");
+          return res.redirect(302, directShortUrl);
+        }
+      }
+
       let targetUrl = link?.originalUrl || "https://google.com";
       if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
         targetUrl = "https://" + targetUrl;
@@ -3068,7 +3105,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       // Record view & earnings if not already consumed
       const ip = getClientIp(req);
       if (vtok) {
-        const tokenResult = verifyAndConsumeTokenResult(vtok, code, String(ip), 1);
+        const tokenResult = verifyAndConsumeTokenResult(vtok, code, String(ip), totalRequiredSteps);
         if (!tokenResult.isAlreadyConsumed) {
           const todayIST = getISTDateString();
           const hasPaidClickToday = db.clicksLog.some(
@@ -3082,7 +3119,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
           );
           const currentCpm = getCurrentCpmForLink(link, db);
           const earningAmount = hasPaidClickToday ? 0 : (currentCpm / 1000);
-          const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || "ShortXLinks") as string;
+          const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || "TG Links Chain") as string;
           const clickId = "c-" + Math.random().toString(36).substring(2, 9);
           const click: ClickLog = {
             id: clickId,
@@ -3112,7 +3149,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
+      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl} (CPM: $${getCurrentCpmForLink(link, db)})`);
       return res.send(renderTgLinksCompletionPage(code, targetUrl));
     }
 
@@ -3174,15 +3211,20 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     // DIRECT REDIRECT FOR NON-FAUCET PLAN:
     // When a user visits a non-faucet short link (e.g. /go/:code), immediately redirect (302)
-    // straight to the assigned shortener (ShortXLinks for Default Plan, SoftURL for Plan 2)
+    // straight to the assigned shortener (ShortXLinks for Default Plan, SoftURL for Plan 2, ShortXLinks -> SoftURL for ELITE)
     // without loading thunder-appz blog page or any other intermediate page!
     if (!isFaucetMode && (req.path.startsWith("/go/") || req.path === `/go/${code}`)) {
       const platformBase = getPlatformBaseUrl(req, db);
-      const newVtok = createVerificationToken(code, String(ip), 1);
-      // Directly land on TG Links branded completion page upon finishing the single shortener step
-      const completionUrl = `${platformBase}/go-final/${code}?vtok=${newVtok}`;
-
       const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
+      const requiredSteps = enabledApis.length;
+      const newVtok = createVerificationToken(code, String(ip), requiredSteps);
+
+      // If multi-step plan (requiredSteps > 1), step 1 completes into /p/:code?step=2
+      // If single-step plan (requiredSteps <= 1), step 1 directly lands on /go-final/:code
+      const completionUrl = requiredSteps > 1
+        ? `${platformBase}/p/${code}?vtok=${encodeURIComponent(newVtok)}&step=2`
+        : `${platformBase}/go-final/${code}?vtok=${newVtok}`;
+
       const assignedApi = (enabledApis && enabledApis.length > 0) ? enabledApis[0] : null;
 
       let directShortUrl = "";
