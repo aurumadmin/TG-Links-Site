@@ -1588,71 +1588,35 @@ function loadDb(forceReload = false): any {
         cpm: 5.0,
         shortenerIds: ["api-shortxlinks-1"],
         blogPageUrl: "https://thunder-appz.eu.org",
-        description: "Default high-converting shortener pipeline with instant link generation and standard payout rates.",
+        description: "Default high-converting link pipeline with instant link generation and standard payout rates.",
         isDefault: true,
         enabled: true,
         isFaucetPlan: false,
         requirements: "All traffic allowed. 100% completed view counting."
       },
       {
+        id: "elite",
+        name: "ELITE",
+        cpm: 8.0,
+        shortenerIds: ["api-shortxlinks-1", "api-softurl-2"],
+        blogPageUrl: "https://thunder-appz.eu.org",
+        description: "High-yield premium publisher monetization with enhanced $8.00 CPM rate and priority payouts.",
+        isDefault: false,
+        enabled: true,
+        isFaucetPlan: false,
+        requirements: "Verified traffic only. 100% completed view counting."
+      },
+      {
         id: "plan-2",
-        name: "Plan 2",
+        name: "PLAN 2",
         cpm: 5.0,
         shortenerIds: ["api-softurl-2"],
         blogPageUrl: "https://thunder-appz.eu.org",
-        description: "Single-step high conversion plan using SoftURL with direct redirection.",
+        description: "Alternative publisher routing with instant view verification and standard $5.00 CPM payout rates.",
         isDefault: false,
         enabled: true,
         isFaucetPlan: false,
         requirements: "All traffic allowed. 100% completed view counting."
-      },
-      {
-        id: "faucet",
-        name: "Faucet Mode Plan",
-        cpm: 4.0,
-        shortenerIds: [], // Direct claim landing with zero external shorteners
-        blogPageUrl: "https://thunder-appz.eu.org",
-        description: "Dedicated crypto faucet traffic monetization plan routing via /faucet/ with direct claim landing.",
-        isDefault: false,
-        enabled: true,
-        isFaucetPlan: true,
-        requirements: "Crypto faucet & claim site traffic. Restricted to 1 view per IP per 24 hours."
-      },
-      {
-        id: "standard",
-        name: "Standard Plan",
-        cpm: 12.50,
-        shortenerIds: defaultNonFaucetShorteners,
-        blogPageUrl: "https://thunder-appz.eu.org",
-        description: "Optimized payout tier for active creators looking for higher CPM yield.",
-        isDefault: false,
-        enabled: true,
-        isFaucetPlan: false,
-        requirements: "General audience & web traffic."
-      },
-      {
-        id: "premium",
-        name: "Premium Plan",
-        cpm: 15.0,
-        shortenerIds: defaultNonFaucetShorteners,
-        blogPageUrl: "https://thunder-appz.eu.org",
-        description: "High-yield monetization plan engineered for targeted high quality publisher traffic.",
-        isDefault: false,
-        enabled: true,
-        isFaucetPlan: false,
-        requirements: "Targeted audience & Telegram channel traffic."
-      },
-      {
-        id: "vip",
-        name: "VIP Publisher Plan",
-        cpm: 20.0,
-        shortenerIds: defaultNonFaucetShorteners,
-        blogPageUrl: "https://thunder-appz.eu.org",
-        description: "Maximized CPM tier for top-tier volume publishers and network creators.",
-        isDefault: false,
-        enabled: true,
-        isFaucetPlan: false,
-        requirements: "High volume publishers (10,000+ views/day)."
       }
     ];
     changed = true;
@@ -4783,7 +4747,7 @@ ${ticket.message}
 
   app.post("/api/admin/users/:id/update", requireAdmin, (req, res) => {
     const { id } = req.params;
-    const { role, balance, customCpm, banned, enableFaucetMode } = req.body;
+    const { role, balance, customCpm, banned, enableFaucetMode, planId } = req.body;
     const db = loadDb();
 
     const user = db.users.find((u: any) => u && u.id === id);
@@ -4794,10 +4758,28 @@ ${ticket.message}
     if (customCpm !== undefined) user.customCpm = customCpm === null ? undefined : Number(customCpm);
     if (banned !== undefined) user.banned = banned;
     if (enableFaucetMode !== undefined) user.enableFaucetMode = Boolean(enableFaucetMode);
+    if (planId !== undefined) {
+      user.planId = planId || "default";
+    }
 
     saveDb(db);
     const { password: _, ...userSafe } = user;
     res.json({ success: true, user: userSafe });
+  });
+
+  app.post("/api/admin/users/:id/plan", requireAdmin, (req, res) => {
+    const { id } = req.params;
+    const { planId } = req.body;
+    const db = loadDb();
+
+    const user = db.users.find((u: any) => u && u.id === id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const targetPlan = (db.plans || []).find((p: any) => p.id === planId && p.enabled);
+    user.planId = targetPlan ? targetPlan.id : (planId || "default");
+    saveDb(db);
+    const { password: _, ...userSafe } = user;
+    res.json({ success: true, user: userSafe, planId: user.planId });
   });
 
   app.post("/api/admin/users/:id/faucet-mode", requireAdmin, (req, res) => {

@@ -1517,7 +1517,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate, 
                 Publisher Plan Settings
               </h3>
               <p className="text-xs text-slate-400 mb-6 leading-normal">
-                Choose the publisher plan that best matches your traffic model. Each plan comes with transparent CPM rates and designated shortener pipelines.
+                Choose the publisher plan that best matches your traffic model. Each plan comes with transparent CPM rates and instant monetization.
               </p>
 
               {planSwitchSuccess && (
@@ -1548,7 +1548,7 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate, 
                 </div>
 
                 <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Want to inspect shortener steps & requirements?</span>
+                  <span className="text-slate-400">Want to inspect plan features & CPM rates?</span>
                   <button
                     onClick={() => onNavigate("/plans")}
                     className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 transition"

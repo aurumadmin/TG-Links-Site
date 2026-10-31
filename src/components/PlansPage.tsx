@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Check, Sparkles, ArrowRight, RefreshCw, AlertCircle, ExternalLink } from "lucide-react";
+import { Check, Sparkles, ArrowRight, RefreshCw, AlertCircle } from "lucide-react";
 import { fetchApi } from "../lib/api";
-import { PublisherPlan, User, AdFlyShortener } from "../types";
+import { PublisherPlan, User } from "../types";
 
 interface PlansPageProps {
   user: User | null;
@@ -12,7 +12,6 @@ interface PlansPageProps {
 
 export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate }: PlansPageProps) {
   const [plans, setPlans] = useState<PublisherPlan[]>([]);
-  const [shorteners, setShorteners] = useState<AdFlyShortener[]>([]);
   const [loading, setLoading] = useState(true);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -24,9 +23,6 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
       const plansRes = await fetchApi("/plans").catch(() => null);
       if (plansRes?.plans) {
         setPlans(plansRes.plans);
-      }
-      if (plansRes?.shorteners) {
-        setShorteners(plansRes.shorteners);
       }
     } catch (err) {
       console.error("Failed to load plans data:", err);
@@ -78,18 +74,6 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
     }
   };
 
-  // Helper to get shortener names for a plan
-  const getShortenerNames = (plan: PublisherPlan) => {
-    if (!plan.shortenerIds || plan.shortenerIds.length === 0) {
-      return ["Direct Landing (No Shorteners)"];
-    }
-    const matched = plan.shortenerIds
-      .map(id => shorteners.find(s => s.id === id && s.enabled !== false))
-      .filter((s): s is AdFlyShortener => Boolean(s))
-      .map(s => s.name);
-    return matched.length > 0 ? matched : ["Direct Landing (No Shorteners)"];
-  };
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
       {/* Page Header */}
@@ -99,10 +83,10 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
           Publisher Traffic Plans
         </span>
         <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight">
-          Publisher CPM Rates & Shortener Plans
+          Publisher CPM Rates & Plans
         </h1>
         <p className="text-slate-400 text-sm md:text-base mt-3 leading-relaxed">
-          Choose the best monetization plan for your audience and traffic sources. Switch plans anytime with zero downtime. Each plan features guaranteed CPM rates, fast shortener routing, and automatic payouts.
+          Choose the best monetization plan for your audience and traffic sources. Switch plans anytime with zero downtime. Each plan features guaranteed CPM rates, high conversion rates, and automatic payouts.
         </p>
       </div>
 
@@ -127,13 +111,12 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
           <span className="font-semibold text-sm">Loading publisher plans...</span>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8 items-stretch max-w-6xl mx-auto">
           {plans.map((plan) => {
             const isCurrentPlan = user
               ? (user.planId === plan.id || (!user.planId && plan.isDefault))
               : false;
 
-            const shortenerList = getShortenerNames(plan);
             const isSwitching = switchingId === plan.id;
 
             return (
@@ -171,12 +154,6 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
                         Default Plan
                       </span>
                     )}
-
-                    {plan.isFaucetPlan && (
-                      <span className="px-2.5 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                        🚰 Faucet Mode (/faucet/)
-                      </span>
-                    )}
                   </div>
 
                   {/* CPM Price display */}
@@ -196,27 +173,8 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
 
                   {/* Plan Description */}
                   <p className="text-xs text-slate-300 leading-relaxed mb-6">
-                    {plan.description || "High conversion publisher shortener pipeline with instant view counting."}
+                    {plan.description || "High conversion publisher monetization with guaranteed CPM rates and instant view counting."}
                   </p>
-
-                  {/* Assigned Shorteners Pipeline */}
-                  <div className="pt-3 border-t border-slate-800/80 mb-6">
-                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider block mb-2">
-                      Shortener Chain ({shortenerList.length})
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {shortenerList.map((name, i) => (
-                        <span key={i} className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${
-                          name.includes("Direct") 
-                            ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                            : "bg-indigo-950/60 text-indigo-300 border-indigo-800/40"
-                        }`}>
-                          {!name.includes("Direct") && <span className="text-slate-500 font-normal mr-1">#{i + 1}</span>}
-                          {name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
 
                   {/* Features & Details */}
                   <div className="space-y-4 mb-8 text-xs">

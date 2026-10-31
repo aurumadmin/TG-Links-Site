@@ -259,6 +259,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [editCustomCpm, setEditCustomCpm] = useState("");
   const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
   const [editFaucetMode, setEditFaucetMode] = useState(false);
+  const [editPlanId, setEditPlanId] = useState<string>("default");
   const [userFaucetFilter, setUserFaucetFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
   const [userSearchQuery, setUserSearchQuery] = useState("");
 
@@ -595,6 +596,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     setEditCustomCpm(u.customCpm ? String(u.customCpm) : "");
     setEditRole(u.role);
     setEditFaucetMode(!!(u as any).enableFaucetMode);
+    setEditPlanId((u as any).planId || "default");
   };
 
   const handleSaveUser = async (userId: string) => {
@@ -608,7 +610,8 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
           balance: isNaN(balanceNum) ? 0 : balanceNum,
           customCpm: cpmNum,
           role: editRole,
-          enableFaucetMode: editFaucetMode
+          enableFaucetMode: editFaucetMode,
+          planId: editPlanId
         })
       });
 
@@ -618,6 +621,22 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       }
     } catch (err) {
       alert("Failed to update user.");
+    }
+  };
+
+  const handleAdminChangeUserPlan = async (userId: string, newPlanId: string) => {
+    try {
+      const res = await fetchApi(`/admin/users/${userId}/plan`, {
+        method: "POST",
+        body: JSON.stringify({ planId: newPlanId })
+      });
+      if (res.success) {
+        setUsersList((prev) => prev.map((u) => u.id === userId ? { ...u, planId: newPlanId } : u));
+      } else {
+        alert(res.error || "Failed to update user plan.");
+      }
+    } catch (err: any) {
+      alert("Failed to update user plan: " + err.message);
     }
   };
 
@@ -1671,6 +1690,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     <th className="py-4 px-6">Role</th>
                     <th className="py-4 px-6 text-right">Wallet Balance</th>
                     <th className="py-4 px-6 text-center">Custom CPM</th>
+                    <th className="py-4 px-6 text-center">Active Plan</th>
                     <th className="py-4 px-6 text-center">Faucet Mode</th>
                     <th className="py-4 px-6 text-center">Traffic Sources</th>
                     <th className="py-4 px-6 text-center">Registered Date</th>
@@ -1754,6 +1774,48 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                             ) : (
                               <span className="text-slate-500 font-semibold">System Default</span>
                             )
+                          )}
+                        </td>
+                        <td className="py-4 px-6 text-center">
+                          {isEditing ? (
+                            <select
+                              value={editPlanId}
+                              onChange={(e) => setEditPlanId(e.target.value)}
+                              className="px-2.5 py-1 bg-slate-950 border border-slate-700 rounded-lg text-white font-bold text-xs focus:ring-2 focus:ring-indigo-500/30 focus:outline-none"
+                            >
+                              {(adminPlansList.length > 0 ? adminPlansList : [
+                                { id: "default", name: "Default Plan", cpm: 5 },
+                                { id: "elite", name: "ELITE", cpm: 8 },
+                                { id: "plan-2", name: "PLAN 2", cpm: 5 }
+                              ]).map((p: any) => (
+                                <option key={p.id} value={p.id} className="bg-slate-950 text-white">
+                                  {p.name} (${p.cpm ? Number(p.cpm).toFixed(2) : "5.00"})
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <select
+                              value={(u as any).planId || "default"}
+                              onChange={(e) => handleAdminChangeUserPlan(u.id, e.target.value)}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold border cursor-pointer outline-none transition ${
+                                ((u as any).planId === "elite")
+                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:border-amber-400"
+                                  : ((u as any).planId === "plan-2")
+                                  ? "bg-purple-500/10 text-purple-400 border-purple-500/30 hover:border-purple-400"
+                                  : "bg-indigo-500/10 text-indigo-400 border-indigo-500/30 hover:border-indigo-400"
+                              }`}
+                              title="Click to change publisher plan for this user"
+                            >
+                              {(adminPlansList.length > 0 ? adminPlansList : [
+                                { id: "default", name: "Default Plan", cpm: 5 },
+                                { id: "elite", name: "ELITE", cpm: 8 },
+                                { id: "plan-2", name: "PLAN 2", cpm: 5 }
+                              ]).map((p: any) => (
+                                <option key={p.id} value={p.id} className="bg-slate-950 text-white">
+                                  {p.name} (${p.cpm ? Number(p.cpm).toFixed(2) : "5.00"} CPM)
+                                </option>
+                              ))}
+                            </select>
                           )}
                         </td>
                         <td className="py-4 px-6 text-center">
