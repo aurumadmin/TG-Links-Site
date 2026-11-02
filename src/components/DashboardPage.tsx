@@ -470,11 +470,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate, 
   };
 
   const activeWithdrawalsSum = withdrawals
-    .filter(w => w.status === "pending")
+    .filter(w => w.status === "pending" || w.status === "approved" || w.status === "processing")
     .reduce((sum, w) => sum + w.amount, 0);
 
   const completedWithdrawalsSum = withdrawals
-    .filter(w => w.status === "approved")
+    .filter(w => w.status === "completed" || (w.status === "approved" && w.method !== "faucetpay"))
     .reduce((sum, w) => sum + w.amount, 0);
 
   return (
@@ -1441,12 +1441,65 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate, 
                                <span className="font-mono text-slate-500 truncate block text-[10px]" title={w.account}>{w.account}</span>
                              </td>
                              <td className="py-3 px-4 text-right font-bold text-white">
-                               ${w.amount.toFixed(2)}
+                               <div>${w.amount.toFixed(2)}</div>
+                               {(w.payoutCryptoAmount || w.payoutAmountSatoshis) && (
+                                 <div className="text-[10px] font-mono text-cyan-400 font-normal">
+                                   {w.payoutCryptoAmount
+                                     ? `${w.payoutCryptoAmount.toFixed(6)} ${w.payoutCurrency || "LTC"}`
+                                     : `${(w.payoutAmountSatoshis! / 100000000).toFixed(6)} ${w.payoutCurrency || "LTC"}`}
+                                 </div>
+                               )}
                              </td>
                              <td className="py-3 px-4 text-center">
-                               <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${w.status === "approved" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : w.status === "rejected" ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"}`}>
-                                 {w.status}
-                               </span>
+                               {w.status === "completed" && (
+                                 <div>
+                                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                     <Check className="w-3 h-3" />
+                                     Completed
+                                   </span>
+                                   {w.payoutId && (
+                                     <span className="block text-[8px] font-mono text-slate-500 mt-0.5 truncate max-w-[120px] mx-auto" title={`Payout ID: ${w.payoutId}`}>
+                                       ID: {w.payoutId}
+                                     </span>
+                                   )}
+                                 </div>
+                               )}
+                               {w.status === "processing" && (
+                                 <div>
+                                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                     <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                                     Processing
+                                   </span>
+                                   <span className="block text-[8px] text-slate-500 mt-0.5">
+                                     Gateway queue
+                                   </span>
+                                 </div>
+                               )}
+                               {w.status === "approved" && (
+                                 <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                   Approved
+                                 </span>
+                               )}
+                               {w.status === "returned" && (
+                                 <div>
+                                   <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                     Refunded
+                                   </span>
+                                   <span className="block text-[8px] text-sky-400/80 mt-0.5">
+                                     Credited to wallet
+                                   </span>
+                                 </div>
+                               )}
+                               {(w.status === "cancelled" || w.status === "rejected") && (
+                                 <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                   Cancelled
+                                 </span>
+                               )}
+                               {w.status === "pending" && (
+                                 <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                   Pending Review
+                                 </span>
+                               )}
                              </td>
                            </tr>
                         ))}

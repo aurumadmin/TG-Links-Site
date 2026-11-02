@@ -59,7 +59,11 @@ import {
   Target,
   QrCode,
   Instagram,
-  MousePointerClick
+  MousePointerClick,
+  RotateCcw,
+  Key,
+  Wallet,
+  Coins
 } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
@@ -78,7 +82,11 @@ const DEFAULT_ADMIN_SETTINGS: SystemSettings = {
   siteDescription: "Monetize your traffic with the world's most transparent, high-paying URL shortener network.",
   globalCpm: 5.0,
   minWithdrawal: 5.0,
-  withdrawalMethods: ["PayPal", "UPI", "Bank Transfer", "Crypto"],
+  withdrawalMethods: ["PayPal", "UPI", "Bank Transfer", "Crypto", "FaucetPay"],
+  enableFaucetPayAutoPay: true,
+  faucetPayAutoPayMode: "manual_approval",
+  faucetPayApiKey: "",
+  faucetPayCurrency: "USDT",
   adPagesCount: 1,
   bannerAd728x90: "",
   bannerAd300x250: "",
@@ -170,9 +178,23 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [adminLinkSearch, setAdminLinkSearch] = useState("");
   const [adminLinkPage, setAdminLinkPage] = useState(1);
   const [withdrawalsList, setWithdrawalsList] = useState<Withdrawal[]>([]);
-  const [withdrawalFilter, setWithdrawalFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [withdrawalFilter, setWithdrawalFilter] = useState<"all" | "pending" | "approved" | "processing" | "completed" | "returned" | "rejected">("all");
   const [withdrawalSortOrder, setWithdrawalSortOrder] = useState<"newest" | "oldest">("newest");
   const [withdrawalSearch, setWithdrawalSearch] = useState("");
+  
+  // FaucetPay Auto-Pay & Test Payment States
+  const [testPaymentModalOpen, setTestPaymentModalOpen] = useState(false);
+  const [testPaymentTo, setTestPaymentTo] = useState("");
+  const [testPaymentAmount, setTestPaymentAmount] = useState("0.001");
+  const [testPaymentCurrency, setTestPaymentCurrency] = useState("LTC");
+  const [testPaymentLoading, setTestPaymentLoading] = useState(false);
+  const [testPaymentResult, setTestPaymentResult] = useState<any>(null);
+  const [faucetBalances, setFaucetBalances] = useState<Record<string, any> | null>(null);
+  const [checkingBalances, setCheckingBalances] = useState(false);
+  const [queueRetrying, setQueueRetrying] = useState(false);
+  const [showFaucetApiKey, setShowFaucetApiKey] = useState(false);
+  const [liveLtcPrice, setLiveLtcPrice] = useState<{ price: number; source: string; formatted: string; updatedAt: string } | null>(null);
+  const [loadingLtcPrice, setLoadingLtcPrice] = useState(false);
   const [ticketsList, setTicketsList] = useState<SupportTicket[]>([]);
   const [sysSettings, setSysSettings] = useState<SystemSettings>(() => getCachedSettings() || DEFAULT_ADMIN_SETTINGS);
   const [isAdminLoading, setIsAdminLoading] = useState(true);
@@ -540,6 +562,8 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       if (plansRes?.plans) {
         setAdminPlansList(plansRes.plans);
       }
+      // Fetch current real-time market price of LTC
+      fetchLiveLtcPrice();
     } catch (err) {
       console.error("Failed to load admin panel data:", err);
     } finally {
@@ -714,16 +738,102 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   };
 
   // WITHDRAWALS ACTIONS
-  const handleProcessWithdrawal = async (id: string, status: 'approved' | 'rejected') => {
-    if (!confirm(`Are you sure you want to mark this withdrawal as ${status}?`)) return;
+  const handleProcessWithdrawal = async (
+    id: string, 
+    action: 'approve' | 'complete' | 'return' | 'cancel' | 'retry_faucetpay',
+    reason?: string
+  ) => {
+    const promptMsg = 
+      action === 'approve' ? "Approve this withdrawal payout?" :
+      action === 'complete' ? "Mark this withdrawal as COMPLETED and paid?" :
+      action === 'return' ? "Return funds back to the publisher's wallet balance (e.g. invalid payout account)?" :
+      action === 'cancel' ? "Cancel this withdrawal request?" :
+      "Retry FaucetPay payout now?";
+
+    if (!confirm(promptMsg)) return;
     try {
-      await fetchApi(`/admin/withdrawals/${id}/status`, {
+      const res = await fetchApi(`/admin/withdrawals/${id}/status`, {
         method: "POST",
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ action, reason })
       });
+      if (res?.message) {
+        alert(res.message);
+      }
       loadAdminData();
+    } catch (err: any) {
+      alert(err?.message || "Failed to process withdrawal.");
+    }
+  };
+
+  // FAUCETPAY AUTO-PAY ADMIN ACTIONS
+  const handleCheckFaucetBalances = async () => {
+    setCheckingBalances(true);
+    try {
+      const res = await fetchApi("/admin/faucetpay/balance");
+      if (res?.success && res.balances) {
+        setFaucetBalances(res.balances);
+      } else {
+        alert(res?.error || "Failed to fetch balances. Check your FaucetPay API key.");
+      }
+    } catch (err: any) {
+      alert(err?.message || "Failed to check FaucetPay balances.");
+    } finally {
+      setCheckingBalances(false);
+    }
+  };
+
+  const handleSendTestPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testPaymentTo.trim()) {
+      alert("Please enter a destination FaucetPay email or wallet address.");
+      return;
+    }
+    setTestPaymentLoading(true);
+    setTestPaymentResult(null);
+    try {
+      const res = await fetchApi("/admin/faucetpay/test-payment", {
+        method: "POST",
+        body: JSON.stringify({
+          to: testPaymentTo.trim(),
+          amount: parseFloat(testPaymentAmount) || 0.001,
+          currency: testPaymentCurrency || sysSettings.faucetPayCurrency || "USDT"
+        })
+      });
+      setTestPaymentResult(res);
+      if (res?.success) {
+        handleCheckFaucetBalances();
+      }
+    } catch (err: any) {
+      setTestPaymentResult({ success: false, message: err?.message || "Test request failed" });
+    } finally {
+      setTestPaymentLoading(false);
+    }
+  };
+
+  const handleRetryProcessingQueue = async () => {
+    setQueueRetrying(true);
+    try {
+      const res = await fetchApi("/admin/faucetpay/retry-queue", { method: "POST" });
+      loadAdminData();
+      alert(`Queue processed! Remaining items in processing: ${res?.remainingProcessing ?? 0}`);
+    } catch (err: any) {
+      alert("Failed to process queue.");
+    } finally {
+      setQueueRetrying(false);
+    }
+  };
+
+  const fetchLiveLtcPrice = async () => {
+    setLoadingLtcPrice(true);
+    try {
+      const res = await fetchApi("/faucetpay/ltc-price");
+      if (res?.success && res.price) {
+        setLiveLtcPrice(res);
+      }
     } catch (err) {
-      alert("Failed to process withdrawal.");
+      console.warn("Failed to fetch live LTC price:", err);
+    } finally {
+      setLoadingLtcPrice(false);
     }
   };
 
@@ -2078,20 +2188,32 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         {activeTab === "withdrawals" && (() => {
           const pendingCount = withdrawalsList.filter(w => w.status === "pending").length;
           const approvedCount = withdrawalsList.filter(w => w.status === "approved").length;
-          const rejectedCount = withdrawalsList.filter(w => w.status === "rejected").length;
+          const processingCount = withdrawalsList.filter(w => w.status === "processing").length;
+          const completedCount = withdrawalsList.filter(w => w.status === "completed").length;
+          const returnedCount = withdrawalsList.filter(w => w.status === "returned").length;
+          const rejectedCount = withdrawalsList.filter(w => w.status === "rejected" || w.status === "cancelled").length;
+
           const totalPendingAmount = withdrawalsList.filter(w => w.status === "pending").reduce((sum, w) => sum + (w.amount || 0), 0);
-          const totalApprovedAmount = withdrawalsList.filter(w => w.status === "approved").reduce((sum, w) => sum + (w.amount || 0), 0);
+          const totalProcessingAmount = withdrawalsList.filter(w => w.status === "processing").reduce((sum, w) => sum + (w.amount || 0), 0);
+          const totalApprovedAmount = withdrawalsList.filter(w => w.status === "approved" || w.status === "completed").reduce((sum, w) => sum + (w.amount || 0), 0);
 
           const displayedWithdrawals = [...withdrawalsList]
             .filter((w) => {
-              if (withdrawalFilter !== "all" && w.status !== withdrawalFilter) return false;
+              if (withdrawalFilter !== "all") {
+                if (withdrawalFilter === "rejected") {
+                  if (w.status !== "rejected" && w.status !== "cancelled") return false;
+                } else if (w.status !== withdrawalFilter) {
+                  return false;
+                }
+              }
               if (withdrawalSearch.trim()) {
                 const q = withdrawalSearch.toLowerCase().trim();
                 return (
                   (w.userEmail || "").toLowerCase().includes(q) ||
                   (w.id || "").toLowerCase().includes(q) ||
                   (w.method || "").toLowerCase().includes(q) ||
-                  (w.account || "").toLowerCase().includes(q)
+                  (w.account || "").toLowerCase().includes(q) ||
+                  String(w.payoutId || "").includes(q)
                 );
               }
               return true;
@@ -2100,6 +2222,8 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               if (withdrawalSortOrder === "newest") {
                 if (a.status === "pending" && b.status !== "pending") return -1;
                 if (a.status !== "pending" && b.status === "pending") return 1;
+                if (a.status === "processing" && b.status !== "processing") return -1;
+                if (a.status !== "processing" && b.status === "processing") return 1;
                 const timeA = new Date(a.createdAt).getTime() || 0;
                 const timeB = new Date(b.createdAt).getTime() || 0;
                 return timeB - timeA;
@@ -2109,8 +2233,101 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               return timeA - timeB;
             });
 
+          const isAutoPayActive = sysSettings.enableFaucetPayAutoPay !== false;
+          const autoPayMode = sysSettings.faucetPayAutoPayMode || "manual_approval";
+
           return (
             <div className="space-y-6" id="admin_withdrawals">
+              {/* FAUCETPAY AUTO-PAY OVERVIEW BANNER */}
+              <div className="bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-slate-900 border border-amber-500/30 rounded-2xl p-5 shadow-xl">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className="p-3 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400 shrink-0">
+                      <Zap className="w-6 h-6 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-base font-black text-white">FaucetPay Auto-Pay Engine</h3>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${
+                          !isAutoPayActive || autoPayMode === "disabled"
+                            ? "bg-slate-800 text-slate-400 border-slate-700"
+                            : autoPayMode === "instant"
+                            ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                            : "bg-indigo-500/20 text-indigo-300 border-indigo-500/40"
+                        }`}>
+                          {!isAutoPayActive || autoPayMode === "disabled"
+                            ? "⏸️ Auto-Pay Disabled"
+                            : autoPayMode === "instant"
+                            ? "⚡ Instant Auto-Pay"
+                            : "🟢 Manual Auto-Pay (Approve First)"}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-950 text-slate-300 border border-slate-800">
+                          Currency: {sysSettings.faucetPayCurrency || "USDT"} (1:1 USD)
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                        {autoPayMode === "manual_approval"
+                          ? "Manual Auto-Pay Active: Review user traffic, click Approve. TG Links will automatically dispatch the payout via FaucetPay API and complete the request."
+                          : autoPayMode === "instant"
+                          ? "Instant Auto-Pay Active: User FaucetPay withdrawal requests are automatically dispatched immediately upon submission."
+                          : "Auto-Pay is disabled. All payouts require manual completion."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setTestPaymentModalOpen(true)}
+                      className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      Test FaucetPay API
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCheckFaucetBalances}
+                      disabled={checkingBalances}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Coins className="w-3.5 h-3.5 text-amber-400" />
+                      {checkingBalances ? "Checking..." : "Live Balances"}
+                    </button>
+
+                    {processingCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleRetryProcessingQueue}
+                        disabled={queueRetrying}
+                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/30 flex items-center gap-1.5 transition cursor-pointer animate-pulse"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${queueRetrying ? "animate-spin" : ""}`} />
+                        Retry Queue ({processingCount})
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inline Faucet Balances Bar if loaded */}
+                {faucetBalances && (
+                  <div className="mt-4 pt-4 border-t border-slate-800/80 flex items-center gap-3 overflow-x-auto text-xs">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                      <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                      Faucet Balances:
+                    </span>
+                    {Object.entries(faucetBalances).map(([cur, data]: any) => (
+                      <div key={cur} className="px-3 py-1 bg-slate-950/80 rounded-lg border border-slate-800 flex items-center gap-1.5 shrink-0">
+                        <span className="font-extrabold text-amber-400">{cur}:</span>
+                        <span className="font-mono text-white">
+                          {data?.status === 200 ? (data.balance_bitcoin !== undefined ? data.balance_bitcoin : data.balance) : "Error"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* TOP HEADER & METRICS */}
               <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-6">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/60 pb-5">
@@ -2120,7 +2337,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       <span>Fund Withdrawal Payout Requests</span>
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Review, verify, and approve publisher withdrawals. New requests appear at the top by default.
+                      Review, verify, and approve publisher withdrawals. Filter by status, auto-pay via FaucetPay, or return funds to publisher balance.
                     </p>
                   </div>
 
@@ -2134,31 +2351,44 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 </div>
 
                 {/* QUICK STATS CARDS */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
-                  <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl">
-                    <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider block">Pending Requests</span>
-                    <div className="flex items-baseline gap-2 mt-1">
-                      <span className="text-2xl font-black text-white">{pendingCount}</span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 mt-5">
+                  <div className="bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider block">Pending</span>
+                    <div className="flex items-baseline gap-1.5 mt-1">
+                      <span className="text-xl font-black text-white">{pendingCount}</span>
                       <span className="text-xs font-bold text-amber-300">(${totalPendingAmount.toFixed(2)})</span>
                     </div>
                   </div>
 
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl">
-                    <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider block">Approved / Paid</span>
-                    <div className="flex items-baseline gap-2 mt-1">
-                      <span className="text-2xl font-black text-white">{approvedCount}</span>
+                  <div className="bg-purple-500/10 border border-purple-500/20 p-3.5 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider block">Processing (Queue)</span>
+                    <div className="flex items-baseline gap-1.5 mt-1">
+                      <span className="text-xl font-black text-white">{processingCount}</span>
+                      <span className="text-xs font-bold text-purple-300">(${totalProcessingAmount.toFixed(2)})</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 p-3.5 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider block">Approved</span>
+                    <span className="text-xl font-black text-white block mt-1">{approvedCount}</span>
+                  </div>
+
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 p-3.5 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider block">Completed</span>
+                    <div className="flex items-baseline gap-1.5 mt-1">
+                      <span className="text-xl font-black text-white">{completedCount}</span>
                       <span className="text-xs font-bold text-emerald-300">(${totalApprovedAmount.toFixed(2)})</span>
                     </div>
                   </div>
 
-                  <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl">
-                    <span className="text-[10px] uppercase font-bold text-rose-400 tracking-wider block">Rejected</span>
-                    <span className="text-2xl font-black text-white block mt-1">{rejectedCount}</span>
+                  <div className="bg-sky-500/10 border border-sky-500/20 p-3.5 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider block">Returned / Refunded</span>
+                    <span className="text-xl font-black text-white block mt-1">{returnedCount}</span>
                   </div>
 
-                  <div className="bg-slate-800/40 border border-slate-700/60 p-4 rounded-xl">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Total Submissions</span>
-                    <span className="text-2xl font-black text-white block mt-1">{withdrawalsList.length}</span>
+                  <div className="bg-rose-500/10 border border-rose-500/20 p-3.5 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold text-rose-400 tracking-wider block">Cancelled / Rejected</span>
+                    <span className="text-xl font-black text-white block mt-1">{rejectedCount}</span>
                   </div>
                 </div>
               </div>
@@ -2169,7 +2399,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
                   <button
                     onClick={() => setWithdrawalFilter("all")}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                       withdrawalFilter === "all"
                         ? "bg-indigo-600 text-white shadow"
                         : "text-slate-400 hover:text-white"
@@ -2180,7 +2410,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
 
                   <button
                     onClick={() => setWithdrawalFilter("pending")}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                       withdrawalFilter === "pending"
                         ? "bg-amber-500 text-slate-950 shadow"
                         : "text-amber-400 hover:text-amber-300"
@@ -2194,24 +2424,60 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
 
                   <button
                     onClick={() => setWithdrawalFilter("approved")}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                       withdrawalFilter === "approved"
-                        ? "bg-emerald-600 text-white shadow"
-                        : "text-emerald-400 hover:text-emerald-300"
+                        ? "bg-indigo-600 text-white shadow"
+                        : "text-indigo-400 hover:text-indigo-300"
                     }`}
                   >
                     Approved ({approvedCount})
                   </button>
 
                   <button
+                    onClick={() => setWithdrawalFilter("processing")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                      withdrawalFilter === "processing"
+                        ? "bg-purple-600 text-white shadow"
+                        : "text-purple-400 hover:text-purple-300"
+                    }`}
+                  >
+                    <span>Processing ({processingCount})</span>
+                    {processingCount > 0 && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setWithdrawalFilter("completed")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      withdrawalFilter === "completed"
+                        ? "bg-emerald-600 text-white shadow"
+                        : "text-emerald-400 hover:text-emerald-300"
+                    }`}
+                  >
+                    Completed ({completedCount})
+                  </button>
+
+                  <button
+                    onClick={() => setWithdrawalFilter("returned")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      withdrawalFilter === "returned"
+                        ? "bg-sky-600 text-white shadow"
+                        : "text-sky-400 hover:text-sky-300"
+                    }`}
+                  >
+                    Returned ({returnedCount})
+                  </button>
+
+                  <button
                     onClick={() => setWithdrawalFilter("rejected")}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                       withdrawalFilter === "rejected"
                         ? "bg-rose-600 text-white shadow"
                         : "text-rose-400 hover:text-rose-300"
                     }`}
                   >
-                    Rejected ({rejectedCount})
+                    Cancelled ({rejectedCount})
                   </button>
                 </div>
 
@@ -2221,7 +2487,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
-                      placeholder="Search email, ID, method..."
+                      placeholder="Search email, ID, method, payout ID..."
                       value={withdrawalSearch}
                       onChange={(e) => setWithdrawalSearch(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
@@ -2287,107 +2553,306 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                           </td>
                         </tr>
                       ) : (
-                        displayedWithdrawals.map((w, idx) => (
-                          <tr key={w.id} className="hover:bg-slate-900/30 transition">
-                            <td className="py-4 px-6">
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-white block text-sm">{w.userEmail}</span>
-                                {idx === 0 && withdrawalSortOrder === "newest" && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                                    LATEST
-                                  </span>
-                                )}
-                              </div>
-                              <span className="text-[10px] text-slate-500 block font-mono mt-0.5">Req ID: {w.id}</span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5">
-                                Submitted: {new Date(w.createdAt).toLocaleString(undefined, {
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
-                              </span>
-                              
-                              <div className="flex items-center gap-1.5 mt-2">
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${w.userFaucetMode ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-800 text-slate-400 border-slate-700"}`}>
-                                  {w.userFaucetMode ? "🚰 FAUCET MODE ON" : "🌐 ORGANIC TRAFFIC"}
-                                </span>
-                                <button
-                                  onClick={() => handleToggleUserFaucetMode(w.userId, !!w.userFaucetMode)}
-                                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition cursor-pointer"
-                                  title={w.userFaucetMode ? "Disable Faucet Mode for user" : "Enable Faucet Mode for user"}
-                                >
-                                  {w.userFaucetMode ? <ToggleRight className="w-4 h-4 text-amber-400" /> : <ToggleLeft className="w-4 h-4 text-slate-500" />}
-                                </button>
-                              </div>
-                            </td>
-                            <td className="py-4 px-6">
-                              <span className="font-bold text-slate-200 block text-xs">{w.method}</span>
-                              <span className="font-mono text-slate-400 block break-all whitespace-pre-line text-[10px] mt-1 bg-slate-950 p-2.5 rounded-xl border border-slate-850 max-w-xs">{w.account}</span>
-                            </td>
-                            <td className="py-4 px-6 text-right font-black text-white text-base">
-                              ${w.amount.toFixed(2)}
-                            </td>
-                            <td className="py-4 px-6">
-                              <div className="space-y-1.5">
-                                {w.trafficSources && w.trafficSources.length > 0 ? (
-                                  <div className="text-[11px] font-medium text-slate-300">
-                                    <span className="font-bold text-white font-mono block truncate max-w-[180px]">
-                                      Top: {w.trafficSources[0].source}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400">
-                                      {w.trafficSources[0].clicks} views (${w.trafficSources[0].earnings.toFixed(4)})
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className="text-[10px] text-slate-500 block italic">No click logs recorded yet</span>
-                                )}
+                        displayedWithdrawals.map((w, idx) => {
+                          const isFaucet = (w.method || "").toLowerCase().includes("faucetpay") || (w.method || "").toLowerCase().includes("faucet pay");
+                          const hasError = !!w.payoutError;
 
-                                <button
-                                  onClick={() => handleOpenTrafficModal(w.userId, w.userEmail, w.userFaucetMode)}
-                                  className="px-2.5 py-1 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 border border-indigo-500/20 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition cursor-pointer"
-                                >
-                                  <Globe className="w-3 h-3 text-indigo-400" />
-                                  Inspect All Sources ({w.trafficSources?.length || 0})
-                                </button>
-                              </div>
-                            </td>
-                            <td className="py-4 px-6 text-center">
-                              <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${
-                                w.status === "approved"
-                                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                                  : w.status === "rejected"
-                                  ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                                  : "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
-                              }`}>
-                                {w.status}
-                              </span>
-                            </td>
-                            <td className="py-4 px-6 text-center">
-                              {w.status === "pending" ? (
-                                <div className="flex items-center justify-center gap-2">
+                          return (
+                            <tr key={w.id} className="hover:bg-slate-900/30 transition">
+                              <td className="py-4 px-6">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-white block text-sm">{w.userEmail}</span>
+                                  {idx === 0 && withdrawalSortOrder === "newest" && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                      LATEST
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-slate-500 block font-mono mt-0.5">Req ID: {w.id}</span>
+                                <span className="text-[10px] text-slate-400 block mt-0.5">
+                                  Submitted: {new Date(w.createdAt).toLocaleString(undefined, {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </span>
+                                
+                                <div className="flex items-center gap-1.5 mt-2">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${w.userFaucetMode ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-800 text-slate-400 border-slate-700"}`}>
+                                    {w.userFaucetMode ? "🚰 FAUCET MODE ON" : "🌐 ORGANIC TRAFFIC"}
+                                  </span>
                                   <button
-                                    onClick={() => handleProcessWithdrawal(w.id, "approved")}
-                                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-900/30 flex items-center gap-1.5 uppercase transition cursor-pointer"
+                                    onClick={() => handleToggleUserFaucetMode(w.userId, !!w.userFaucetMode)}
+                                    className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition cursor-pointer"
+                                    title={w.userFaucetMode ? "Disable Faucet Mode for user" : "Enable Faucet Mode for user"}
                                   >
-                                    <Check className="w-3.5 h-3.5" />
-                                    Approve
-                                  </button>
-                                  <button
-                                    onClick={() => handleProcessWithdrawal(w.id, "rejected")}
-                                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-900/30 flex items-center gap-1.5 uppercase transition cursor-pointer"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                    Reject
+                                    {w.userFaucetMode ? <ToggleRight className="w-4 h-4 text-amber-400" /> : <ToggleLeft className="w-4 h-4 text-slate-500" />}
                                   </button>
                                 </div>
-                              ) : (
-                                <span className="text-slate-500 font-semibold text-xs">Processed</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))
+                              </td>
+
+                              <td className="py-4 px-6">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-slate-200 block text-xs">{w.method}</span>
+                                  {isFaucet && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-0.5">
+                                      <Zap className="w-2.5 h-2.5" /> Auto-Pay
+                                    </span>
+                                  )}
+                                </div>
+
+                                <span className="font-mono text-slate-400 block break-all whitespace-pre-line text-[10px] mt-1 bg-slate-950 p-2.5 rounded-xl border border-slate-850 max-w-xs">
+                                  {w.account}
+                                </span>
+
+                                {w.payoutId && (
+                                  <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-400 font-mono font-bold">
+                                    <Check className="w-3 h-3" />
+                                    <span>Payout ID: #{w.payoutId}</span>
+                                  </div>
+                                )}
+
+                                {hasError && (
+                                  <div className="mt-1 p-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-300 max-w-xs break-words">
+                                    {w.payoutError}
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="py-4 px-6 text-right font-black text-white text-base">
+                                ${w.amount.toFixed(2)}
+                                {(w.payoutCryptoAmount || w.payoutAmountSatoshis) && (
+                                  <div className="text-[10px] font-mono font-bold text-cyan-400 mt-0.5">
+                                    {w.payoutCryptoAmount
+                                      ? `${w.payoutCryptoAmount.toFixed(6)} ${w.payoutCurrency || "LTC"}`
+                                      : `${(w.payoutAmountSatoshis! / 100000000).toFixed(6)} ${w.payoutCurrency || "LTC"}`}
+                                  </div>
+                                )}
+                                {w.payoutExchangeRate && (
+                                  <div className="text-[9px] text-slate-500 font-mono font-normal">
+                                    @ ${w.payoutExchangeRate.toFixed(2)}/{w.payoutCurrency || "LTC"}
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="py-4 px-6">
+                                <div className="space-y-1.5">
+                                  {w.trafficSources && w.trafficSources.length > 0 ? (
+                                    <div className="text-[11px] font-medium text-slate-300">
+                                      <span className="font-bold text-white font-mono block truncate max-w-[180px]">
+                                        Top: {w.trafficSources[0].source}
+                                      </span>
+                                      <span className="text-[10px] text-slate-400">
+                                        {w.trafficSources[0].clicks} views (${w.trafficSources[0].earnings.toFixed(4)})
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-500 block italic">No click logs recorded yet</span>
+                                  )}
+
+                                  <button
+                                    onClick={() => handleOpenTrafficModal(w.userId, w.userEmail, w.userFaucetMode)}
+                                    className="px-2.5 py-1 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 border border-indigo-500/20 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition cursor-pointer"
+                                  >
+                                    <Globe className="w-3 h-3 text-indigo-400" />
+                                    Inspect All Sources ({w.trafficSources?.length || 0})
+                                  </button>
+                                </div>
+                              </td>
+
+                              <td className="py-4 px-6 text-center">
+                                <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${
+                                  w.status === "completed"
+                                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                                    : w.status === "approved"
+                                    ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-400"
+                                    : w.status === "processing"
+                                    ? "bg-purple-500/10 border-purple-500/30 text-purple-400 animate-pulse"
+                                    : w.status === "returned"
+                                    ? "bg-sky-500/10 border-sky-500/30 text-sky-400"
+                                    : w.status === "rejected" || w.status === "cancelled"
+                                    ? "bg-rose-500/10 border-rose-500/30 text-rose-400"
+                                    : "bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse"
+                                }`}>
+                                  {w.status === "processing" && <RefreshCw className="w-2.5 h-2.5 animate-spin" />}
+                                  {w.status === "returned" && <RotateCcw className="w-2.5 h-2.5" />}
+                                  {w.status === "completed" && <Check className="w-2.5 h-2.5" />}
+                                  {w.status}
+                                </span>
+                                {w.status === "processing" && (
+                                  <span className="text-[9px] text-purple-300 block mt-1 font-semibold">
+                                    Awaiting Faucet Funds
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="py-4 px-6 text-center">
+                                {/* PENDING WORKFLOW */}
+                                {w.status === "pending" && (
+                                  <div className="flex flex-col gap-1.5 items-center justify-center">
+                                    <button
+                                      onClick={() => handleProcessWithdrawal(w.id, "approve")}
+                                      className={`w-full px-3 py-1.5 text-white font-black text-xs rounded-xl shadow flex items-center justify-center gap-1.5 uppercase transition cursor-pointer ${
+                                        isFaucet && isAutoPayActive
+                                          ? "bg-gradient-to-r from-emerald-600 to-amber-600 hover:from-emerald-500 hover:to-amber-500 shadow-emerald-900/30"
+                                          : "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/30"
+                                      }`}
+                                      title={isFaucet && isAutoPayActive ? "Approve traffic and trigger instant FaucetPay transfer" : "Approve this withdrawal"}
+                                    >
+                                      {isFaucet && isAutoPayActive ? <Zap className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                                      <span>{isFaucet && isAutoPayActive ? "Approve & Auto-Pay" : "Approve"}</span>
+                                    </button>
+
+                                    <div className="flex items-center gap-1.5 w-full">
+                                      <button
+                                        onClick={() => handleProcessWithdrawal(w.id, "return")}
+                                        className="flex-1 px-2.5 py-1 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 font-bold text-[10px] rounded-lg transition cursor-pointer flex items-center justify-center gap-1"
+                                        title="Return funds to user's wallet balance (e.g. wrong address)"
+                                      >
+                                        <RotateCcw className="w-3 h-3" />
+                                        Return
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleProcessWithdrawal(w.id, "cancel")}
+                                        className="flex-1 px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 font-bold text-[10px] rounded-lg transition cursor-pointer flex items-center justify-center gap-1"
+                                        title="Cancel withdrawal (no refund)"
+                                      >
+                                        <X className="w-3 h-3" />
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* APPROVED WORKFLOW */}
+                                {w.status === "approved" && (
+                                  <div className="flex flex-col gap-1.5 items-center justify-center">
+                                    {isFaucet && isAutoPayActive ? (
+                                      <button
+                                        onClick={() => handleProcessWithdrawal(w.id, "retry_faucetpay")}
+                                        className="w-full px-3 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-black text-xs rounded-xl shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                                        title="Send payout now via FaucetPay API"
+                                      >
+                                        <Zap className="w-3.5 h-3.5" />
+                                        Auto-Pay Now
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleProcessWithdrawal(w.id, "complete")}
+                                        className="w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                                        title="Mark payment as sent/completed"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                        Complete
+                                      </button>
+                                    )}
+
+                                    <div className="flex items-center gap-1.5 w-full">
+                                      {isFaucet && isAutoPayActive && (
+                                        <button
+                                          onClick={() => handleProcessWithdrawal(w.id, "complete")}
+                                          className="flex-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg transition cursor-pointer"
+                                          title="Mark manually completed without FaucetPay API"
+                                        >
+                                          Mark Done
+                                        </button>
+                                      )}
+
+                                      <button
+                                        onClick={() => handleProcessWithdrawal(w.id, "return")}
+                                        className="flex-1 px-2 py-1 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 font-bold text-[10px] rounded-lg transition cursor-pointer"
+                                        title="Return funds to user's wallet"
+                                      >
+                                        Return
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleProcessWithdrawal(w.id, "cancel")}
+                                        className="flex-1 px-2 py-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 font-bold text-[10px] rounded-lg transition cursor-pointer"
+                                        title="Cancel withdrawal"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* PROCESSING WORKFLOW */}
+                                {w.status === "processing" && (
+                                  <div className="flex flex-col gap-1.5 items-center justify-center">
+                                    <button
+                                      onClick={() => handleProcessWithdrawal(w.id, "retry_faucetpay")}
+                                      className="w-full px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                                      title="Retry FaucetPay payout now"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                      Retry FaucetPay
+                                    </button>
+
+                                    <div className="flex items-center gap-1.5 w-full">
+                                      <button
+                                        onClick={() => handleProcessWithdrawal(w.id, "complete")}
+                                        className="flex-1 px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 font-bold text-[10px] rounded-lg transition cursor-pointer"
+                                        title="Mark completed if paid manually"
+                                      >
+                                        Complete
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleProcessWithdrawal(w.id, "return")}
+                                        className="flex-1 px-2 py-1 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 font-bold text-[10px] rounded-lg transition cursor-pointer"
+                                        title="Return funds to user wallet"
+                                      >
+                                        Return
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* COMPLETED WORKFLOW */}
+                                {w.status === "completed" && (
+                                  <div className="text-center">
+                                    <span className="text-emerald-400 font-bold text-xs flex items-center justify-center gap-1">
+                                      <Check className="w-3.5 h-3.5" />
+                                      Completed
+                                    </span>
+                                    {w.processedAt && (
+                                      <span className="text-[9px] text-slate-500 block">
+                                        {new Date(w.processedAt).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* RETURNED WORKFLOW */}
+                                {w.status === "returned" && (
+                                  <div className="text-center">
+                                    <span className="text-sky-400 font-bold text-xs flex items-center justify-center gap-1">
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                      Refunded
+                                    </span>
+                                    <span className="text-[9px] text-slate-500 block">
+                                      Returned to wallet
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* CANCELLED WORKFLOW */}
+                                {(w.status === "rejected" || w.status === "cancelled") && (
+                                  <div className="text-center">
+                                    <span className="text-rose-400 font-bold text-xs flex items-center justify-center gap-1">
+                                      <X className="w-3.5 h-3.5" />
+                                      Cancelled
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -3401,6 +3866,222 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     Enable OxaPay Crypto Deposits
                   </span>
                 </label>
+              </div>
+            </div>
+
+            {/* FAUCETPAY AUTO-PAY CONFIGURATION */}
+            <div className="bg-slate-900/40 p-6 rounded-xl border border-amber-500/30 space-y-5 shadow-lg">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                      FaucetPay Auto-Pay Engine
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        sysSettings.enableFaucetPayAutoPay
+                          ? (sysSettings.faucetPayAutoPayMode === "instant" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30")
+                          : "bg-slate-800 text-slate-400"
+                      }`}>
+                        {sysSettings.enableFaucetPayAutoPay
+                          ? (sysSettings.faucetPayAutoPayMode === "instant" ? "⚡ INSTANT AUTO-PAY" : "🛡️ MANUAL APPROVAL AUTO-PAY")
+                          : "DISABLED"}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Configure automated cryptocurrency payouts directly to publishers' FaucetPay accounts.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTestPaymentModalOpen(true)}
+                    className="px-3.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Coins className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Test Payment</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={checkingBalances}
+                    onClick={handleCheckFaucetBalances}
+                    className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${checkingBalances ? "animate-spin" : ""}`} />
+                    <span>Check Balances</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Live Balances Banner if loaded */}
+              {faucetBalances && (
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Coins className="w-3.5 h-3.5 text-amber-400" />
+                      FaucetPay Live Account Balances
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">Fetched from FaucetPay API</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 pt-1">
+                    {Object.entries(faucetBalances).map(([coin, info]: [string, any]) => (
+                      <div key={coin} className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                        <span className="text-[10px] font-extrabold text-slate-400 block">{coin}</span>
+                        <span className="text-sm font-black text-emerald-400 block font-mono">
+                          {info?.balance || "0.00"}
+                        </span>
+                        <span className="text-[9px] text-slate-500 block truncate">{info?.balance_in_satoshi ?? 0} sats</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* REAL-TIME LIVE LTC MARKET PRICE CARD */}
+              <div className="p-4 bg-gradient-to-r from-cyan-950/40 via-slate-900 to-indigo-950/40 rounded-xl border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-black shrink-0 text-base">
+                    Ł
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-white">
+                        Live LTC (Litecoin) Price Integration
+                      </span>
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        LIVE TICKER
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      TG Links automatically fetches live LTC prices from {liveLtcPrice?.source || "Binance Live Ticker"}. Payouts convert USD to LTC automatically at this exact real-time rate.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right">
+                    <span className="text-xl font-black text-cyan-300 font-mono block">
+                      {liveLtcPrice ? liveLtcPrice.formatted : "$55.02 USD"}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono block">
+                      $1.00 USD ≈ {liveLtcPrice && liveLtcPrice.price > 0 ? (1 / liveLtcPrice.price).toFixed(6) : "0.018181"} LTC
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={loadingLtcPrice}
+                    onClick={fetchLiveLtcPrice}
+                    title="Refresh Live Market Price"
+                    className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${loadingLtcPrice ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Form Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-1">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">
+                    Enable FaucetPay Auto-Pay
+                  </label>
+                  <select
+                    value={sysSettings.enableFaucetPayAutoPay !== false ? "true" : "false"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, enableFaucetPayAutoPay: e.target.value === "true" })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-sm text-white"
+                  >
+                    <option value="true" className="bg-slate-950 text-white">ENABLED (Process via API)</option>
+                    <option value="false" className="bg-slate-950 text-white">DISABLED (Manual payouts only)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-1">Master switch for FaucetPay API payouts.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">
+                    Auto-Pay Processing Mode
+                  </label>
+                  <select
+                    value={sysSettings.faucetPayAutoPayMode || "manual_approval"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, faucetPayAutoPayMode: e.target.value as any })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-sm text-white"
+                  >
+                    <option value="manual_approval" className="bg-slate-950 text-white">
+                      🛡️ Manual Auto Pay (Admin Approves first, then auto-dispatches)
+                    </option>
+                    <option value="instant" className="bg-slate-950 text-white">
+                      ⚡ Instant Auto Pay (Auto-dispatches immediately on request)
+                    </option>
+                    <option value="disabled" className="bg-slate-950 text-white">
+                      ⛔ Disabled (No auto-payout)
+                    </option>
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    {sysSettings.faucetPayAutoPayMode === "instant"
+                      ? "Dispatches payments to FaucetPay API instantly when publisher submits request."
+                      : "Review publisher traffic first. Clicking 'Approve' will automatically dispatch to FaucetPay API."}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">
+                    Payout Currency
+                  </label>
+                  <select
+                    value={sysSettings.faucetPayCurrency || "LTC"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, faucetPayCurrency: e.target.value })}
+                    className="block w-full px-4 py-2.5 bg-slate-950 border border-cyan-500/40 rounded-xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none transition text-sm text-cyan-300 font-bold"
+                  >
+                    <option value="LTC" className="bg-slate-950 text-cyan-300 font-bold">Ł LTC (Litecoin - Auto Live Market Price)</option>
+                    <option value="USDT" className="bg-slate-950 text-white">USDT (1:1 USD)</option>
+                    <option value="BTC" className="bg-slate-950 text-white">BTC (Bitcoin)</option>
+                    <option value="TRX" className="bg-slate-950 text-white">TRX (Tron)</option>
+                    <option value="DOGE" className="bg-slate-950 text-white">DOGE (Dogecoin)</option>
+                    <option value="BCH" className="bg-slate-950 text-white">BCH (Bitcoin Cash)</option>
+                    <option value="DASH" className="bg-slate-950 text-white">DASH</option>
+                    <option value="DGB" className="bg-slate-950 text-white">DGB (DigiByte)</option>
+                    <option value="ETH" className="bg-slate-950 text-white">ETH (Ethereum)</option>
+                    <option value="SOL" className="bg-slate-950 text-white">SOL (Solana)</option>
+                    <option value="TON" className="bg-slate-950 text-white">TON (Toncoin)</option>
+                  </select>
+                  <p className="text-[10px] text-cyan-400/90 mt-1">
+                    {sysSettings.faucetPayCurrency === "LTC" || !sysSettings.faucetPayCurrency
+                      ? `LTC Active: 1 USD auto-converts to ${liveLtcPrice ? (1 / liveLtcPrice.price).toFixed(6) : "0.018181"} LTC (${liveLtcPrice ? Math.round(100000000 / liveLtcPrice.price).toLocaleString() : "1,818,181"} litoshis).`
+                      : "Payout amount will be sent in the selected currency."}
+                  </p>
+                </div>
+              </div>
+
+              {/* API Key */}
+              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-300 uppercase flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-amber-400" />
+                    FaucetPay API Key (Payout API Token)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowFaucetApiKey(!showFaucetApiKey)}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer"
+                  >
+                    {showFaucetApiKey ? "Hide Key" : "Show Key"}
+                  </button>
+                </div>
+                <input
+                  type={showFaucetApiKey ? "text" : "password"}
+                  placeholder="Paste your FaucetPay API Key from FaucetPay.io > Faucet Settings > API"
+                  value={sysSettings.faucetPayApiKey || ""}
+                  onChange={(e) => setSysSettings({ ...sysSettings, faucetPayApiKey: e.target.value })}
+                  className="block w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition text-xs font-mono text-amber-300 placeholder-slate-700"
+                />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[10px] text-slate-500">
+                  <span>Get your key at: <a href="https://faucetpay.io/page/faucet-admin" target="_blank" rel="noreferrer" className="text-amber-400 hover:underline">FaucetPay.io Faucet Admin</a></span>
+                  <span className="text-slate-400">Low Balance Protection: If balance runs out (Code 402), requests wait in <strong>PROCESSING</strong> queue and auto-complete when funded.</span>
+                </div>
               </div>
             </div>
 
@@ -6510,6 +7191,163 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* FAUCETPAY TEST PAYMENT MODAL */}
+      {testPaymentModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                  <Coins className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">FaucetPay Test Payment</h3>
+                  <p className="text-[11px] text-slate-400">Send a live test micro-payout to verify FaucetPay API credentials.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setTestPaymentModalOpen(false); setTestPaymentResult(null); }}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSendTestPayment} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
+                  Recipient FaucetPay Email or Wallet Address
+                </label>
+                <input
+                  required
+                  type="text"
+                  placeholder="e.g. user@faucetpay.io or cryptocurrency address"
+                  value={testPaymentTo}
+                  onChange={(e) => setTestPaymentTo(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-600 focus:border-amber-500 outline-none font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
+                    Amount (Units)
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    step="any"
+                    min="0.00000001"
+                    value={testPaymentAmount}
+                    onChange={(e) => setTestPaymentAmount(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-amber-400 font-bold focus:border-amber-500 outline-none font-mono"
+                  />
+                  <div className="text-[10px] text-slate-400 mt-1 font-mono">
+                    {testPaymentCurrency === "LTC" ? (
+                      <span className="text-cyan-400 font-bold">
+                        ≈ {((parseFloat(testPaymentAmount) || 0) / (liveLtcPrice?.price || 55.02)).toFixed(8)} LTC ({Math.round(((parseFloat(testPaymentAmount) || 0) / (liveLtcPrice?.price || 55.02)) * 100000000).toLocaleString()} litoshis)
+                      </span>
+                    ) : (
+                      <span>e.g. 0.001 {testPaymentCurrency}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
+                    Currency
+                  </label>
+                  <select
+                    value={testPaymentCurrency}
+                    onChange={(e) => setTestPaymentCurrency(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-cyan-500/40 rounded-xl text-xs text-cyan-300 font-bold focus:border-cyan-500 outline-none"
+                  >
+                    <option value="LTC">Ł LTC (Litecoin - Real-Time Price)</option>
+                    <option value="USDT">USDT</option>
+                    <option value="BTC">BTC</option>
+                    <option value="TRX">TRX</option>
+                    <option value="DOGE">DOGE</option>
+                    <option value="BCH">BCH</option>
+                    <option value="DASH">DASH</option>
+                    <option value="DGB">DGB</option>
+                    <option value="ETH">ETH</option>
+                    <option value="BNB">BNB</option>
+                    <option value="SOL">SOL</option>
+                    <option value="TON">TON</option>
+                  </select>
+                  {testPaymentCurrency === "LTC" && liveLtcPrice && (
+                    <span className="text-[10px] text-slate-400 mt-1 block">
+                      Market Rate: <strong className="text-white">{liveLtcPrice.formatted}</strong> ({liveLtcPrice.source})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Live response box */}
+              {testPaymentResult && (
+                <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                  testPaymentResult.success 
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                    : "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                }`}>
+                  <div className="flex items-center gap-1.5 font-bold">
+                    {testPaymentResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertCircle className="w-4 h-4 text-rose-400" />}
+                    <span>{testPaymentResult.message || (testPaymentResult.success ? "Payment Dispatched Successfully!" : "Test Payment Failed")}</span>
+                  </div>
+                  {testPaymentResult.payoutId && (
+                    <div className="text-[11px] font-mono text-slate-300">
+                      Payout ID: <span className="font-bold text-white">{testPaymentResult.payoutId}</span>
+                    </div>
+                  )}
+                  {testPaymentResult.payoutHash && (
+                    <div className="text-[11px] font-mono text-slate-300 truncate">
+                      Tx Hash: <span className="text-indigo-400">{testPaymentResult.payoutHash}</span>
+                    </div>
+                  )}
+                  {testPaymentResult.balanceRemaining !== undefined && (
+                    <div className="text-[11px] font-mono text-slate-400">
+                      Remaining Balance: <span className="text-emerald-400 font-bold">{testPaymentResult.balanceRemaining}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Modal Buttons */}
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleCheckFaucetBalances}
+                  disabled={checkingBalances}
+                  className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${checkingBalances ? "animate-spin" : ""}`} />
+                  <span>Refresh Balances</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setTestPaymentModalOpen(false); setTestPaymentResult(null); }}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={testPaymentLoading}
+                    className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {testPaymentLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    <span>{testPaymentLoading ? "Sending Payout..." : "Send Test Micro-Payment"}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}

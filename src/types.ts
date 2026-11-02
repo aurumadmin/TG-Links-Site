@@ -94,11 +94,22 @@ export interface Withdrawal {
   amount: number;
   method: string;
   account: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'completed' | 'processing' | 'returned' | 'cancelled' | 'rejected';
   createdAt: string;
+  processedAt?: string;
+  returnedAt?: string;
+  payoutId?: string | number;
+  payoutHash?: string;
+  payoutCurrency?: string;
+  payoutAmountSatoshis?: number;
+  payoutCryptoAmount?: number;
+  payoutExchangeRate?: number;
+  payoutError?: string;
+  payoutNote?: string;
   userPlanId?: string;
   totalUserClicks?: number;
   trafficSources?: TrafficSource[];
+  userFaucetMode?: boolean;
 }
 
 export interface SystemSettings {
@@ -161,6 +172,11 @@ export interface SystemSettings {
   enableFaucetPayDeposit?: boolean;
   faucetPayMerchant?: string;
   faucetPaySecret?: string;
+  // FaucetPay Auto Pay Payout Gateway
+  enableFaucetPayAutoPay?: boolean;
+  faucetPayAutoPayMode?: 'manual_approval' | 'instant' | 'disabled';
+  faucetPayApiKey?: string;
+  faucetPayCurrency?: string;
   enableOxaPayDeposit?: boolean;
   oxaPayMerchantKey?: string;
   oxaPayApiKey?: string;

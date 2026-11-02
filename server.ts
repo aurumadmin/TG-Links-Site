@@ -4089,6 +4089,361 @@ Sitemap: ${baseUrl}/sitemap.xml`
     });
   });
 
+  // --- FAUCETPAY AUTO-PAY INTEGRATION HELPERS ---
+
+  function isFaucetPayMethod(method: string = ""): boolean {
+    const m = String(method || "").toLowerCase().trim();
+    return m.includes("faucetpay") || m.includes("faucet pay");
+  }
+
+  function cleanFaucetPayDestination(account: string = ""): string {
+    const trimmed = String(account || "").trim();
+    // If an email address is embedded anywhere in the string, extract it
+    const emailMatch = trimmed.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    if (emailMatch) return emailMatch[0];
+    // Otherwise extract the first contiguous token (e.g. crypto wallet address)
+    const firstWord = trimmed.split(/[\s,]+/)[0];
+    return firstWord || trimmed;
+  }
+
+  // Real-time Cryptocurrency Market Price Fetcher (LTC, BTC, DOGE, TRX, etc.)
+  interface CryptoPriceCache {
+    price: number;
+    source: string;
+    updatedAt: number;
+  }
+
+  const cryptoPriceCache: Map<string, CryptoPriceCache> = new Map();
+  const CRYPTO_PRICE_TTL_MS = 60 * 1000; // 60 seconds memory cache
+
+  async function getLiveCryptoPriceInUsd(currency: string = "LTC"): Promise<{ price: number; source: string; updatedAt: string }> {
+    const symbol = (currency || "LTC").toUpperCase();
+
+    // USDT is 1:1 USD
+    if (symbol === "USDT" || symbol === "FUSD" || symbol === "USD") {
+      return { price: 1.0, source: "Pegged 1:1 USD", updatedAt: new Date().toISOString() };
+    }
+
+    // Check memory cache
+    const cached = cryptoPriceCache.get(symbol);
+    if (cached && Date.now() - cached.updatedAt < CRYPTO_PRICE_TTL_MS) {
+      return {
+        price: cached.price,
+        source: `${cached.source} (cached)`,
+        updatedAt: new Date(cached.updatedAt).toISOString()
+      };
+    }
+
+    // 1. Try Binance Live Ticker
+    try {
+      const pair = symbol === "BTC" ? "BTCUSDT" : symbol === "LTC" ? "LTCUSDT" : `${symbol}USDT`;
+      const resp = await fetchWithTimeout(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`, {}, 3000);
+      if (resp && resp.ok) {
+        const data: any = await resp.json();
+        const p = parseFloat(data?.price);
+        if (!isNaN(p) && p > 0) {
+          cryptoPriceCache.set(symbol, { price: p, source: "Binance Live", updatedAt: Date.now() });
+          return { price: p, source: "Binance Live", updatedAt: new Date().toISOString() };
+        }
+      }
+    } catch (e) {
+      // fallback to next provider
+    }
+
+    // 2. Try Coinbase Spot Ticker
+    try {
+      const resp = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${symbol}-USD/spot`, {}, 3000);
+      if (resp && resp.ok) {
+        const data: any = await resp.json();
+        const p = parseFloat(data?.data?.amount);
+        if (!isNaN(p) && p > 0) {
+          cryptoPriceCache.set(symbol, { price: p, source: "Coinbase Spot", updatedAt: Date.now() });
+          return { price: p, source: "Coinbase Spot", updatedAt: new Date().toISOString() };
+        }
+      }
+    } catch (e) {
+      // fallback to next provider
+    }
+
+    // 3. Try CoinGecko Public Simple Price
+    try {
+      const coinId = symbol === "LTC" ? "litecoin" : symbol === "BTC" ? "bitcoin" : symbol === "TRX" ? "tron" : symbol === "DOGE" ? "dogecoin" : symbol.toLowerCase();
+      const resp = await fetchWithTimeout(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`, {}, 3500);
+      if (resp && resp.ok) {
+        const data: any = await resp.json();
+        const p = parseFloat(data?.[coinId]?.usd);
+        if (!isNaN(p) && p > 0) {
+          cryptoPriceCache.set(symbol, { price: p, source: "CoinGecko", updatedAt: Date.now() });
+          return { price: p, source: "CoinGecko", updatedAt: new Date().toISOString() };
+        }
+      }
+    } catch (e) {
+      // fallback
+    }
+
+    // Return stale cache if available
+    if (cached && cached.price > 0) {
+      return {
+        price: cached.price,
+        source: `${cached.source} (stale)`,
+        updatedAt: new Date(cached.updatedAt).toISOString()
+      };
+    }
+
+    // Safe fallback estimate in case network is disconnected
+    const safeFallbacks: Record<string, number> = {
+      LTC: 55.0,
+      BTC: 65000.0,
+      ETH: 2500.0,
+      DOGE: 0.12,
+      TRX: 0.16
+    };
+    const fallbackPrice = safeFallbacks[symbol] || 1.0;
+    return { price: fallbackPrice, source: "Market Baseline Estimate", updatedAt: new Date().toISOString() };
+  }
+
+  interface FaucetPaySendResult {
+    success: boolean;
+    isInsufficientBalance?: boolean;
+    status: number;
+    message: string;
+    payoutId?: number | string;
+    payoutUserHash?: string;
+    balance?: number;
+    balanceBitcoin?: number;
+    currency?: string;
+    amountSatoshis?: number;
+    cryptoAmount?: number;
+    exchangeRate?: number;
+    priceSource?: string;
+  }
+
+  async function sendFaucetPayPayout(
+    apiKey: string,
+    to: string,
+    usdAmount: number,
+    currency: string = "LTC",
+    ipAddress: string = "127.0.0.1"
+  ): Promise<FaucetPaySendResult> {
+    const cleanTo = cleanFaucetPayDestination(to);
+    const cleanCurrency = (currency || "LTC").toUpperCase();
+
+    // Automatically fetch real-time market price for the payout currency (e.g. LTC in USD)
+    const priceInfo = await getLiveCryptoPriceInUsd(cleanCurrency);
+    const exchangeRate = priceInfo.price;
+    const cryptoAmount = Number(usdAmount) / exchangeRate;
+
+    // FaucetPay requires the amount in the smallest coin unit (Satoshis / 8 decimal places)
+    // For LTC: 1 LTC = 100,000,000 litoshis/satoshis.
+    const amountSatoshis = Math.round(cryptoAmount * 100000000);
+    if (amountSatoshis <= 0) {
+      return { success: false, status: 400, message: "Invalid payout amount" };
+    }
+
+    if (!apiKey || !apiKey.trim()) {
+      return { success: false, status: 403, message: "FaucetPay API key is not configured in Admin Settings" };
+    }
+
+    try {
+      const params = new URLSearchParams();
+      params.append("api_key", apiKey.trim());
+      params.append("amount", String(amountSatoshis));
+      params.append("to", cleanTo);
+      params.append("currency", cleanCurrency);
+      params.append("ip_address", ipAddress || "127.0.0.1");
+
+      const resp = await fetch("https://faucetpay.io/api/v1/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: params.toString()
+      });
+
+      const data: any = await resp.json().catch(async () => {
+        const text = await resp.text().catch(() => "");
+        return { status: resp.status, message: text || "Invalid response format from FaucetPay API" };
+      });
+
+      const rawStatus = Number(data?.status || resp.status);
+      const msg = String(data?.message || data?.error || "");
+
+      // In FaucetPay API v1:
+      // status 200 = Success (with payout_id)
+      // status 402 = Insufficient balance on faucet
+      const isSuccess = (rawStatus === 200 || data?.status === "200") && (data?.payout_id !== undefined || msg.toLowerCase() === "ok");
+      const isInsufficient = Boolean(
+        rawStatus === 402 ||
+        data?.status === "402" ||
+        msg.toLowerCase().includes("not enough balance") ||
+        msg.toLowerCase().includes("insufficient")
+      );
+
+      return {
+        success: isSuccess,
+        isInsufficientBalance: isInsufficient,
+        status: rawStatus,
+        message: msg || (isSuccess ? "Payout sent successfully" : "FaucetPay transfer failed"),
+        payoutId: data?.payout_id,
+        payoutUserHash: data?.payout_user_hash,
+        balance: data?.balance,
+        balanceBitcoin: data?.balance_bitcoin,
+        currency: cleanCurrency,
+        amountSatoshis,
+        cryptoAmount,
+        exchangeRate,
+        priceSource: priceInfo.source
+      };
+    } catch (err: any) {
+      console.error("[FaucetPay Send Error]", err);
+      return {
+        success: false,
+        isInsufficientBalance: false,
+        status: 500,
+        message: err.message || "Failed to reach FaucetPay API"
+      };
+    }
+  }
+
+  async function getFaucetPayBalances(apiKey: string, currencies: string[] = ["LTC", "USDT", "BTC", "TRX", "DOGE"]): Promise<Record<string, any>> {
+    const results: Record<string, any> = {};
+    if (!apiKey || !apiKey.trim()) return results;
+
+    await Promise.all(currencies.map(async (cur) => {
+      try {
+        const params = new URLSearchParams();
+        params.append("api_key", apiKey.trim());
+        params.append("currency", cur);
+        const resp = await fetch("https://faucetpay.io/api/v1/getbalance", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString()
+        });
+        const data: any = await resp.json().catch(() => null);
+        if (data) {
+          results[cur] = data;
+        }
+      } catch (e: any) {
+        results[cur] = { status: 500, message: e.message };
+      }
+    }));
+
+    return results;
+  }
+
+  async function executeFaucetPayWithdrawal(
+    withdrawal: any,
+    db: any,
+    ip: string = "127.0.0.1"
+  ): Promise<{ success: boolean; isInsufficient: boolean; error?: string; result?: FaucetPaySendResult }> {
+    const apiKey = db.settings?.faucetPayApiKey || db.settings?.faucetPaySecret || "";
+    const currency = db.settings?.faucetPayCurrency || "LTC";
+
+    if (!apiKey) {
+      withdrawal.payoutError = "FaucetPay API key is not configured in Admin Settings.";
+      saveDb(db);
+      return { success: false, isInsufficient: false, error: withdrawal.payoutError };
+    }
+
+    const result = await sendFaucetPayPayout(apiKey, withdrawal.account, withdrawal.amount, currency, ip);
+
+    if (result.success) {
+      withdrawal.status = "completed";
+      withdrawal.processedAt = new Date().toISOString();
+      withdrawal.payoutId = result.payoutId;
+      withdrawal.payoutHash = result.payoutUserHash;
+      withdrawal.payoutCurrency = result.currency;
+      withdrawal.payoutAmountSatoshis = result.amountSatoshis;
+      withdrawal.payoutCryptoAmount = result.cryptoAmount;
+      withdrawal.payoutExchangeRate = result.exchangeRate;
+      withdrawal.payoutError = undefined;
+      withdrawal.payoutNote = `Sent ${result.cryptoAmount?.toFixed(8)} ${result.currency} (${result.amountSatoshis?.toLocaleString()} litoshis) at $${result.exchangeRate?.toFixed(2)}/USD via FaucetPay API (Payout ID: #${result.payoutId})`;
+      saveDb(db);
+
+      if (withdrawal.userEmail) {
+        sendSmtpEmail({
+          to: withdrawal.userEmail,
+          subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Paid via FaucetPay ($${withdrawal.amount.toFixed(2)})`,
+          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via FaucetPay (${withdrawal.account}) has been completed!\n\nPayout ID: ${result.payoutId}\nCurrency: ${result.currency}\nDate: ${withdrawal.processedAt}\n\nThank you for using ${db.settings?.siteName || "TG Links"}!`,
+          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #16a34a; margin-top: 0;">🎉 Payout Sent via FaucetPay!</h2>
+            <p>Your withdrawal has been successfully transferred to your FaucetPay account:</p>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)} (${result.currency})</p>
+              <p style="margin: 4px 0;"><strong>FaucetPay Destination:</strong> ${withdrawal.account}</p>
+              <p style="margin: 4px 0;"><strong>Payout ID:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-weight: bold;">#${result.payoutId}</code></p>
+              <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">COMPLETED & TRANSFERRED</span></p>
+            </div>
+            <p style="font-size: 13px; color: #64748b;">The payment is now available in your FaucetPay balance.</p>
+          </div>`
+        }).catch((e: any) => console.error("[SMTP Error] FaucetPay completion email:", e));
+      }
+
+      return { success: true, isInsufficient: false, result };
+    } else if (result.isInsufficientBalance) {
+      // Insufficient balance on FaucetPay faucet -> put under "processing" state
+      withdrawal.status = "processing";
+      withdrawal.payoutError = `FaucetPay faucet balance low. Queued for automatic payout once funds arrive (Status 402: ${result.message})`;
+      withdrawal.payoutNote = "Processing: Waiting for FaucetPay funds replenishment";
+      saveDb(db);
+
+      if (withdrawal.userEmail) {
+        sendSmtpEmail({
+          to: withdrawal.userEmail,
+          subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Approved - Processing ($${withdrawal.amount.toFixed(2)})`,
+          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via FaucetPay (${withdrawal.account}) has been approved by admin and is currently processing. The payment will complete automatically as soon as the batch clears.\n\nThank you for your patience!`,
+          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #4f46e5; margin-top: 0;">⏳ Withdrawal Approved & Processing</h2>
+            <p>Your withdrawal on <strong>${db.settings?.siteName || "TG Links"}</strong> has been approved by admin and is in processing through FaucetPay:</p>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
+              <p style="margin: 4px 0;"><strong>Method:</strong> FaucetPay</p>
+              <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #2563eb; font-weight: bold;">APPROVED - IN PROCESS</span></p>
+            </div>
+            <p style="font-size: 13px; color: #64748b;">The payout will be completed automatically to your FaucetPay address.</p>
+          </div>`
+        }).catch((e: any) => console.error("[SMTP Error] FaucetPay processing email:", e));
+      }
+
+      return { success: false, isInsufficient: true, error: withdrawal.payoutError, result };
+    } else {
+      withdrawal.payoutError = `FaucetPay transfer failed (${result.status}): ${result.message}`;
+      saveDb(db);
+      return { success: false, isInsufficient: false, error: withdrawal.payoutError, result };
+    }
+  }
+
+  async function checkAndProcessQueuedFaucetPayWithdrawals() {
+    const db = loadDb();
+    const apiKey = db.settings?.faucetPayApiKey || db.settings?.faucetPaySecret || "";
+    if (!apiKey || db.settings?.enableFaucetPayAutoPay === false) return;
+
+    const queued = (db.withdrawals || []).filter((w: any) => 
+      w && w.status === "processing" && isFaucetPayMethod(w.method)
+    );
+
+    if (queued.length === 0) return;
+
+    for (const w of queued) {
+      try {
+        const res = await executeFaucetPayWithdrawal(w, db);
+        if (res.success) {
+          console.log(`[FaucetPay Auto-Pay] Queued withdrawal ${w.id} successfully processed! Payout ID: #${w.payoutId}`);
+        } else if (res.isInsufficient) {
+          // Faucet balance still insufficient, pause queue check to avoid rate-limiting
+          break;
+        }
+      } catch (e) {
+        console.error(`[FaucetPay Auto-Pay] Error processing queued withdrawal ${w.id}:`, e);
+      }
+    }
+  }
+
+  // Periodic processor: check queued processing withdrawals every 60 seconds
+  setInterval(() => {
+    checkAndProcessQueuedFaucetPayWithdrawals().catch(e => console.error("[FaucetPay Interval Error]", e));
+  }, 60000);
+
   // --- WITHDRAWALS ENDPOINTS ---
   
   app.get("/api/withdrawals/user/:userId", (req, res) => {
@@ -4102,7 +4457,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
     res.json({ withdrawals: userWithdrawals });
   });
 
-  app.post("/api/withdrawals/request", (req, res) => {
+  app.post("/api/withdrawals/request", async (req, res) => {
     const { userId, amount, method, account } = req.body;
     if (!userId || !amount || !method || !account) {
       return res.status(400).json({ error: "All withdrawal request fields are required" });
@@ -4145,6 +4500,18 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     db.withdrawals.push(newWithdrawal);
     saveDb(db);
+
+    // If FaucetPay method and Auto-Pay is set to "instant", process immediately!
+    const isFaucet = isFaucetPayMethod(method);
+    const autoPayEnabled = db.settings?.enableFaucetPayAutoPay !== false;
+    const isInstantMode = db.settings?.faucetPayAutoPayMode === "instant";
+
+    if (isFaucet && autoPayEnabled && isInstantMode) {
+      const clientIp = getClientIp(req);
+      executeFaucetPayWithdrawal(newWithdrawal, db, clientIp).catch((err) => {
+        console.error("[Instant FaucetPay Execution Error]", err);
+      });
+    }
 
     // 1. Send confirmation email to user
     sendSmtpEmail({
@@ -4994,55 +5361,254 @@ ${ticket.adminReply}
     res.json({ success: true });
   });
 
-  app.post("/api/admin/withdrawals/:id/status", requireAdmin, (req, res) => {
+  app.post("/api/admin/withdrawals/:id/status", requireAdmin, async (req, res) => {
     const { id } = req.params;
-    const { status } = req.body; // 'approved' or 'rejected'
+    const { status, action, reason } = req.body;
     const db = loadDb();
 
     const withdrawal = db.withdrawals.find((w: any) => w.id === id);
     if (!withdrawal) return res.status(404).json({ error: "Withdrawal not found" });
 
-    if (withdrawal.status !== "pending") {
-      return res.status(400).json({ error: "Withdrawal already processed" });
-    }
+    const clientIp = getClientIp(req);
+    const resolvedAction = String(action || status || "").toLowerCase();
 
-    if (status === "approved") {
+    if (resolvedAction === "approve" || resolvedAction === "approved") {
       withdrawal.status = "approved";
-    } else if (status === "rejected") {
-      withdrawal.status = "rejected";
-      // Refund the user's wallet balance
+      withdrawal.payoutError = undefined;
+
+      // Check if FaucetPay Auto-Pay is enabled
+      const isFaucet = isFaucetPayMethod(withdrawal.method);
+      const autoPayEnabled = db.settings?.enableFaucetPayAutoPay !== false;
+      const autoPayMode = db.settings?.faucetPayAutoPayMode || "manual_approval";
+
+      if (isFaucet && autoPayEnabled && autoPayMode !== "disabled") {
+        // Automatically execute FaucetPay payout
+        const execRes = await executeFaucetPayWithdrawal(withdrawal, db, clientIp);
+        saveDb(db);
+        return res.json({ 
+          success: true, 
+          withdrawal,
+          autoPaid: execRes.success,
+          insufficientFunds: execRes.isInsufficient,
+          message: execRes.success 
+            ? `Approved and completed via FaucetPay Auto-Pay (Payout ID: #${withdrawal.payoutId})`
+            : execRes.isInsufficient
+            ? "Approved! FaucetPay balance is currently low. Queued in PROCESSING status and will automatically complete once funds are deposited into FaucetPay."
+            : `Approved, but FaucetPay transfer failed: ${execRes.error}`
+        });
+      }
+
+      saveDb(db);
+
+      // Email user that withdrawal is approved
+      if (withdrawal.userEmail) {
+        sendSmtpEmail({
+          to: withdrawal.userEmail,
+          subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Request Approved ($${withdrawal.amount.toFixed(2)})`,
+          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via ${withdrawal.method} (${withdrawal.account}) has been APPROVED!\n\nOur payment team is processing the disbursement.`,
+          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #16a34a; margin-top: 0;">✅ Withdrawal Approved!</h2>
+            <p>Your withdrawal on <strong>${db.settings?.siteName || "TG Links"}</strong> has been reviewed and approved:</p>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
+              <p style="margin: 4px 0;"><strong>Method:</strong> ${withdrawal.method}</p>
+              <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${withdrawal.account}</p>
+              <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">APPROVED</span></p>
+            </div>
+            <p style="font-size: 13px; color: #334155;">Disbursement is in progress.</p>
+          </div>`
+        }).catch((e: any) => console.error("[SMTP Error]", e));
+      }
+
+      return res.json({ success: true, withdrawal, message: "Withdrawal approved successfully." });
+
+    } else if (resolvedAction === "complete" || resolvedAction === "completed") {
+      withdrawal.status = "completed";
+      withdrawal.processedAt = new Date().toISOString();
+      withdrawal.payoutError = undefined;
+      saveDb(db);
+
+      if (withdrawal.userEmail) {
+        sendSmtpEmail({
+          to: withdrawal.userEmail,
+          subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Completed & Paid ($${withdrawal.amount.toFixed(2)})`,
+          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via ${withdrawal.method} (${withdrawal.account}) has been COMPLETED and paid!\n\nThank you for publishing with ${db.settings?.siteName || "TG Links"}!`,
+          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #16a34a; margin-top: 0;">🎉 Withdrawal Completed!</h2>
+            <p>Your withdrawal has been completed and funds have been disbursed:</p>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
+              <p style="margin: 4px 0;"><strong>Method:</strong> ${withdrawal.method}</p>
+              <p style="margin: 4px 0;"><strong>Account:</strong> ${withdrawal.account}</p>
+              <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">COMPLETED</span></p>
+            </div>
+          </div>`
+        }).catch((e: any) => console.error("[SMTP Error]", e));
+      }
+
+      return res.json({ success: true, withdrawal, message: "Withdrawal marked as completed." });
+
+    } else if (resolvedAction === "return" || resolvedAction === "returned") {
+      // User gets refunded back into their TG Links account balance!
+      withdrawal.status = "returned";
+      withdrawal.returnedAt = new Date().toISOString();
+      withdrawal.payoutNote = reason || "Returned to user balance by admin";
+
       const user = db.users.find((u: any) => u.id === withdrawal.userId);
       if (user) {
         user.balance = Number((user.balance + withdrawal.amount).toFixed(6));
       }
+      saveDb(db);
+
+      if (withdrawal.userEmail) {
+        sendSmtpEmail({
+          to: withdrawal.userEmail,
+          subject: `[${db.settings?.siteName || "TG Links"}] Funds Returned to Balance ($${withdrawal.amount.toFixed(2)})`,
+          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via ${withdrawal.method} has been RETURNED to your publisher balance.\n\nReason: ${withdrawal.payoutNote}\n\nPlease verify your payment details in Settings and submit a new request anytime.`,
+          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #0284c7; margin-top: 0;">↩️ Funds Returned to Your Balance</h2>
+            <p>Your withdrawal request was returned and the funds have been credited back to your TG Links wallet balance:</p>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+              <p style="margin: 4px 0;"><strong>Amount Returned:</strong> $${withdrawal.amount.toFixed(2)}</p>
+              <p style="margin: 4px 0;"><strong>Method:</strong> ${withdrawal.method}</p>
+              <p style="margin: 4px 0;"><strong>Reason:</strong> ${withdrawal.payoutNote}</p>
+              <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #0284c7; font-weight: bold;">RETURNED TO WALLET</span></p>
+            </div>
+            <p style="font-size: 13px; color: #64748b;">You can update your payment method in your dashboard settings and request again.</p>
+          </div>`
+        }).catch((e: any) => console.error("[SMTP Error]", e));
+      }
+
+      return res.json({ success: true, withdrawal, message: "Funds returned to user balance." });
+
+    } else if (resolvedAction === "cancel" || resolvedAction === "cancelled" || resolvedAction === "rejected") {
+      withdrawal.status = "cancelled";
+      withdrawal.processedAt = new Date().toISOString();
+      withdrawal.payoutNote = reason || "Cancelled by admin";
+      saveDb(db);
+
+      if (withdrawal.userEmail) {
+        sendSmtpEmail({
+          to: withdrawal.userEmail,
+          subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Request Cancelled`,
+          text: `Your withdrawal request of $${withdrawal.amount.toFixed(2)} has been cancelled.\nReason: ${withdrawal.payoutNote}`,
+          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #dc2626; margin-top: 0;">❌ Withdrawal Request Cancelled</h2>
+            <p>Your withdrawal request of $${withdrawal.amount.toFixed(2)} has been cancelled by the administration.</p>
+          </div>`
+        }).catch((e: any) => console.error("[SMTP Error]", e));
+      }
+
+      return res.json({ success: true, withdrawal, message: "Withdrawal cancelled." });
+
+    } else if (resolvedAction === "retry_faucetpay") {
+      // Re-attempt FaucetPay transfer
+      const execRes = await executeFaucetPayWithdrawal(withdrawal, db, clientIp);
+      saveDb(db);
+      return res.json({
+        success: execRes.success,
+        withdrawal,
+        insufficientFunds: execRes.isInsufficient,
+        message: execRes.success
+          ? `Payout successful! FaucetPay Payout ID: #${withdrawal.payoutId}`
+          : execRes.isInsufficient
+          ? "Still insufficient balance in FaucetPay faucet. Withdrawal remains in PROCESSING."
+          : `FaucetPay transfer failed: ${execRes.error}`
+      });
     } else {
-      return res.status(400).json({ error: "Invalid status parameter" });
+      return res.status(400).json({ error: "Invalid status/action parameter" });
+    }
+  });
+
+  // --- FAUCETPAY ADMIN TEST & UTILITY ROUTES ---
+
+  app.get("/api/admin/faucetpay/balance", requireAdmin, async (req, res) => {
+    const db = loadDb();
+    const apiKey = db.settings?.faucetPayApiKey || db.settings?.faucetPaySecret || "";
+    if (!apiKey) {
+      return res.status(400).json({ error: "FaucetPay API key is not configured in Admin Settings" });
     }
 
-    saveDb(db);
+    const balances = await getFaucetPayBalances(apiKey);
+    res.json({ success: true, balances });
+  });
 
-    // Send status update email to user
-    if (withdrawal.userEmail) {
-      const isApproved = status === "approved";
-      sendSmtpEmail({
-        to: withdrawal.userEmail,
-        subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Request ${isApproved ? "Approved" : "Updated"} ($${withdrawal.amount.toFixed(2)})`,
-        text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via ${withdrawal.method} (${withdrawal.account}) has been ${isApproved ? "APPROVED and processed" : "REJECTED"}.\n\n${isApproved ? "Funds have been sent to your account." : "The requested amount has been restored to your publisher balance."}\n\nThank you for using ${db.settings?.siteName || "TG Links"}!`,
-        html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-          <h2 style="color: ${isApproved ? '#16a34a' : '#dc2626'}; margin-top: 0;">${isApproved ? '✅ Withdrawal Approved!' : '❌ Withdrawal Request Updated'}</h2>
-          <p>Your withdrawal request on <strong>${db.settings?.siteName || "TG Links"}</strong> has been ${isApproved ? 'approved and completed' : 'rejected'}:</p>
-          <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
-            <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
-            <p style="margin: 4px 0;"><strong>Method:</strong> ${withdrawal.method}</p>
-            <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${withdrawal.account}</p>
-            <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: ${isApproved ? '#16a34a' : '#dc2626'}; font-weight: bold;">${isApproved ? 'APPROVED & PAID' : 'REJECTED & REFUNDED'}</span></p>
-          </div>
-          <p style="font-size: 13px; color: #334155;">${isApproved ? 'Your payment has been successfully processed.' : 'The requested funds have been restored to your publisher balance.'}</p>
-        </div>`
-      }).catch((e: any) => console.error("[SMTP Error] Withdrawal status update email:", e));
+  app.post("/api/admin/faucetpay/test-payment", requireAdmin, async (req, res) => {
+    const { to, amount, currency } = req.body;
+    if (!to) {
+      return res.status(400).json({ error: "Recipient FaucetPay email or wallet address is required" });
     }
 
-    res.json({ success: true, withdrawal });
+    const db = loadDb();
+    const apiKey = db.settings?.faucetPayApiKey || db.settings?.faucetPaySecret || "";
+    if (!apiKey) {
+      return res.status(400).json({ error: "FaucetPay API key is not configured in Admin Settings" });
+    }
+
+    const testAmount = Number(amount) > 0 ? Number(amount) : 0.001;
+    const testCurrency = currency || db.settings?.faucetPayCurrency || "LTC";
+    const clientIp = getClientIp(req);
+
+    const result = await sendFaucetPayPayout(apiKey, to, testAmount, testCurrency, clientIp);
+
+    res.json({
+      success: result.success,
+      result,
+      message: result.success
+        ? `Test payment sent! Payout ID: #${result.payoutId} (${result.cryptoAmount?.toFixed(8)} ${result.currency} at $${result.exchangeRate?.toFixed(2)}/USD)`
+        : `Test payout failed (${result.status}): ${result.message}`
+    });
+  });
+
+  app.post("/api/admin/faucetpay/retry-queue", requireAdmin, async (req, res) => {
+    await checkAndProcessQueuedFaucetPayWithdrawals();
+    const db = loadDb();
+    const remainingProcessing = (db.withdrawals || []).filter((w: any) => 
+      w && w.status === "processing" && isFaucetPayMethod(w.method)
+    ).length;
+    res.json({ success: true, remainingProcessing });
+  });
+
+  // Public & Admin Live Crypto Price & Conversion Endpoints
+  app.get(["/api/faucetpay/ltc-price", "/api/admin/faucetpay/ltc-price"], async (req, res) => {
+    try {
+      const priceInfo = await getLiveCryptoPriceInUsd("LTC");
+      res.json({
+        success: true,
+        currency: "LTC",
+        price: priceInfo.price,
+        formatted: `$${priceInfo.price.toFixed(2)} USD`,
+        source: priceInfo.source,
+        updatedAt: priceInfo.updatedAt
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to fetch LTC market price" });
+    }
+  });
+
+  app.get("/api/faucetpay/convert", async (req, res) => {
+    try {
+      const usdAmount = parseFloat(String(req.query.usd || "1"));
+      const currency = String(req.query.currency || "LTC").toUpperCase();
+      const safeUsd = isNaN(usdAmount) || usdAmount <= 0 ? 1 : usdAmount;
+      const priceInfo = await getLiveCryptoPriceInUsd(currency);
+      const exchangeRate = priceInfo.price;
+      const cryptoAmount = safeUsd / exchangeRate;
+      const satoshis = Math.round(cryptoAmount * 100000000);
+
+      res.json({
+        success: true,
+        usd: safeUsd,
+        currency,
+        exchangeRate,
+        cryptoAmount,
+        satoshis,
+        priceSource: priceInfo.source,
+        updatedAt: priceInfo.updatedAt
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   app.get("/api/admin/settings", requireAdmin, (req, res) => {
@@ -5084,6 +5650,9 @@ ${ticket.adminReply}
       enableFaucetMode: s.enableFaucetMode !== undefined ? s.enableFaucetMode : false,
       enableFaucetPayDeposit: s.enableFaucetPayDeposit === true,
       faucetPayMerchant: s.faucetPayMerchant || "",
+      enableFaucetPayAutoPay: s.enableFaucetPayAutoPay !== false,
+      faucetPayAutoPayMode: s.faucetPayAutoPayMode || "manual_approval",
+      faucetPayCurrency: s.faucetPayCurrency || "LTC",
       enableOxaPayDeposit: s.enableOxaPayDeposit !== false,
       enableUpiDeposit: s.enableUpiDeposit !== false,
       upiId: s.upiId !== undefined ? s.upiId : "pay@upi",
@@ -5499,8 +6068,18 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     method: w.method || w.withdrawal_method || w.payment_method || "PayPal",
     account: w.account || w.withdrawal_account || w.payment_account || "N/A",
     status: w.status || "pending",
-    requestedAt: w.requestedAt || w.requested_at || w.created_at || w.date || new Date().toISOString(),
-    processedAt: w.processedAt || w.processed_at || w.updated_at
+    requestedAt: w.requestedAt || w.requested_at || w.createdAt || w.created_at || w.date || new Date().toISOString(),
+    createdAt: w.createdAt || w.requestedAt || w.requested_at || w.created_at || w.date || new Date().toISOString(),
+    processedAt: w.processedAt || w.processed_at || w.updated_at,
+    returnedAt: w.returnedAt,
+    payoutId: w.payoutId || w.payout_id,
+    payoutHash: w.payoutHash || w.payout_user_hash || w.payout_hash,
+    payoutCurrency: w.payoutCurrency || w.currency,
+    payoutAmountSatoshis: w.payoutAmountSatoshis,
+    payoutError: w.payoutError,
+    payoutNote: w.payoutNote,
+    userPlanId: w.userPlanId,
+    userFaucetMode: w.userFaucetMode
   })).filter(Boolean);
 
   // 8. Normalize TICKETS
@@ -5547,6 +6126,13 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     enableNeonAdGate: rawSettings.enableNeonAdGate !== undefined ? Boolean(rawSettings.enableNeonAdGate) : false,
     neonTodayAdCode: rawSettings.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`,
     enableFaucetMode: rawSettings.enableFaucetMode !== undefined ? Boolean(rawSettings.enableFaucetMode) : false,
+    enableFaucetPayDeposit: rawSettings.enableFaucetPayDeposit !== undefined ? Boolean(rawSettings.enableFaucetPayDeposit) : false,
+    faucetPayMerchant: rawSettings.faucetPayMerchant || "",
+    faucetPaySecret: rawSettings.faucetPaySecret || "",
+    enableFaucetPayAutoPay: rawSettings.enableFaucetPayAutoPay !== undefined ? Boolean(rawSettings.enableFaucetPayAutoPay) : true,
+    faucetPayAutoPayMode: rawSettings.faucetPayAutoPayMode || "manual_approval",
+    faucetPayApiKey: rawSettings.faucetPayApiKey || "",
+    faucetPayCurrency: rawSettings.faucetPayCurrency || "USDT",
     smtpHost: rawSettings.smtpHost || "",
     smtpPort: rawSettings.smtpPort || 587,
     smtpUser: rawSettings.smtpUser || "",
