@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for creating the new ELITE publisher plan with two-step sequential shortener routing (ShortXLinks then SoftURL) at an $8.00 CPM payout rate, available to all publishers.",
-  "updatedAt":  "2026-10-29T09:53:27.255268246Z",
+  "summary":  "Updated implementation plan so the admin freely decides and configures the CPM rate for the ELITE plan while toggling ShareDiskLinks on or off.",
+  "updatedAt":  "2026-11-02T12:03:18.333889789Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

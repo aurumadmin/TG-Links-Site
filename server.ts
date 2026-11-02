@@ -296,8 +296,8 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
       const pId = planShortenerIds[idx];
       const target = String(pId || "").toLowerCase();
 
-      // Skip other shorteners in non-faucet pipeline
-      if (target.includes("adslab") || target.includes("sharedisk") || target.includes("arolinks")) continue;
+      // Skip deprecated shorteners in non-faucet pipeline
+      if (target.includes("adslab") || target.includes("arolinks")) continue;
 
       let found = activeShorteners.find((s: any) => {
         const sId = String(s.id || "").toLowerCase();
@@ -310,6 +310,9 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
       }
       if (!found && (target.includes("softurl") || target === "api-softurl-2")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("softurl") && !s.isFaucetApi);
+      }
+      if (!found && (target.includes("sharedisk") || target === "api-sharedisklinks-3")) {
+        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("sharedisk") && !s.isFaucetApi);
       }
 
       if (found) {
@@ -1573,6 +1576,25 @@ function loadDb(forceReload = false): any {
       softUrlObj.apiToken = "609c875b96d61f0592bfe5ae036b2db1df673680";
       changed = true;
     }
+
+    // Ensure ShareDiskLinks is present with the configured API token
+    let shareDiskObj = db.adFlyShorteners.find((s: any) => s && (s.id === "api-sharedisklinks-3" || (s.name && s.name.toLowerCase().includes("sharedisk"))));
+    if (!shareDiskObj) {
+      db.adFlyShorteners.push({
+        id: "api-sharedisklinks-3",
+        name: "ShareDiskLinks",
+        apiUrl: "https://sharedisklinks.com/api",
+        apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
+        enabled: false,
+        priority: 5,
+        isFaucetApi: false
+      });
+      changed = true;
+    } else if (shareDiskObj.apiToken !== "271c129bc7585bddfe6a026a2536116403e057ac" || !shareDiskObj.apiUrl) {
+      shareDiskObj.apiToken = "271c129bc7585bddfe6a026a2536116403e057ac";
+      shareDiskObj.apiUrl = "https://sharedisklinks.com/api";
+      changed = true;
+    }
   }
   if (!db.plans || db.plans.length === 0) {
     const allShorteners = db.adFlyShorteners || [];
@@ -1640,6 +1662,25 @@ function loadDb(forceReload = false): any {
     const originalLength = db.withdrawals.length;
     db.withdrawals = db.withdrawals.filter(Boolean);
     if (db.withdrawals.length !== originalLength) changed = true;
+
+    for (const w of db.withdrawals) {
+      // Ensure valid createdAt from legacy requestedAt / date fields so "Submitted: Invalid Date" never appears
+      const fallbackDate = w.createdAt || w.requestedAt || w.requested_at || w.date || w.processedAt || new Date().toISOString();
+      if (!w.createdAt || isNaN(new Date(w.createdAt).getTime())) {
+        w.createdAt = isNaN(new Date(fallbackDate).getTime()) ? new Date().toISOString() : fallbackDate;
+        changed = true;
+      }
+
+      // Migrate all older processed withdrawals (which had status "approved" before the 2-step workflow) to "completed"
+      if (w.status === "approved" && !w.workflowV2) {
+        w.status = "completed";
+        w.workflowV2 = true;
+        w.processedAt = w.processedAt || w.createdAt;
+        w.approvedEmailSent = true;
+        w.completedEmailSent = true;
+        changed = true;
+      }
+    }
   }
   if (!db.tickets) {
     db.tickets = [];
@@ -1712,6 +1753,11 @@ function loadDb(forceReload = false): any {
     if (db.settings.fakeExtraUsers === undefined) { db.settings.fakeExtraUsers = 0; changed = true; }
     if (db.settings.fakeExtraLinks === undefined) { db.settings.fakeExtraLinks = 0; changed = true; }
     if (db.settings.enableEmailBackup === undefined) { db.settings.enableEmailBackup = false; changed = true; }
+    if (!db.settings.faucetPayLtcDefaultMigrated) {
+      db.settings.faucetPayCurrency = "LTC";
+      db.settings.faucetPayLtcDefaultMigrated = true;
+      changed = true;
+    }
   } else {
     db.settings = initialDb.settings;
     changed = true;
@@ -4167,7 +4213,26 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     // 3. Try CoinGecko Public Simple Price
     try {
-      const coinId = symbol === "LTC" ? "litecoin" : symbol === "BTC" ? "bitcoin" : symbol === "TRX" ? "tron" : symbol === "DOGE" ? "dogecoin" : symbol.toLowerCase();
+      const coinIdMap: Record<string, string> = {
+        LTC: "litecoin",
+        BTC: "bitcoin",
+        TRX: "tron",
+        DOGE: "dogecoin",
+        ETH: "ethereum",
+        BCH: "bitcoin-cash",
+        DASH: "dash",
+        DGB: "digibyte",
+        BNB: "binancecoin",
+        SOL: "solana",
+        TON: "the-open-network",
+        MATIC: "matic-network",
+        POL: "matic-network",
+        XRP: "ripple",
+        ADA: "cardano",
+        ZEC: "zcash",
+        FEY: "feyorra"
+      };
+      const coinId = coinIdMap[symbol] || symbol.toLowerCase();
       const resp = await fetchWithTimeout(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`, {}, 3500);
       if (resp && resp.ok) {
         const data: any = await resp.json();
@@ -4196,7 +4261,18 @@ Sitemap: ${baseUrl}/sitemap.xml`
       BTC: 65000.0,
       ETH: 2500.0,
       DOGE: 0.12,
-      TRX: 0.16
+      TRX: 0.16,
+      BCH: 350.0,
+      DASH: 25.0,
+      DGB: 0.008,
+      BNB: 580.0,
+      SOL: 150.0,
+      TON: 5.0,
+      MATIC: 0.40,
+      XRP: 0.55,
+      ADA: 0.35,
+      ZEC: 30.0,
+      FEY: 0.005
     };
     const fallbackPrice = safeFallbacks[symbol] || 1.0;
     return { price: fallbackPrice, source: "Market Baseline Estimate", updatedAt: new Date().toISOString() };
@@ -4305,7 +4381,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
   }
 
-  async function getFaucetPayBalances(apiKey: string, currencies: string[] = ["LTC", "USDT", "BTC", "TRX", "DOGE"]): Promise<Record<string, any>> {
+  async function getFaucetPayBalances(
+    apiKey: string,
+    currencies: string[] = ["LTC", "USDT", "BTC", "TRX", "DOGE", "BCH", "DASH", "DGB", "ETH", "BNB", "SOL", "TON"]
+  ): Promise<Record<string, any>> {
     const results: Record<string, any> = {};
     if (!apiKey || !apiKey.trim()) return results;
 
@@ -4320,11 +4399,29 @@ Sitemap: ${baseUrl}/sitemap.xml`
           body: params.toString()
         });
         const data: any = await resp.json().catch(() => null);
-        if (data) {
-          results[cur] = data;
+        if (data && (Number(data.status) === 200 || data.status === "200")) {
+          const rawCoinBalance = data.balance_bitcoin !== undefined
+            ? parseFloat(String(data.balance_bitcoin))
+            : (data.balance !== undefined ? Number(data.balance) / 100000000 : 0);
+
+          // Only include cryptos that have an available balance > 0
+          if (!isNaN(rawCoinBalance) && rawCoinBalance > 0) {
+            const priceInfo = await getLiveCryptoPriceInUsd(cur);
+            const usdValue = Number((rawCoinBalance * priceInfo.price).toFixed(2));
+            results[cur] = {
+              ...data,
+              status: 200,
+              cryptoAmount: rawCoinBalance,
+              balance_bitcoin: rawCoinBalance.toFixed(8),
+              balance_in_satoshi: data.balance,
+              exchangeRate: priceInfo.price,
+              usdValue,
+              usdFormatted: `$${usdValue.toFixed(2)}`
+            };
+          }
         }
       } catch (e: any) {
-        results[cur] = { status: 500, message: e.message };
+        // Ignore unsupported or failed currency queries
       }
     }));
 
@@ -4349,6 +4446,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
     if (result.success) {
       withdrawal.status = "completed";
+      withdrawal.workflowV2 = true;
       withdrawal.processedAt = new Date().toISOString();
       withdrawal.payoutId = result.payoutId;
       withdrawal.payoutHash = result.payoutUserHash;
@@ -4358,18 +4456,22 @@ Sitemap: ${baseUrl}/sitemap.xml`
       withdrawal.payoutExchangeRate = result.exchangeRate;
       withdrawal.payoutError = undefined;
       withdrawal.payoutNote = `Sent ${result.cryptoAmount?.toFixed(8)} ${result.currency} (${result.amountSatoshis?.toLocaleString()} litoshis) at $${result.exchangeRate?.toFixed(2)}/USD via FaucetPay API (Payout ID: #${result.payoutId})`;
+
+      const shouldSendCompleteEmail = Boolean(withdrawal.userEmail && !withdrawal.completedEmailSent);
+      withdrawal.completedEmailSent = true;
+      withdrawal.approvedEmailSent = true;
       saveDb(db);
 
-      if (withdrawal.userEmail) {
+      if (shouldSendCompleteEmail) {
         sendSmtpEmail({
           to: withdrawal.userEmail,
           subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Paid via FaucetPay ($${withdrawal.amount.toFixed(2)})`,
-          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via FaucetPay (${withdrawal.account}) has been completed!\n\nPayout ID: ${result.payoutId}\nCurrency: ${result.currency}\nDate: ${withdrawal.processedAt}\n\nThank you for using ${db.settings?.siteName || "TG Links"}!`,
+          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via FaucetPay (${withdrawal.account}) has been completed!\n\nPayout ID: ${result.payoutId}\nCurrency: ${result.currency} (${result.cryptoAmount?.toFixed(8)} ${result.currency})\nDate: ${withdrawal.processedAt}\n\nThank you for using ${db.settings?.siteName || "TG Links"}!`,
           html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
             <h2 style="color: #16a34a; margin-top: 0;">🎉 Payout Sent via FaucetPay!</h2>
             <p>Your withdrawal has been successfully transferred to your FaucetPay account:</p>
             <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
-              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)} (${result.currency})</p>
+              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)} (${result.cryptoAmount?.toFixed(8)} ${result.currency})</p>
               <p style="margin: 4px 0;"><strong>FaucetPay Destination:</strong> ${withdrawal.account}</p>
               <p style="margin: 4px 0;"><strong>Payout ID:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-weight: bold;">#${result.payoutId}</code></p>
               <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">COMPLETED & TRANSFERRED</span></p>
@@ -4381,29 +4483,13 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
       return { success: true, isInsufficient: false, result };
     } else if (result.isInsufficientBalance) {
-      // Insufficient balance on FaucetPay faucet -> put under "processing" state
+      // Insufficient balance on FaucetPay faucet -> put under "processing" state.
+      // CRITICAL: Do NOT send any email when a withdrawal is under "processing" so periodic retries never spam the user!
       withdrawal.status = "processing";
+      withdrawal.workflowV2 = true;
       withdrawal.payoutError = `FaucetPay faucet balance low. Queued for automatic payout once funds arrive (Status 402: ${result.message})`;
       withdrawal.payoutNote = "Processing: Waiting for FaucetPay funds replenishment";
       saveDb(db);
-
-      if (withdrawal.userEmail) {
-        sendSmtpEmail({
-          to: withdrawal.userEmail,
-          subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Approved - Processing ($${withdrawal.amount.toFixed(2)})`,
-          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via FaucetPay (${withdrawal.account}) has been approved by admin and is currently processing. The payment will complete automatically as soon as the batch clears.\n\nThank you for your patience!`,
-          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-            <h2 style="color: #4f46e5; margin-top: 0;">⏳ Withdrawal Approved & Processing</h2>
-            <p>Your withdrawal on <strong>${db.settings?.siteName || "TG Links"}</strong> has been approved by admin and is in processing through FaucetPay:</p>
-            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
-              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
-              <p style="margin: 4px 0;"><strong>Method:</strong> FaucetPay</p>
-              <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #2563eb; font-weight: bold;">APPROVED - IN PROCESS</span></p>
-            </div>
-            <p style="font-size: 13px; color: #64748b;">The payout will be completed automatically to your FaucetPay address.</p>
-          </div>`
-        }).catch((e: any) => console.error("[SMTP Error] FaucetPay processing email:", e));
-      }
 
       return { success: false, isInsufficient: true, error: withdrawal.payoutError, result };
     } else {
@@ -4495,7 +4581,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
       method,
       account,
       status: "pending",
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      workflowV2: true
     };
 
     db.withdrawals.push(newWithdrawal);
@@ -4708,8 +4795,96 @@ Sitemap: ${baseUrl}/sitemap.xml`
       db.plans.push(plan);
     }
 
+    // If ShareDiskLinks is assigned to this plan, ensure its shortener entry is enabled and ordered after SoftURL in ELITE
+    const hasShareDisk = (plan.shortenerIds || []).some((sid: string) =>
+      sid === "api-sharedisklinks-3" || String(sid).toLowerCase().includes("sharedisk")
+    );
+    const shareDiskApi = (db.adFlyShorteners || []).find((s: any) =>
+      s && (s.id === "api-sharedisklinks-3" || String(s.name || "").toLowerCase().includes("sharedisk"))
+    );
+    if (plan.id === "elite" || String(plan.name || "").toUpperCase() === "ELITE") {
+      if (hasShareDisk) {
+        if (shareDiskApi) shareDiskApi.enabled = true;
+        const shareId = shareDiskApi?.id || "api-sharedisklinks-3";
+        const withoutShare = (plan.shortenerIds || []).filter((sid: string) => sid !== shareId && !String(sid).toLowerCase().includes("sharedisk"));
+        plan.shortenerIds = [...withoutShare, shareId];
+      } else if (shareDiskApi) {
+        // Check if any other plan still uses ShareDiskLinks; if not, mark disabled
+        const usedElsewhere = (db.plans || []).some((p: any) =>
+          p.id !== plan.id && (p.shortenerIds || []).includes(shareDiskApi.id)
+        );
+        if (!usedElsewhere) shareDiskApi.enabled = false;
+      }
+    } else if (hasShareDisk && shareDiskApi) {
+      shareDiskApi.enabled = true;
+    }
+
     saveDb(db);
-    res.json({ success: true, plan, plans: db.plans });
+    res.json({ success: true, plan, plans: db.plans, shorteners: db.adFlyShorteners });
+  });
+
+  // POST /api/admin/plans/elite/toggle-sharedisklinks - Quick toggle ShareDiskLinks in ELITE Plan (ShortXLinks -> SoftURL -> ShareDiskLinks)
+  app.post("/api/admin/plans/elite/toggle-sharedisklinks", requireAdmin, (req, res) => {
+    const { enabled, cpm } = req.body || {};
+    const db = loadDb();
+    if (!db.plans) db.plans = [];
+    if (!db.adFlyShorteners) db.adFlyShorteners = [];
+
+    let shareDiskApi = db.adFlyShorteners.find((s: any) =>
+      s && (s.id === "api-sharedisklinks-3" || String(s.name || "").toLowerCase().includes("sharedisk"))
+    );
+    if (!shareDiskApi) {
+      shareDiskApi = {
+        id: "api-sharedisklinks-3",
+        name: "ShareDiskLinks",
+        apiUrl: "https://sharedisklinks.com/api",
+        apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
+        enabled: false,
+        priority: 5,
+        isFaucetApi: false
+      };
+      db.adFlyShorteners.push(shareDiskApi);
+    } else {
+      shareDiskApi.apiToken = "271c129bc7585bddfe6a026a2536116403e057ac";
+      shareDiskApi.apiUrl = "https://sharedisklinks.com/api";
+    }
+
+    const elitePlan = db.plans.find((p: any) => p && (p.id === "elite" || String(p.name || "").toUpperCase() === "ELITE"));
+    if (!elitePlan) {
+      return res.status(404).json({ error: "ELITE plan not found" });
+    }
+
+    const shareId = shareDiskApi.id;
+    const currentlyInPlan = Array.isArray(elitePlan.shortenerIds) && elitePlan.shortenerIds.includes(shareId) && shareDiskApi.enabled !== false;
+    const nextEnabled = enabled !== undefined ? Boolean(enabled) : !currentlyInPlan;
+
+    shareDiskApi.enabled = nextEnabled;
+
+    const baseIds = (elitePlan.shortenerIds || []).filter((id: string) => id !== shareId && !String(id).toLowerCase().includes("sharedisk"));
+    if (baseIds.length === 0) {
+      baseIds.push("api-shortxlinks-1", "api-softurl-2");
+    }
+
+    if (nextEnabled) {
+      // Ensure sequence: ShortXLinks -> SoftURL -> ShareDiskLinks
+      elitePlan.shortenerIds = [...baseIds, shareId];
+    } else {
+      elitePlan.shortenerIds = baseIds;
+    }
+
+    // Admin decides the CPM: only update if admin explicitly passed a valid cpm value
+    if (cpm !== undefined && cpm !== null && !isNaN(Number(cpm)) && Number(cpm) >= 0) {
+      elitePlan.cpm = Number(cpm);
+    }
+
+    saveDb(db);
+    res.json({
+      success: true,
+      shareDiskEnabled: nextEnabled,
+      plan: elitePlan,
+      plans: db.plans,
+      shorteners: db.adFlyShorteners
+    });
   });
 
   // DELETE /api/admin/plans/:id - Admin delete plan
@@ -5361,6 +5536,24 @@ ${ticket.adminReply}
     res.json({ success: true });
   });
 
+  app.post("/api/admin/withdrawals/complete-all-approved", requireAdmin, (req, res) => {
+    const db = loadDb();
+    let count = 0;
+    const now = new Date().toISOString();
+    for (const w of db.withdrawals || []) {
+      if (w && w.status === "approved") {
+        w.status = "completed";
+        w.workflowV2 = true;
+        w.processedAt = w.processedAt || now;
+        w.approvedEmailSent = true;
+        w.completedEmailSent = true;
+        count++;
+      }
+    }
+    if (count > 0) saveDb(db);
+    res.json({ success: true, updatedCount: count, message: `Marked ${count} approved withdrawal(s) as completed.` });
+  });
+
   app.post("/api/admin/withdrawals/:id/status", requireAdmin, async (req, res) => {
     const { id } = req.params;
     const { status, action, reason } = req.body;
@@ -5374,7 +5567,32 @@ ${ticket.adminReply}
 
     if (resolvedAction === "approve" || resolvedAction === "approved") {
       withdrawal.status = "approved";
+      withdrawal.workflowV2 = true;
+      withdrawal.approvedAt = new Date().toISOString();
       withdrawal.payoutError = undefined;
+
+      const sendApprovedNotificationOnce = () => {
+        if (withdrawal.userEmail && !withdrawal.approvedEmailSent) {
+          withdrawal.approvedEmailSent = true;
+          saveDb(db);
+          sendSmtpEmail({
+            to: withdrawal.userEmail,
+            subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Request Approved ($${withdrawal.amount.toFixed(2)})`,
+            text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via ${withdrawal.method} (${withdrawal.account}) has been APPROVED!\n\nOur payment team is processing the disbursement.`,
+            html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+              <h2 style="color: #16a34a; margin-top: 0;">✅ Withdrawal Approved!</h2>
+              <p>Your withdrawal on <strong>${db.settings?.siteName || "TG Links"}</strong> has been reviewed and approved:</p>
+              <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+                <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
+                <p style="margin: 4px 0;"><strong>Method:</strong> ${withdrawal.method}</p>
+                <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${withdrawal.account}</p>
+                <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">APPROVED</span></p>
+              </div>
+              <p style="font-size: 13px; color: #334155;">Disbursement is in progress.</p>
+            </div>`
+          }).catch((e: any) => console.error("[SMTP Error]", e));
+        }
+      };
 
       // Check if FaucetPay Auto-Pay is enabled
       const isFaucet = isFaucetPayMethod(withdrawal.method);
@@ -5384,6 +5602,10 @@ ${ticket.adminReply}
       if (isFaucet && autoPayEnabled && autoPayMode !== "disabled") {
         // Automatically execute FaucetPay payout
         const execRes = await executeFaucetPayWithdrawal(withdrawal, db, clientIp);
+        if (!execRes.success) {
+          // Send the single Approved email once when approved (never repeated during processing retries)
+          sendApprovedNotificationOnce();
+        }
         saveDb(db);
         return res.json({ 
           success: true, 
@@ -5399,36 +5621,21 @@ ${ticket.adminReply}
       }
 
       saveDb(db);
-
-      // Email user that withdrawal is approved
-      if (withdrawal.userEmail) {
-        sendSmtpEmail({
-          to: withdrawal.userEmail,
-          subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Request Approved ($${withdrawal.amount.toFixed(2)})`,
-          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via ${withdrawal.method} (${withdrawal.account}) has been APPROVED!\n\nOur payment team is processing the disbursement.`,
-          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-            <h2 style="color: #16a34a; margin-top: 0;">✅ Withdrawal Approved!</h2>
-            <p>Your withdrawal on <strong>${db.settings?.siteName || "TG Links"}</strong> has been reviewed and approved:</p>
-            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
-              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
-              <p style="margin: 4px 0;"><strong>Method:</strong> ${withdrawal.method}</p>
-              <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${withdrawal.account}</p>
-              <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">APPROVED</span></p>
-            </div>
-            <p style="font-size: 13px; color: #334155;">Disbursement is in progress.</p>
-          </div>`
-        }).catch((e: any) => console.error("[SMTP Error]", e));
-      }
+      sendApprovedNotificationOnce();
 
       return res.json({ success: true, withdrawal, message: "Withdrawal approved successfully." });
 
     } else if (resolvedAction === "complete" || resolvedAction === "completed") {
       withdrawal.status = "completed";
+      withdrawal.workflowV2 = true;
       withdrawal.processedAt = new Date().toISOString();
       withdrawal.payoutError = undefined;
+      const shouldSendCompleteEmail = Boolean(withdrawal.userEmail && !withdrawal.completedEmailSent);
+      withdrawal.completedEmailSent = true;
+      withdrawal.approvedEmailSent = true;
       saveDb(db);
 
-      if (withdrawal.userEmail) {
+      if (shouldSendCompleteEmail) {
         sendSmtpEmail({
           to: withdrawal.userEmail,
           subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Completed & Paid ($${withdrawal.amount.toFixed(2)})`,
@@ -6060,27 +6267,37 @@ function normalizeAndMigrateDatabase(rawData: any): any {
   });
 
   // 7. Normalize WITHDRAWALS
-  const normalizedWithdrawals: any[] = rawWithdrawals.map((w: any, idx: number) => ({
-    id: String(w.id || w._id || `w-${idx + 1}`),
-    userId: String(w.userId || w.user_id || "guest"),
-    userEmail: w.userEmail || w.user_email || w.email || "guest",
-    amount: cleanNumber(w.amount ?? w.sum ?? 0),
-    method: w.method || w.withdrawal_method || w.payment_method || "PayPal",
-    account: w.account || w.withdrawal_account || w.payment_account || "N/A",
-    status: w.status || "pending",
-    requestedAt: w.requestedAt || w.requested_at || w.createdAt || w.created_at || w.date || new Date().toISOString(),
-    createdAt: w.createdAt || w.requestedAt || w.requested_at || w.created_at || w.date || new Date().toISOString(),
-    processedAt: w.processedAt || w.processed_at || w.updated_at,
-    returnedAt: w.returnedAt,
-    payoutId: w.payoutId || w.payout_id,
-    payoutHash: w.payoutHash || w.payout_user_hash || w.payout_hash,
-    payoutCurrency: w.payoutCurrency || w.currency,
-    payoutAmountSatoshis: w.payoutAmountSatoshis,
-    payoutError: w.payoutError,
-    payoutNote: w.payoutNote,
-    userPlanId: w.userPlanId,
-    userFaucetMode: w.userFaucetMode
-  })).filter(Boolean);
+  const normalizedWithdrawals: any[] = rawWithdrawals.map((w: any, idx: number) => {
+    const rawStatus = w.status || "pending";
+    const isLegacyApproved = rawStatus === "approved" && !w.workflowV2;
+    const resolvedCreatedAt = w.createdAt || w.requestedAt || w.requested_at || w.created_at || w.date || w.processedAt || new Date().toISOString();
+    return {
+      id: String(w.id || w._id || `w-${idx + 1}`),
+      userId: String(w.userId || w.user_id || "guest"),
+      userEmail: w.userEmail || w.user_email || w.email || "guest",
+      amount: cleanNumber(w.amount ?? w.sum ?? 0),
+      method: w.method || w.withdrawal_method || w.payment_method || "PayPal",
+      account: w.account || w.withdrawal_account || w.payment_account || "N/A",
+      status: isLegacyApproved ? "completed" : rawStatus,
+      workflowV2: true,
+      approvedEmailSent: isLegacyApproved ? true : Boolean(w.approvedEmailSent),
+      completedEmailSent: (isLegacyApproved || rawStatus === "completed") ? true : Boolean(w.completedEmailSent),
+      requestedAt: w.requestedAt || w.requested_at || resolvedCreatedAt,
+      createdAt: resolvedCreatedAt,
+      processedAt: w.processedAt || w.processed_at || w.updated_at || (isLegacyApproved ? resolvedCreatedAt : undefined),
+      returnedAt: w.returnedAt,
+      payoutId: w.payoutId || w.payout_id,
+      payoutHash: w.payoutHash || w.payout_user_hash || w.payout_hash,
+      payoutCurrency: w.payoutCurrency || w.currency,
+      payoutAmountSatoshis: w.payoutAmountSatoshis,
+      payoutCryptoAmount: w.payoutCryptoAmount,
+      payoutExchangeRate: w.payoutExchangeRate,
+      payoutError: w.payoutError,
+      payoutNote: w.payoutNote,
+      userPlanId: w.userPlanId,
+      userFaucetMode: w.userFaucetMode
+    };
+  }).filter(Boolean);
 
   // 8. Normalize TICKETS
   const normalizedTickets: any[] = rawTickets.map((t: any, idx: number) => ({

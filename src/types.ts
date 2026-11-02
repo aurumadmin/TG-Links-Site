@@ -110,6 +110,10 @@ export interface Withdrawal {
   totalUserClicks?: number;
   trafficSources?: TrafficSource[];
   userFaucetMode?: boolean;
+  workflowV2?: boolean;
+  approvedAt?: string;
+  approvedEmailSent?: boolean;
+  completedEmailSent?: boolean;
 }
 
 export interface SystemSettings {

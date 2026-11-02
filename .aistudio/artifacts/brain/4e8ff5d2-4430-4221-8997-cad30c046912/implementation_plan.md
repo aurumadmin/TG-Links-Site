@@ -1,120 +1,91 @@
-# Implementation Plan - ELITE Publisher Plan (ShortXLinks + SoftURL Sequential Monetization)
+# ShareDiskLinks Toggle for ELITE Plan & Withdrawal Refinements
 
-Create and activate the new **ELITE** publisher plan offering an elevated **$8.00 CPM** payout rate. Visitors navigating short links generated under this plan must complete a 2-step verification chain—first **ShortXLinks**, immediately followed by **SoftURL**—before landing on the final destination page.
+Add a dedicated one-click toggle in the Admin Panel to enable or disable **ShareDiskLinks** (`https://sharedisklinks.com/st?api=271c129bc7585bddfe6a026a2536116403e057ac&url=...`) as the 3rd step in the **ELITE** plan's redirect chain (`ShortXLinks` → `SoftURL` → `ShareDiskLinks`), while letting the **admin freely decide and set the CPM rate** for the ELITE plan at any time, alongside completing all pending FaucetPay live balance and withdrawal status improvements.
 
----
-
-### User Review & Critical Decisions
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following requirements were confirmed during Phase 1 clarification:
-> - **CPM Payout Rate**: Set to **$8.00 CPM** ($8.00 per 1,000 verified views), giving creators a premium payout rate reflecting the two-step completion requirement.
-> - **Step Progression Order**: Strictly **ShortXLinks first (Step 1)**, then **SoftURL (Step 2)**, followed by the TG Links verified completion screen and destination access.
-> - **Publisher Accessibility**: Freely selectable by **all publishers** directly from the **Plans** page and User Dashboard.
+> The following product decisions incorporate your latest feedback and govern this implementation:
+
+- **Redirect Sequence When Enabled**: Visitors on the **ELITE** plan complete **ShortXLinks** first (`step=0`), **SoftURL** second (`step=1`), and **ShareDiskLinks** third (`step=2`) before reaching the final destination page.
+- **Default State & Admin Control**: ShareDiskLinks starts **disabled by default** in the ELITE plan, with a dedicated quick toggle button directly on the **ELITE** plan card in the Admin Panel (`Publisher Plans` tab) as well as checkbox control in the Plan Editor and External Shorteners list.
+- **Admin-Controlled CPM Rate**: Toggling ShareDiskLinks on or off **does not overwrite** the plan's CPM with a hardcoded value—the **admin decides the CPM rate** freely via the Plan Editor (or inline when toggling/editing the plan).
+- **Previous Withdrawal & FaucetPay Refinements Preserved**:
+  - Older processed withdrawals are automatically migrated to `completed` status with valid submission timestamps.
+  - Email notifications are never sent while a withdrawal is in `processing` status (only sent once upon `approved` and once upon `completed`).
+  - FaucetPay Live Balances display only cryptocurrencies with an available balance greater than `0`, alongside their live USD (`$`) value.
 
 ---
 
-### 1. Overview & Core Concept
+## 1. Overview & Core Concept
 
-- **What It Does**: Introduces a high-yield publisher tier named **ELITE** (`id: "elite"`). When a creator selects or generates links under the ELITE plan, link clicks are routed through a sequential dual-shortener pipeline:
-  1. **Step 1**: Visitor is routed through **ShortXLinks** (`shortxlinks.com`).
-  2. **Step 2**: Upon completing ShortXLinks, the visitor returns to TG Links and is seamlessly dispatched to **SoftURL** (`softurl.in`).
-  3. **Completion**: Upon completing SoftURL, the visit is validated, the publisher is credited earnings at the **$8.00 CPM** rate, and the visitor accesses the final destination URL.
-- **Target Audience**: Telegram channel owners, high-intent download communities, and content creators seeking maximum CPM revenue per thousand clicks.
-- **Key Value**: Provides publishers with an official 2-step option with double monetization yield compared to single-step plans.
-
----
-
-### 2. User Experience & Visual Design
-
-- **Plans Page Showcase (`/plans`)**:
-  - The ELITE plan card features prominent badging (`ELITE PLAN`), clear rate display (`$8.00 CPM`), and a visual 2-step badge indicator (`#1 ShortXLinks` → `#2 SoftURL`).
-  - Active plan indicator and a responsive `"Switch to Plan"` CTA with live state transitions and success alerts.
-- **User Dashboard (`/dashboard`)**:
-  - Displays the active plan as **ELITE** with `$8.00 CPM` rate in the publisher overview.
-  - Links created while on the ELITE plan indicate the dual-shortener pipeline.
-- **Admin Panel (`/admin` → Publisher Plans Manager)**:
-  - Lists the ELITE plan in the configured plans table with full editing and toggle controls.
-  - Allows administrators to adjust CPM, reorder shorteners, or toggle status at any time.
+- **What It Does**:
+  1. Integrates **ShareDiskLinks** using the QuickLink format (`https://sharedisklinks.com/st?api=271c129bc7585bddfe6a026a2536116403e057ac&url=...`) into the multi-step publisher plan pipeline.
+  2. Provides administrators with an instant toggle on the **ELITE** plan to switch between a 2-step pipeline (`ShortXLinks` → `SoftURL`) and a 3-step pipeline (`ShortXLinks` → `SoftURL` → `ShareDiskLinks`), while keeping full manual control over the plan's CPM rate.
+  3. Upgrades the Admin Withdrawals & FaucetPay views so only positive crypto balances are displayed with live `$` valuations, legacy approved withdrawals are marked completed, and duplicate processing emails are eliminated.
+- **Target Audience / Persona**: Platform administrators managing monetization yield and publisher payout workflows, and publishers using the ELITE plan.
+- **Key Value**: Lets administrators enable or disable ShareDiskLinks in the ELITE plan with one click while retaining complete control over the CPM payout rate.
 
 ---
 
-### 3. Key Product Decisions & Trade-Offs
+## 2. User Experience & Visual Design
 
-- **Multi-Step Chain Execution**:
-  - *Chosen Approach*: Maintain server-side cryptographic token validation (`vtok`) tracking step progression (`step=1`, `step=2`, `step=3`). When returning to `/p/:code` at `step=2`, the server checks the plan's shortener count. If 2 shorteners are configured, it invokes the second shortener (SoftURL) with a target of `step=3`. Only when `step > totalRequiredSteps` is the click recorded and rewarded.
-  - *Why*: Prevents view spoofing or early rewards if a visitor drops off after only completing the first shortener. Both shorteners must be completed to unlock the destination and award earnings.
-- **Fallback Resilience**:
-  - *Chosen Approach*: If SoftURL API experiences temporary network timeouts during the step 2 redirect, the server gracefully allows the visitor to proceed to the completion page to prevent broken user experiences.
+- **Key User Flows**:
+  1. **Admin Quick Toggle & Custom CPM in Publisher Plans**:
+     - In **Admin Panel → Publisher Plans**, the **ELITE** plan row features a dedicated **ShareDiskLinks** toggle button (`Enable ShareDiskLinks` / `ShareDiskLinks Enabled`).
+     - When **Disabled (Default)**: ELITE plan runs `ShortXLinks → SoftURL` (2 steps).
+     - When **Enabled**: ShareDiskLinks (`api-sharedisklinks-3`) is activated and appended as Step #3 (`ShortXLinks → SoftURL → ShareDiskLinks`).
+     - **Admin-Defined CPM**: The ELITE plan preserves whatever CPM rate the admin sets in the Plan Editor (defaulting to `$8.00 CPM` until changed by the admin), and the admin can update the CPM rate to any value at any time.
+  2. **Visitor Multi-Step Redirect Flow (ELITE with ShareDiskLinks Enabled)**:
+     - Visitor opens `/go/:code` → redirected to **ShortXLinks** (`step=0`) → returns to `/go/:code?step=1` → redirected to **SoftURL** (`step=1`) → returns to `/go/:code?step=2` → redirected to **ShareDiskLinks** (`https://sharedisklinks.com/st?api=271c129bc7585bddfe6a026a2536116403e057ac&url=...`) → returns to `/go-final/:code?vtok=...` where the completed view and the admin-configured ELITE CPM earning are credited.
+  3. **Admin FaucetPay Live Balances & Withdrawals**:
+     - Clicking **Live Balances** shows only cryptocurrencies with balance `> 0`, formatted with tabular numerals and live USD equivalents (e.g., `LTC: 0.00766982 ($0.42)`).
+- **Visual Identity & Theme**:
+  - *Aesthetic Direction*: High-contrast dark slate SaaS admin console (`#020617` canvas, `#0F172A` structural cards, `#1E293B` hairline borders).
+  - *Color Palette & Mood*: Emerald (`#10B981`) for active/enabled states and USD payout rates, Indigo (`#6366F1`) for primary controls, and Amber (`#F59E0B`) for FaucetPay actions.
+  - *Typography & Hierarchy*: Clean sans-serif headings paired with `font-mono tabular-nums` for all CPM rates, crypto balances, USD conversions, and timestamps.
 
 ---
 
-### 4. Technical Architecture & Sequential Data Flow
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1: Independent ShareDiskLinks Toggle + Admin-Controlled CPM**
+  - *Chosen Approach*: Ensure `api-sharedisklinks-3` (`ShareDiskLinks`) is seeded and kept synced with token `271c129bc7585bddfe6a026a2536116403e057ac` and QuickLink endpoint `https://sharedisklinks.com/st?api=271c129bc7585bddfe6a026a2536116403e057ac&url=...`. Provide a toggle on the ELITE plan that enables/disables `api-sharedisklinks-3` and updates `elite.shortenerIds` between `["api-shortxlinks-1", "api-softurl-2"]` and `["api-shortxlinks-1", "api-softurl-2", "api-sharedisklinks-3"]` without overriding `elite.cpm`. The admin can freely edit `elite.cpm` via the Plan Editor.
+  - *Why*: Gives the admin full flexibility to set any CPM rate for the ELITE plan whether ShareDiskLinks is enabled or disabled.
+- **Decision 2: Direct QuickLink Format for ShareDiskLinks**
+  - *Chosen Approach*: Use the direct QuickLink redirect URL `https://sharedisklinks.com/st?api=271c129bc7585bddfe6a026a2536116403e057ac&url={destination}` in `getSingleExternalShortenedUrl` and allow `sharedisklinks` in `getEnabledApisForPlan`.
+  - *Why*: Matches ShareDiskLinks' official QuickLink specification provided by the user, ensuring instant and reliable redirects.
+
+---
+
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           ELITE PLAN PIPELINE                               │
-└─────────────────────────────────────────────────────────────────────────────┘
-
- 1. LINK CLICK
-    User clicks: tglinks.tech/go/:code (or short link)
-         │
-         ▼
- 2. STEP 1 (ShortXLinks)
-    Server provisions vtok and redirects visitor to ShortXLinks:
-    shortxlinks.com/st?api=...&url=tglinks.tech/p/:code?vtok=...&step=2
-         │
-         ▼
- 3. VISITOR COMPLETES SHORTXLINKS
-    Redirects back to: tglinks.tech/p/:code?vtok=...&step=2
-         │
-         ▼
- 4. STEP 2 DISPATCH (SoftURL)
-    Server detects Step 2 of 2 in ELITE plan.
-    Dispatches visitor to SoftURL:
-    softurl.in/st?api=...&url=tglinks.tech/p/:code?vtok=...&step=3
-         │
-         ▼
- 5. VISITOR COMPLETES SOFTURL
-    Redirects back to: tglinks.tech/p/:code?vtok=...&step=3
-         │
-         ▼
- 6. REWARD & DESTINATION ACCESS
-    Server verifies both steps completed.
-    - Credits publisher balance with $8.00 CPM ($0.008 per view)
-    - Logs verified click in clicksLog
-    - Renders TG Links Verified Completion Page -> Original URL
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        Admin Panel (Publisher Plans)                     │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ ELITE Plan Card (Admin-Configured CPM Rate)                        │  │
+│  │  • Chain: #1 ShortXLinks → #2 SoftURL [→ #3 ShareDiskLinks]        │  │
+│  │  • Quick Action: [ Enable / Disable ShareDiskLinks ]  [ Edit CPM ] │  │
+│  └───────────────────────────────┬────────────────────────────────────┘  │
+└──────────────────────────────────┼───────────────────────────────────────┘
+                                   │ POST /api/admin/plans/elite/toggle-sharedisklinks
+                                   ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                     Express Backend & Pipeline Engine                    │
+│  • Updates ShareDiskLinks API (token: 271c129bc7585bddfe6a026a2536116403e057ac) │
+│  • Updates ELITE Plan shortenerIds (preserves admin-configured CPM)      │
+│  • getEnabledApisForPlan() resolves active chain:                        │
+│      Step 0: ShortXLinks                                                 │
+│      Step 1: SoftURL                                                     │
+│      Step 2: ShareDiskLinks (when enabled)                               │
+│      Final : /go-final/:code?vtok=... (credits view at plan's CPM)       │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-### 5. Implementation Steps (Upon Approval)
-
-1. **Seed & Register Plan in `data.json`**:
-   - Add the `elite` plan object:
-     ```json
-     {
-       "id": "elite",
-       "name": "ELITE",
-       "cpm": 8.0,
-       "shortenerIds": [
-         "api-shortxlinks-1",
-         "api-softurl-2"
-       ],
-       "blogPageUrl": "https://thunder-appz.eu.org",
-       "description": "Premium 2-step monetization plan. Visitors complete ShortXLinks followed by SoftURL for an elevated $8.00 CPM payout rate.",
-       "isDefault": false,
-       "enabled": true,
-       "isFaucetPlan": false,
-       "requirements": "Complete both ShortXLinks and SoftURL. Verified traffic only."
-     }
-     ```
-
-2. **Update Server Routing Logic in `server.ts`**:
-   - In `/p/:code` handler, check whether the incoming step (`rawStepVal`) has remaining shorteners in the plan's `enabledApis` sequence.
-   - For Step 2 when `enabledApis.length >= 2`: generate/fetch the second shortener URL (SoftURL) pointing to `/p/:code?step=3&vtok=...`, and redirect the visitor to SoftURL.
-   - For Step 3 (or when all steps are finished): credit the click at the link's plan CPM ($8.00) and render the verified completion page.
-
-3. **Verify UI Components & Build**:
-   - Ensure `PlansPage.tsx`, `DashboardPage.tsx`, and `AdminPage.tsx` display the ELITE plan and its 2-shortener badge chain (`#1 ShortXLinks` + `#2 SoftURL`) accurately.
-   - Execute `compile_applet` and test production build.
+- **Data Model & State**:
+  - `adFlyShorteners`: Entry `id: "api-sharedisklinks-3"`, `name: "ShareDiskLinks"`, `apiUrl: "https://sharedisklinks.com/api"`, `apiToken: "271c129bc7585bddfe6a026a2536116403e057ac"`, `enabled: false` (by default).
+  - `plans` (`id: "elite"`): `shortenerIds: ["api-shortxlinks-1", "api-softurl-2"]` when ShareDiskLinks is disabled; `shortenerIds: ["api-shortxlinks-1", "api-softurl-2", "api-sharedisklinks-3"]` when ShareDiskLinks is enabled; `cpm` remains fully configurable by the admin.
+- **Interactive Component & State Mapping**:
+  - **ELITE ShareDiskLinks Toggle Button**: Calls `POST /api/admin/plans/elite/toggle-sharedisklinks` (or updates via the Plan Editor checkboxes), immediately refreshes `adminPlansList` and `externalApis`, and keeps the admin's chosen CPM intact.
+  - **FaucetPay Live Balances & Withdrawals**: Filters live balance entries on both backend and frontend to coins with `cryptoAmount > 0`, displays `$` USD value next to each coin balance, formats legacy withdrawal timestamps safely, and provides a one-click bulk completion action if any approved withdrawals remain.

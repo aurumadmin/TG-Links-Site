@@ -974,6 +974,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       });
       if (res?.success && res.plans) {
         setAdminPlansList(res.plans);
+        if (res.shorteners) setExternalApis(res.shorteners);
         setPlanSaveMsg("Publisher plan saved successfully!");
         setTimeout(() => setPlanSaveMsg(""), 3000);
         setEditingPlanId(null);
@@ -1044,6 +1045,51 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
         ...planFormData,
         shortenerIds: [...current, shortenerId]
       });
+    }
+  };
+
+  const handleToggleEliteShareDiskLinks = async (currentEnabled: boolean) => {
+    try {
+      const res = await fetchApi("/admin/plans/elite/toggle-sharedisklinks", {
+        method: "POST",
+        body: JSON.stringify({ enabled: !currentEnabled })
+      });
+      if (res?.success) {
+        if (res.plans) setAdminPlansList(res.plans);
+        if (res.shorteners) setExternalApis(res.shorteners);
+        setPlanSaveMsg(
+          res.shareDiskEnabled
+            ? "ShareDiskLinks enabled in ELITE Plan (ShortXLinks → SoftURL → ShareDiskLinks)!"
+            : "ShareDiskLinks disabled in ELITE Plan (ShortXLinks → SoftURL)."
+        );
+        setTimeout(() => setPlanSaveMsg(""), 3500);
+        if (editingPlanId === "elite" && res.plan) {
+          setPlanFormData((prev: any) => ({
+            ...prev,
+            shortenerIds: res.plan.shortenerIds || []
+          }));
+        }
+      } else {
+        alert(res?.error || "Failed to toggle ShareDiskLinks in ELITE Plan.");
+      }
+    } catch (err: any) {
+      alert("Error toggling ShareDiskLinks: " + (err?.message || "Unknown error"));
+    }
+  };
+
+  const handleCompleteAllApprovedWithdrawals = async () => {
+    const count = withdrawalsList.filter(w => w.status === "approved").length;
+    if (!confirm(`Mark all ${count} approved withdrawal(s) as COMPLETED without sending duplicate emails?`)) return;
+    try {
+      const res = await fetchApi("/admin/withdrawals/complete-all-approved", {
+        method: "POST"
+      });
+      if (res?.message) {
+        alert(res.message);
+      }
+      loadAdminData();
+    } catch (err: any) {
+      alert(err?.message || "Failed to mark approved withdrawals as completed.");
     }
   };
 
@@ -2262,7 +2308,12 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                             : "🟢 Manual Auto-Pay (Approve First)"}
                         </span>
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-950 text-slate-300 border border-slate-800">
-                          Currency: {sysSettings.faucetPayCurrency || "USDT"} (1:1 USD)
+                          Currency: {sysSettings.faucetPayCurrency || "LTC"}{" "}
+                          {(!sysSettings.faucetPayCurrency || sysSettings.faucetPayCurrency === "LTC")
+                            ? (liveLtcPrice ? `(1 LTC = ${liveLtcPrice.formatted})` : "(Auto Live Rate)")
+                            : sysSettings.faucetPayCurrency === "USDT"
+                            ? "(1:1 USD)"
+                            : "(Auto Live Rate)"}
                         </span>
                       </div>
                       <p className="text-xs text-slate-300 mt-1 leading-relaxed">
@@ -2309,23 +2360,44 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                   </div>
                 </div>
 
-                {/* Inline Faucet Balances Bar if loaded */}
-                {faucetBalances && (
-                  <div className="mt-4 pt-4 border-t border-slate-800/80 flex items-center gap-3 overflow-x-auto text-xs">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
-                      <Wallet className="w-3.5 h-3.5 text-emerald-400" />
-                      Faucet Balances:
-                    </span>
-                    {Object.entries(faucetBalances).map(([cur, data]: any) => (
-                      <div key={cur} className="px-3 py-1 bg-slate-950/80 rounded-lg border border-slate-800 flex items-center gap-1.5 shrink-0">
-                        <span className="font-extrabold text-amber-400">{cur}:</span>
-                        <span className="font-mono text-white">
-                          {data?.status === 200 ? (data.balance_bitcoin !== undefined ? data.balance_bitcoin : data.balance) : "Error"}
+                {/* Inline Faucet Balances Bar if loaded (Only Available > 0 Cryptos + USD Amount) */}
+                {faucetBalances && (() => {
+                  const availableEntries = Object.entries(faucetBalances).filter(([_, data]: any) => {
+                    const coinVal = parseFloat(String(data?.balance_bitcoin ?? data?.cryptoAmount ?? (data?.balance ? Number(data.balance) / 1e8 : 0)));
+                    return !isNaN(coinVal) && coinVal > 0;
+                  });
+                  return (
+                    <div className="mt-4 pt-4 border-t border-slate-800/80 flex items-center gap-3 overflow-x-auto text-xs">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                        <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                        Faucet Balances:
+                      </span>
+                      {availableEntries.length === 0 ? (
+                        <span className="text-xs font-mono text-slate-400 bg-slate-950/80 px-3 py-1 rounded-lg border border-slate-800">
+                          No available crypto balance ($0.00)
                         </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ) : (
+                        availableEntries.map(([cur, data]: any) => {
+                          const coinVal = parseFloat(String(data?.balance_bitcoin ?? data?.cryptoAmount ?? (data?.balance ? Number(data.balance) / 1e8 : 0)));
+                          const usdVal = data?.usdValue !== undefined
+                            ? Number(data.usdValue)
+                            : (cur === "LTC" && liveLtcPrice?.price ? coinVal * liveLtcPrice.price : cur === "USDT" ? coinVal : 0);
+                          return (
+                            <div key={cur} className="px-3 py-1.5 bg-slate-950/90 rounded-lg border border-slate-800 flex items-center gap-2 shrink-0 tabular-nums">
+                              <span className="font-extrabold text-amber-400">{cur}:</span>
+                              <span className="font-mono font-bold text-white">
+                                {coinVal.toFixed(8)}
+                              </span>
+                              <span className="font-mono font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded text-[11px]">
+                                ${usdVal.toFixed(2)}
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* TOP HEADER & METRICS */}
@@ -2341,13 +2413,24 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     </p>
                   </div>
 
-                  <button
-                    onClick={loadAdminData}
-                    className="self-start md:self-auto px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-2 transition cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Refresh Requests
-                  </button>
+                  <div className="flex items-center gap-2.5 self-start md:self-auto flex-wrap">
+                    {approvedCount > 0 && (
+                      <button
+                        onClick={handleCompleteAllApprovedWithdrawals}
+                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Mark All Approved Completed ({approvedCount})
+                      </button>
+                    )}
+                    <button
+                      onClick={loadAdminData}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Refresh Requests
+                    </button>
+                  </div>
                 </div>
 
                 {/* QUICK STATS CARDS */}
@@ -2570,13 +2653,18 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                                 </div>
                                 <span className="text-[10px] text-slate-500 block font-mono mt-0.5">Req ID: {w.id}</span>
                                 <span className="text-[10px] text-slate-400 block mt-0.5">
-                                  Submitted: {new Date(w.createdAt).toLocaleString(undefined, {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
+                                  Submitted: {(() => {
+                                    const rawDate = w.createdAt || (w as any).requestedAt || w.processedAt;
+                                    const parsed = rawDate ? new Date(rawDate) : null;
+                                    if (!parsed || isNaN(parsed.getTime())) return "Previously Processed";
+                                    return parsed.toLocaleString(undefined, {
+                                      year: 'numeric',
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    });
+                                  })()}
                                 </span>
                                 
                                 <div className="flex items-center gap-1.5 mt-2">
@@ -3917,29 +4005,54 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 </div>
               </div>
 
-              {/* Live Balances Banner if loaded */}
-              {faucetBalances && (
-                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                      <Coins className="w-3.5 h-3.5 text-amber-400" />
-                      FaucetPay Live Account Balances
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-mono">Fetched from FaucetPay API</span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 pt-1">
-                    {Object.entries(faucetBalances).map(([coin, info]: [string, any]) => (
-                      <div key={coin} className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
-                        <span className="text-[10px] font-extrabold text-slate-400 block">{coin}</span>
-                        <span className="text-sm font-black text-emerald-400 block font-mono">
-                          {info?.balance || "0.00"}
-                        </span>
-                        <span className="text-[9px] text-slate-500 block truncate">{info?.balance_in_satoshi ?? 0} sats</span>
+              {/* Live Balances Banner if loaded (Only Available > 0 Cryptos + USD Amount) */}
+              {faucetBalances && (() => {
+                const availableEntries = Object.entries(faucetBalances).filter(([_, info]: [string, any]) => {
+                  const coinVal = parseFloat(String(info?.balance_bitcoin ?? info?.cryptoAmount ?? (info?.balance ? Number(info.balance) / 1e8 : 0)));
+                  return !isNaN(coinVal) && coinVal > 0;
+                });
+                return (
+                  <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <Coins className="w-3.5 h-3.5 text-amber-400" />
+                        FaucetPay Available Balances ({availableEntries.length})
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">Live Crypto & USD Value</span>
+                    </div>
+                    {availableEntries.length === 0 ? (
+                      <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-800 text-xs text-slate-400 font-mono">
+                        No cryptocurrencies with available balance ($0.00).
                       </div>
-                    ))}
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-1">
+                        {availableEntries.map(([coin, info]: [string, any]) => {
+                          const coinVal = parseFloat(String(info?.balance_bitcoin ?? info?.cryptoAmount ?? (info?.balance ? Number(info.balance) / 1e8 : 0)));
+                          const usdVal = info?.usdValue !== undefined
+                            ? Number(info.usdValue)
+                            : (coin === "LTC" && liveLtcPrice?.price ? coinVal * liveLtcPrice.price : coin === "USDT" ? coinVal : 0);
+                          return (
+                            <div key={coin} className="p-3 bg-slate-900/80 rounded-lg border border-slate-800/80 space-y-1 tabular-nums">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-extrabold text-amber-400">{coin}</span>
+                                <span className="text-xs font-black font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                                  ${usdVal.toFixed(2)} USD
+                                </span>
+                              </div>
+                              <span className="text-sm font-black text-white block font-mono">
+                                {coinVal.toFixed(8)} {coin}
+                              </span>
+                              <span className="text-[10px] text-slate-500 block font-mono truncate">
+                                {(info?.balance_in_satoshi ?? info?.balance ?? Math.round(coinVal * 1e8)).toLocaleString()} satoshis
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* REAL-TIME LIVE LTC MARKET PRICE CARD */}
               <div className="p-4 bg-gradient-to-r from-cyan-950/40 via-slate-900 to-indigo-950/40 rounded-xl border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
@@ -6388,10 +6501,20 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       const matchedShorteners = (plan.shortenerIds || [])
                         .map((id: string) => externalApis.find(api => api.id === id && api.enabled !== false))
                         .filter(Boolean);
+                      const isElitePlan = plan.id === "elite" || String(plan.name || "").toUpperCase() === "ELITE";
+                      const shareDiskApiObj = externalApis.find(
+                        api => api.id === "api-sharedisklinks-3" || String(api.name || "").toLowerCase().includes("sharedisk")
+                      );
+                      const isShareDiskEnabledInElite = Boolean(
+                        isElitePlan &&
+                        shareDiskApiObj &&
+                        shareDiskApiObj.enabled !== false &&
+                        (plan.shortenerIds || []).includes(shareDiskApiObj.id)
+                      );
                       return (
                         <div key={plan.id} className="p-4 hover:bg-slate-850/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="space-y-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-black text-white text-base">{plan.name}</span>
                               {plan.isDefault && (
                                 <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
@@ -6410,7 +6533,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                               )}
                             </div>
 
-                            <p className="text-xs text-emerald-400 font-extrabold">
+                            <p className="text-xs text-emerald-400 font-extrabold font-mono tabular-nums">
                               ${plan.cpm.toFixed(2)} CPM Rate
                             </p>
 
@@ -6436,7 +6559,31 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                            {isElitePlan && (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleEliteShareDiskLinks(isShareDiskEnabledInElite)}
+                                className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer ${
+                                  isShareDiskEnabledInElite
+                                    ? "bg-emerald-950/50 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/50"
+                                    : "bg-slate-900 border-slate-700 text-slate-300 hover:border-indigo-500/40 hover:text-white"
+                                }`}
+                                title={
+                                  isShareDiskEnabledInElite
+                                    ? "Disable ShareDiskLinks (Step #3) in ELITE Plan"
+                                    : "Enable ShareDiskLinks (Step #3 after SoftURL) in ELITE Plan"
+                                }
+                              >
+                                {isShareDiskEnabledInElite ? (
+                                  <ToggleRight className="w-4 h-4 text-emerald-400" />
+                                ) : (
+                                  <ToggleLeft className="w-4 h-4 text-slate-400" />
+                                )}
+                                <span>ShareDiskLinks: {isShareDiskEnabledInElite ? "ON" : "OFF"}</span>
+                              </button>
+                            )}
+
                             <button
                               onClick={() => handleStartEditPlan(plan)}
                               className="px-3 py-2 bg-slate-800 hover:bg-indigo-600 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5"
