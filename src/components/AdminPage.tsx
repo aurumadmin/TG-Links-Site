@@ -5921,10 +5921,10 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
               <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl space-y-2">
                 <h3 className="text-sm font-bold text-indigo-300 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  Universal Old Database Compatibility Enabled
+                  Old-to-New Database Upgrader &amp; Anti-Reset Vault Protection
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  You can upload <strong>any database backup file</strong> you received via email or exported from an old version (even before statistics or analytics were added). The system automatically detects and converts user accounts, short links, click logs, and payment configurations without losing any data!
+                  Upload your <strong>existing / old database file</strong> (.json, .sql, or .json.gz) below. The system will automatically build the <strong>new upgraded database</strong> from your old DB—keeping 100% of your users, balances, links, clicks, and withdrawals while automatically adding all <strong>4 Publisher Plans</strong> (including the new <strong>$12.00 CPM PLAN 3</strong> with ShortXLinks + SoftURL + LinkDL) and locking it into the persistent anti-reset vault so your DB never resets!
                 </p>
               </div>
 
@@ -5985,9 +5985,19 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 </div>
 
                 {restoreSuccess && (
-                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs font-bold text-emerald-400 flex items-center gap-2.5">
-                    <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                    <span>{restoreSuccess}</span>
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs font-bold text-emerald-400 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                      <span>{restoreSuccess}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleExportDb("json")}
+                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download Upgraded New DB (.json)
+                    </button>
                   </div>
                 )}
 
@@ -6009,7 +6019,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                     ) : (
                       <Upload className="w-4 h-4" />
                     )}
-                    {restoreLoading ? "Restoring Database..." : "Restore / Import Database Now"}
+                    {restoreLoading ? "Upgrading & Restoring DB..." : "Upload Old DB & Build New Upgraded DB Now"}
                   </button>
                 </div>
               </form>

@@ -314,6 +314,9 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
       if (!found && (target.includes("sharedisk") || target === "api-sharedisklinks-3")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("sharedisk") && !s.isFaucetApi);
       }
+      if (!found && (target.includes("linkdl") || target === "api-linkdl-4")) {
+        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("linkdl") && !s.isFaucetApi);
+      }
 
       if (found) {
         result.push({ ...found, stepKey: `${found.id}-${idx}` });
@@ -420,9 +423,15 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
   }
   rawUrl = rawUrl.replace(/\/+$/, "");
 
-  // Generate official AdLinkFly QuickLink API URL directly (/st?api=...&url=https://...) for all shorteners
+  // Check if this shortener is LinkDL (which uses GET https://linkdl.net/api?api=TOKEN&url=URL JSON/text API)
+  const isLinkDl =
+    rawUrl.toLowerCase().includes("linkdl.net") ||
+    String(selectedApi.name || "").toLowerCase().includes("linkdl") ||
+    String(selectedApi.id || "").toLowerCase().includes("linkdl");
+
+  // Generate official AdLinkFly QuickLink API URL directly (/st?api=...&url=https://...) for standard QuickLink shorteners
   let baseDomain = rawUrl.endsWith("/api") ? rawUrl.slice(0, -4) : rawUrl.replace(/\/st$/, "");
-  if (baseDomain && apiToken) {
+  if (!isLinkDl && baseDomain && apiToken) {
     // AdLinkFly QuickLinks strictly require raw :// in url= (rejects %3A%2F%2F with "URL is invalid.")
     const quickLink = `${baseDomain}/st?api=${encodeURIComponent(apiToken)}&url=${targetUrl}`;
     console.log(`[Shortener API] Direct QuickLink API URL generated for ${selectedApi.name}: ${quickLink}`);
@@ -450,7 +459,7 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
       };
 
   for (const endpoint of candidateEndpoints) {
-    // Try both JSON API request and format=text API request for maximum compatibility
+    // Try both JSON API request and format=text API request for maximum compatibility (including LinkDL.Net)
     const urlVariants = [
       `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`,
       `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}&format=text`
@@ -517,6 +526,13 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
         console.warn(`[Shortener API] Failed request to ${apiRequestUrl} for ${selectedApi.name}: ${err?.message || err}`);
       }
     }
+  }
+
+  // Fallback to /st QuickLink if API endpoint was unreachable
+  if (baseDomain && apiToken) {
+    const fallbackQuickLink = `${baseDomain}/st?api=${encodeURIComponent(apiToken)}&url=${targetUrl}`;
+    console.warn(`[Shortener API] Falling back to QuickLink for ${selectedApi.name}: ${fallbackQuickLink}`);
+    return fallbackQuickLink;
   }
 
   console.warn(`[Shortener API] Unable to generate shortened URL for ${selectedApi.name} via API endpoints.`);
@@ -1303,39 +1319,312 @@ function extractTargetUrlFromApiRequest(req: any): string {
   return fullUrlPart.trim();
 }
 
-// Helper to load/save database with multi-process cPanel cache invalidation
+// Persistent Vault Paths to protect against accidental file overwrites during code deployments or concurrent writes
+const STORAGE_DIR = path.join(path.dirname(DB_FILE), "storage");
+const PERSISTENT_VAULT_FILE = path.join(STORAGE_DIR, "tglinks_live_db.json");
+const BACKUP_DB_FILE = path.join(path.dirname(DB_FILE), "data.backup.json");
+const PARENT_VAULT_FILE = path.join(path.dirname(DB_FILE), "..", "tglinks_live_db.json");
+
+function atomicWriteFileSync(targetPath: string, content: string): boolean {
+  try {
+    const dir = path.dirname(targetPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tempPath, content, "utf-8");
+    fs.renameSync(tempPath, targetPath);
+    return true;
+  } catch (err) {
+    try {
+      fs.writeFileSync(targetPath, content, "utf-8");
+      return true;
+    } catch (fallbackErr) {
+      return false;
+    }
+  }
+}
+
+// Compute a richness score for a parsed database object so we never overwrite a real populated DB with an empty seed template
+function getDbRichnessScore(dbObj: any): number {
+  if (!dbObj || typeof dbObj !== "object") return -1;
+  const usersCount = Array.isArray(dbObj.users) ? dbObj.users.length : 0;
+  const linksCount = Array.isArray(dbObj.links) ? dbObj.links.length : 0;
+  const clicksCount = Array.isArray(dbObj.clicksLog) ? dbObj.clicksLog.length : 0;
+  const withdrawalsCount = Array.isArray(dbObj.withdrawals) ? dbObj.withdrawals.length : 0;
+  const ticketsCount = Array.isArray(dbObj.tickets) ? dbObj.tickets.length : 0;
+  const nonAdminUsers = Array.isArray(dbObj.users)
+    ? dbObj.users.filter((u: any) => u && u.id !== "admin-1" && u.id !== "admin-2").length
+    : 0;
+  return (
+    nonAdminUsers * 100 +
+    linksCount * 25 +
+    withdrawalsCount * 20 +
+    clicksCount * 2 +
+    ticketsCount * 10 +
+    usersCount * 5
+  );
+}
+
+function tryReadJsonFile(filePath: string): any | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, "utf-8").trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && (Array.isArray(parsed.users) || Array.isArray(parsed.links))) {
+      return parsed;
+    }
+  } catch (e) {
+    // Ignore read or parse errors on individual candidate files
+  }
+  return null;
+}
+
+// Helper to ensure all required shorteners (including LinkDL & ShareDiskLinks) and all 4 Publisher Plans exist in any DB
+function ensureRequiredShortenersAndPlans(db: any): boolean {
+  let changed = false;
+
+  const defaultShorteners = [
+    {
+      id: "api-shortxlinks-1",
+      name: "ShortXLinks",
+      apiUrl: "https://shortxlinks.com/",
+      apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1",
+      enabled: true,
+      priority: 6,
+      isFaucetApi: false
+    },
+    {
+      id: "api-sharedisklinks-3",
+      name: "ShareDiskLinks",
+      apiUrl: "https://sharedisklinks.com/api",
+      apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
+      enabled: false,
+      priority: 5,
+      isFaucetApi: false
+    },
+    {
+      id: "api-softurl-2",
+      name: "SoftURL",
+      apiUrl: "https://softurl.in/api",
+      apiToken: "609c875b96d61f0592bfe5ae036b2db1df673680",
+      enabled: true,
+      priority: 5,
+      isFaucetApi: false
+    },
+    {
+      id: "api-linkdl-4",
+      name: "LinkDL",
+      apiUrl: "https://linkdl.net/api",
+      apiToken: "b57c6334f1fa259c3e4f0826548ebcee0ef1dbea",
+      enabled: true,
+      priority: 5,
+      isFaucetApi: false
+    },
+    {
+      id: "api-shortxlinks-faucet-3",
+      name: "ShortXLinks-Faucet",
+      apiUrl: "https://shortxlinks.com/",
+      apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1",
+      enabled: true,
+      priority: 4,
+      isFaucetApi: true
+    },
+    {
+      id: "api-easysky-faucet-4",
+      name: "EasySky-Faucet",
+      apiUrl: "https://easysky.in/",
+      apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
+      enabled: true,
+      priority: 3,
+      isFaucetApi: true
+    },
+    {
+      id: "api-oii-5",
+      name: "Oii",
+      apiUrl: "https://oii.io/",
+      apiToken: "1edc96d59f77f395d8efd79d5feebbc1f2e82bc2",
+      enabled: true,
+      priority: 2,
+      isFaucetApi: true
+    },
+    {
+      id: "api-linknext-6",
+      name: "LinkNext",
+      apiUrl: "https://linknext.io/",
+      apiToken: "cbc6cb0ca4ebfc65f8bc87556094cf5e2fafeaee",
+      enabled: true,
+      priority: 1,
+      isFaucetApi: true
+    }
+  ];
+
+  if (!Array.isArray(db.adFlyShorteners) || db.adFlyShorteners.length === 0) {
+    db.adFlyShorteners = JSON.parse(JSON.stringify(defaultShorteners));
+    changed = true;
+  } else {
+    const originalLength = db.adFlyShorteners.length;
+    db.adFlyShorteners = db.adFlyShorteners.filter(Boolean);
+    if (db.adFlyShorteners.length !== originalLength) changed = true;
+
+    // Ensure ShortXLinks, SoftURL, ShareDiskLinks, and LinkDL exist with valid tokens
+    for (const reqShortener of defaultShorteners) {
+      const existing = db.adFlyShorteners.find((s: any) =>
+        s && (
+          String(s.id || "").toLowerCase() === reqShortener.id.toLowerCase() ||
+          (String(s.name || "").toLowerCase() === reqShortener.name.toLowerCase() && Boolean(s.isFaucetApi) === Boolean(reqShortener.isFaucetApi))
+        )
+      );
+      if (!existing) {
+        db.adFlyShorteners.push({ ...reqShortener });
+        changed = true;
+      } else {
+        // Normalize canonical IDs for the 4 core non-faucet shorteners so plan shortenerIds always resolve cleanly
+        if (!reqShortener.isFaucetApi && existing.id !== reqShortener.id) {
+          existing.id = reqShortener.id;
+          changed = true;
+        }
+        if (!existing.apiToken || (reqShortener.id === "api-softurl-2" && existing.apiToken === "c74c424d10103b41dff815bcad304dce1f6050b1")) {
+          existing.apiToken = reqShortener.apiToken;
+          changed = true;
+        }
+        if (!existing.apiUrl) {
+          existing.apiUrl = reqShortener.apiUrl;
+          changed = true;
+        }
+        if (reqShortener.id === "api-linkdl-4" && existing.apiToken !== "b57c6334f1fa259c3e4f0826548ebcee0ef1dbea") {
+          existing.apiToken = "b57c6334f1fa259c3e4f0826548ebcee0ef1dbea";
+          existing.apiUrl = "https://linkdl.net/api";
+          existing.enabled = true;
+          changed = true;
+        }
+        if (reqShortener.id === "api-sharedisklinks-3" && existing.apiToken !== "271c129bc7585bddfe6a026a2536116403e057ac") {
+          existing.apiToken = "271c129bc7585bddfe6a026a2536116403e057ac";
+          existing.apiUrl = "https://sharedisklinks.com/api";
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // Required 4 Publisher Plans (kept in the DB and merged automatically into any old DB)
+  const requiredPlans = [
+    {
+      id: "default",
+      name: "Default Plan",
+      cpm: 5.0,
+      shortenerIds: ["api-shortxlinks-1"],
+      blogPageUrl: "https://thunder-appz.eu.org",
+      description: "Default high-converting link pipeline with instant link generation and standard payout rates.",
+      isDefault: true,
+      enabled: true,
+      isFaucetPlan: false,
+      requirements: "All traffic allowed. 100% completed view counting."
+    },
+    {
+      id: "plan-2",
+      name: "PLAN 2",
+      cpm: 5.0,
+      shortenerIds: ["api-softurl-2"],
+      blogPageUrl: "https://thunder-appz.eu.org",
+      description: "Alternative publisher routing with instant view verification and standard $5.00 CPM payout rates.",
+      isDefault: false,
+      enabled: true,
+      isFaucetPlan: false,
+      requirements: "All traffic allowed. 100% completed view counting."
+    },
+    {
+      id: "elite",
+      name: "ELITE",
+      cpm: 8.0,
+      shortenerIds: ["api-shortxlinks-1", "api-softurl-2"],
+      blogPageUrl: "https://thunder-appz.eu.org",
+      description: "High-yield premium publisher monetization with enhanced $8.00 CPM rate and priority payouts.",
+      isDefault: false,
+      enabled: true,
+      isFaucetPlan: false,
+      requirements: "Verified traffic only. 100% completed view counting."
+    },
+    {
+      id: "plan-3",
+      name: "PLAN 3",
+      cpm: 12.0,
+      shortenerIds: ["api-shortxlinks-1", "api-softurl-2", "api-linkdl-4"],
+      blogPageUrl: "https://thunder-appz.eu.org",
+      description: "Ultra high-paying 3-step publisher pipeline (ShortXLinks + SoftURL + LinkDL) with $12.00 CPM payout rate.",
+      isDefault: false,
+      enabled: true,
+      isFaucetPlan: false,
+      requirements: "All traffic allowed. 100% completed view counting."
+    }
+  ];
+
+  if (!Array.isArray(db.plans) || db.plans.length === 0) {
+    db.plans = JSON.parse(JSON.stringify(requiredPlans));
+    changed = true;
+  } else {
+    const originalLength = db.plans.length;
+    db.plans = db.plans.filter(Boolean);
+    if (db.plans.length !== originalLength) changed = true;
+
+    for (const reqPlan of requiredPlans) {
+      const existingPlan = db.plans.find((p: any) =>
+        p && (
+          String(p.id || "").toLowerCase() === reqPlan.id.toLowerCase() ||
+          String(p.name || "").trim().toLowerCase() === reqPlan.name.toLowerCase() ||
+          (reqPlan.id === "plan-3" && Array.isArray(p.shortenerIds) && p.shortenerIds.includes("api-linkdl-4"))
+        )
+      );
+      if (!existingPlan) {
+        db.plans.push({ ...reqPlan });
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
+
+// Helper to load/save database with multi-process cPanel cache invalidation and anti-reset vault recovery
 function loadDb(forceReload = false): any {
   let db: any = null;
-  let initialDbSeedNeeded = false;
 
   const currentMtime = getDbFileMtime();
   if (!forceReload && cachedDbInMemory && currentMtime > 0 && currentMtime <= lastDbFileMtime) {
     db = cachedDbInMemory;
   } else {
-    let dbContent = "";
-    try {
-      if (!fs.existsSync(DB_FILE)) {
-        initialDbSeedNeeded = true;
-      } else {
-        dbContent = fs.readFileSync(DB_FILE, "utf-8").trim();
-        if (!dbContent) {
-          initialDbSeedNeeded = true;
-        }
-      }
-    } catch (err) {
-      console.error("[TG Links] Error checking/reading database file:", err);
-      initialDbSeedNeeded = true;
-    }
+    // Read primary DB_FILE and all persistent backup vaults so we never lose data if data.json was overwritten by a code upload or truncated
+    const primaryDb = tryReadJsonFile(DB_FILE);
+    const vaultDb = tryReadJsonFile(PERSISTENT_VAULT_FILE);
+    const backupDb = tryReadJsonFile(BACKUP_DB_FILE);
+    const parentVaultDb = tryReadJsonFile(PARENT_VAULT_FILE);
 
-    if (!initialDbSeedNeeded) {
-      try {
-        db = JSON.parse(dbContent);
-      } catch (err) {
-        console.error("[TG Links] Failed to parse database JSON, falling back to seed:", err);
-        initialDbSeedNeeded = true;
+    const candidates: { source: string; data: any; score: number }[] = [];
+    if (primaryDb) candidates.push({ source: "DB_FILE", data: primaryDb, score: getDbRichnessScore(primaryDb) });
+    if (vaultDb) candidates.push({ source: "PERSISTENT_VAULT_FILE", data: vaultDb, score: getDbRichnessScore(vaultDb) });
+    if (backupDb) candidates.push({ source: "BACKUP_DB_FILE", data: backupDb, score: getDbRichnessScore(backupDb) });
+    if (parentVaultDb) candidates.push({ source: "PARENT_VAULT_FILE", data: parentVaultDb, score: getDbRichnessScore(parentVaultDb) });
+    if (cachedDbInMemory) candidates.push({ source: "MEMORY_CACHE", data: cachedDbInMemory, score: getDbRichnessScore(cachedDbInMemory) });
+
+    if (candidates.length > 0) {
+      // If DB_FILE is valid and at least as rich as any backup vault, use DB_FILE; otherwise recover from the richest vault!
+      candidates.sort((a, b) => b.score - a.score);
+      const bestCandidate = candidates[0];
+      const primaryScore = primaryDb ? getDbRichnessScore(primaryDb) : -1;
+
+      if (primaryDb && primaryScore >= bestCandidate.score) {
+        db = primaryDb;
+      } else {
+        console.warn(`[TG Links DB Guard] Auto-recovering database from ${bestCandidate.source} (score ${bestCandidate.score} vs primary score ${primaryScore}) to prevent data loss!`);
+        db = JSON.parse(JSON.stringify(bestCandidate.data));
+        // Immediately restore primary DB_FILE from the recovered rich database
+        atomicWriteFileSync(DB_FILE, JSON.stringify(db, null, 2));
       }
     }
   }
+
+  const initialDbSeedNeeded = !db;
 
   // Define Initial Seed Data
   const initialDb = {
@@ -1498,155 +1787,12 @@ function loadDb(forceReload = false): any {
     db.deletedLinksCount = 0;
     changed = true;
   }
-  if (!db.adFlyShorteners || db.adFlyShorteners.length === 0) {
-    db.adFlyShorteners = [
-      {
-        id: "api-shortxlinks-1",
-        name: "ShortXLinks",
-        apiUrl: "https://shortxlinks.com/",
-        apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1",
-        enabled: true,
-        priority: 6,
-        isFaucetApi: false
-      },
-      {
-        id: "api-sharedisklinks-3",
-        name: "ShareDiskLinks",
-        apiUrl: "https://sharedisklinks.com/api",
-        apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
-        enabled: false,
-        priority: 5,
-        isFaucetApi: false
-      },
-      {
-        id: "api-softurl-2",
-        name: "SoftURL",
-        apiUrl: "https://softurl.in/api",
-        apiToken: "609c875b96d61f0592bfe5ae036b2db1df673680",
-        enabled: true,
-        priority: 5,
-        isFaucetApi: false
-      },
-      {
-        id: "api-shortxlinks-faucet-3",
-        name: "ShortXLinks-Faucet",
-        apiUrl: "https://shortxlinks.com/",
-        apiToken: "b6ac095e9373906c9e461860400e64a7de4536f1",
-        enabled: true,
-        priority: 4,
-        isFaucetApi: true
-      },
-      {
-        id: "api-easysky-faucet-4",
-        name: "EasySky-Faucet",
-        apiUrl: "https://easysky.in/",
-        apiToken: "c74c424d10103b41dff815bcad304dce1f6050b1",
-        enabled: true,
-        priority: 3,
-        isFaucetApi: true
-      },
-      {
-        id: "api-oii-5",
-        name: "Oii",
-        apiUrl: "https://oii.io/",
-        apiToken: "1edc96d59f77f395d8efd79d5feebbc1f2e82bc2",
-        enabled: true,
-        priority: 2,
-        isFaucetApi: true
-      },
-      {
-        id: "api-linknext-6",
-        name: "LinkNext",
-        apiUrl: "https://linknext.io/",
-        apiToken: "cbc6cb0ca4ebfc65f8bc87556094cf5e2fafeaee",
-        enabled: true,
-        priority: 1,
-        isFaucetApi: true
-      }
-    ];
+
+  // Ensure all required shorteners (including LinkDL & ShareDiskLinks) and all 4 Publisher Plans exist in the DB
+  if (ensureRequiredShortenersAndPlans(db)) {
     changed = true;
-  } else {
-    const originalLength = db.adFlyShorteners.length;
-    db.adFlyShorteners = db.adFlyShorteners.filter(Boolean);
-    if (db.adFlyShorteners.length !== originalLength) changed = true;
-
-    // Auto-migrate SoftURL token if old/invalid token is present
-    const softUrlObj = db.adFlyShorteners.find((s: any) => s && (s.id === "api-softurl-2" || (s.name && s.name.toLowerCase().includes("softurl"))));
-    if (softUrlObj && (softUrlObj.apiToken === "c74c424d10103b41dff815bcad304dce1f6050b1" || !softUrlObj.apiToken)) {
-      softUrlObj.apiToken = "609c875b96d61f0592bfe5ae036b2db1df673680";
-      changed = true;
-    }
-
-    // Ensure ShareDiskLinks is present with the configured API token
-    let shareDiskObj = db.adFlyShorteners.find((s: any) => s && (s.id === "api-sharedisklinks-3" || (s.name && s.name.toLowerCase().includes("sharedisk"))));
-    if (!shareDiskObj) {
-      db.adFlyShorteners.push({
-        id: "api-sharedisklinks-3",
-        name: "ShareDiskLinks",
-        apiUrl: "https://sharedisklinks.com/api",
-        apiToken: "271c129bc7585bddfe6a026a2536116403e057ac",
-        enabled: false,
-        priority: 5,
-        isFaucetApi: false
-      });
-      changed = true;
-    } else if (shareDiskObj.apiToken !== "271c129bc7585bddfe6a026a2536116403e057ac" || !shareDiskObj.apiUrl) {
-      shareDiskObj.apiToken = "271c129bc7585bddfe6a026a2536116403e057ac";
-      shareDiskObj.apiUrl = "https://sharedisklinks.com/api";
-      changed = true;
-    }
   }
-  if (!db.plans || db.plans.length === 0) {
-    const allShorteners = db.adFlyShorteners || [];
-    const allIds = allShorteners.map((s: any) => s.id);
-    const faucetIds = allShorteners.filter((s: any) => s.isFaucetApi).map((s: any) => s.id);
-    const nonFaucetIds = allShorteners.filter((s: any) => !s.isFaucetApi).map((s: any) => s.id);
-    const defaultNonFaucetShorteners = nonFaucetIds.length > 0 ? nonFaucetIds : allIds.slice(0, 2);
 
-    db.plans = [
-      {
-        id: "default",
-        name: "Default Plan",
-        cpm: 5.0,
-        shortenerIds: ["api-shortxlinks-1"],
-        blogPageUrl: "https://thunder-appz.eu.org",
-        description: "Default high-converting link pipeline with instant link generation and standard payout rates.",
-        isDefault: true,
-        enabled: true,
-        isFaucetPlan: false,
-        requirements: "All traffic allowed. 100% completed view counting."
-      },
-      {
-        id: "elite",
-        name: "ELITE",
-        cpm: 8.0,
-        shortenerIds: ["api-shortxlinks-1", "api-softurl-2"],
-        blogPageUrl: "https://thunder-appz.eu.org",
-        description: "High-yield premium publisher monetization with enhanced $8.00 CPM rate and priority payouts.",
-        isDefault: false,
-        enabled: true,
-        isFaucetPlan: false,
-        requirements: "Verified traffic only. 100% completed view counting."
-      },
-      {
-        id: "plan-2",
-        name: "PLAN 2",
-        cpm: 5.0,
-        shortenerIds: ["api-softurl-2"],
-        blogPageUrl: "https://thunder-appz.eu.org",
-        description: "Alternative publisher routing with instant view verification and standard $5.00 CPM payout rates.",
-        isDefault: false,
-        enabled: true,
-        isFaucetPlan: false,
-        requirements: "All traffic allowed. 100% completed view counting."
-      }
-    ];
-    changed = true;
-  } else {
-    const originalLength = db.plans.length;
-    db.plans = db.plans.filter(Boolean);
-    if (db.plans.length !== originalLength) changed = true;
-  }
   if (!db.clicksLog) {
     db.clicksLog = [];
     changed = true;
@@ -1805,17 +1951,21 @@ function loadDb(forceReload = false): any {
     return u;
   });
 
-  if (changed) {
-    try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-    } catch (err) {
-      console.error("[TG Links] Failed to update database on disk:", err);
-    }
-  }
-
   // Auto-cleanup API generated links with no new views in 3 days
   if (cleanupInactiveApiLinks(db)) {
+    changed = true;
+  }
+
+  if (changed) {
     saveDb(db);
+  } else {
+    // Ensure persistent vault exists if this DB has user/link data
+    if (getDbRichnessScore(db) > 10 && !fs.existsSync(PERSISTENT_VAULT_FILE)) {
+      const serialized = JSON.stringify(db, null, 2);
+      atomicWriteFileSync(PERSISTENT_VAULT_FILE, serialized);
+      atomicWriteFileSync(BACKUP_DB_FILE, serialized);
+      atomicWriteFileSync(PARENT_VAULT_FILE, serialized);
+    }
   }
 
   lastDbFileMtime = getDbFileMtime() || Date.now();
@@ -1829,7 +1979,6 @@ function cleanupInactiveApiLinks(db: any): boolean {
   const now = Date.now();
   let changed = false;
 
-  const initialCount = db.links.length;
   let deletedNow = 0;
   db.links = db.links.filter((link: any) => {
     // Only check links generated programmatically via Developer API
@@ -1860,9 +2009,26 @@ function cleanupInactiveApiLinks(db: any): boolean {
   return changed;
 }
 
-function saveDb(data: any) {
+function saveDb(data: any, forceOverwrite = false) {
+  if (!data || typeof data !== "object") return;
+
+  // Anti-wipe guard: never allow an empty seed DB (<=2 users, 0 links) to overwrite a populated vault unless forceOverwrite is true
+  if (!forceOverwrite) {
+    const incomingScore = getDbRichnessScore(data);
+    const existingVault = tryReadJsonFile(PERSISTENT_VAULT_FILE) || tryReadJsonFile(BACKUP_DB_FILE);
+    const vaultScore = existingVault ? getDbRichnessScore(existingVault) : -1;
+    if (incomingScore <= 15 && vaultScore > 50) {
+      console.warn(`[TG Links DB Guard] Blocked accidental empty DB save (incoming score ${incomingScore} vs vault score ${vaultScore})!`);
+      return;
+    }
+  }
+
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+    const serialized = JSON.stringify(data, null, 2);
+    atomicWriteFileSync(DB_FILE, serialized);
+    atomicWriteFileSync(BACKUP_DB_FILE, serialized);
+    atomicWriteFileSync(PERSISTENT_VAULT_FILE, serialized);
+    atomicWriteFileSync(PARENT_VAULT_FILE, serialized);
     lastDbFileMtime = getDbFileMtime() || Date.now();
   } catch (err) {
     console.error("[TG Links] Failed to save database file:", err);
@@ -6122,9 +6288,12 @@ function normalizeAndMigrateDatabase(rawData: any): any {
   let rawWithdrawals = toArray(data.withdrawals);
   let rawTickets = toArray(data.tickets || data.support_tickets);
   let rawAdFly = toArray(data.adFlyShorteners || data.external_shorteners);
+  let rawPlans = toArray(data.plans || data.publisher_plans);
+  let rawDepositRequests = toArray(data.depositRequests || data.deposit_requests);
+  let rawAdvertiserCampaigns = toArray(data.advertiserCampaigns || data.advertiser_campaigns);
   let rawSettings = (data.settings || data.config || data.options || data.site_settings || {});
 
-  // 4. Normalize USERS
+  // 4. Normalize USERS (preserving 100% of fields like planId, customCpm, advertiserBalance, etc.)
   const usersMap = new Map<string, any>();
   const normalizedUsers: any[] = [];
 
@@ -6134,21 +6303,28 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     const id = u.id || u._id || u.user_id || u.uid || u.member_id || `u-${idx + 1}`;
     const role = (u.role === "admin" || u.is_admin || u.isAdmin || u.admin || u.type === "admin" || email === "freefiregtamcpe@gmail.com" || email === "teamthunderofficialyt@gmail.com") ? "admin" : "user";
     
-    const userObj = {
+    const userObj: any = {
+      ...u,
       id,
       email: u.email || email,
       username: u.username || u.name || email.split("@")[0],
+      name: u.name || u.username || email.split("@")[0],
       role,
       balance: cleanNumber(u.balance ?? u.wallet ?? u.money ?? u.earnings ?? u.totalEarned ?? 0),
       totalEarned: cleanNumber(u.totalEarned ?? u.total_earned ?? u.balance ?? 0),
+      advertiserBalance: cleanNumber(u.advertiserBalance ?? u.advertiser_balance ?? 0),
       withdrawalMethod: u.withdrawalMethod || u.withdrawal_method || u.payment_method || "PayPal",
       withdrawalAccount: u.withdrawalAccount || u.withdrawal_account || u.payment_account || u.email || email,
       createdAt: u.createdAt || u.created_at || u.created || u.date || new Date().toISOString(),
       banned: Boolean(u.banned ?? u.is_banned ?? false),
       password: u.password || u.pass || u.password_hash || u.hash || "Thunderffyt123@",
       apiToken: u.apiToken || u.api_token || u.token || generateApiToken(),
-      enableFaucetMode: Boolean(u.enableFaucetMode ?? u.faucet_mode ?? false)
+      enableFaucetMode: Boolean(u.enableFaucetMode ?? u.faucet_mode ?? false),
+      planId: u.planId || u.plan_id || "default"
     };
+    if (u.customCpm !== undefined && u.customCpm !== null) {
+      userObj.customCpm = cleanNumber(u.customCpm);
+    }
 
     usersMap.set(String(id), userObj);
     usersMap.set(email, userObj);
@@ -6157,8 +6333,8 @@ function normalizeAndMigrateDatabase(rawData: any): any {
 
   // Mandatory admin accounts so admins are never locked out after restore
   const defaultAdmins = [
-    { id: "admin-1", email: "freefiregtamcpe@gmail.com", role: "admin", balance: 100, totalEarned: 100, withdrawalMethod: "PayPal", withdrawalAccount: "admin_paypal@example.com", createdAt: new Date().toISOString(), banned: false, password: "Thunderffyt123@", apiToken: generateApiToken() },
-    { id: "admin-2", email: "teamthunderofficialyt@gmail.com", role: "admin", balance: 0, totalEarned: 0, withdrawalMethod: "PayPal", withdrawalAccount: "teamthunder@example.com", createdAt: new Date().toISOString(), banned: false, password: "Thunderffyt123@", apiToken: generateApiToken() }
+    { id: "admin-1", email: "freefiregtamcpe@gmail.com", role: "admin", balance: 100, totalEarned: 100, advertiserBalance: 0, withdrawalMethod: "PayPal", withdrawalAccount: "admin_paypal@example.com", createdAt: new Date().toISOString(), banned: false, password: "Thunderffyt123@", apiToken: generateApiToken(), planId: "default" },
+    { id: "admin-2", email: "teamthunderofficialyt@gmail.com", role: "admin", balance: 0, totalEarned: 0, advertiserBalance: 0, withdrawalMethod: "PayPal", withdrawalAccount: "teamthunder@example.com", createdAt: new Date().toISOString(), banned: false, password: "Thunderffyt123@", apiToken: generateApiToken(), planId: "default" }
   ];
 
   defaultAdmins.forEach(adminDef => {
@@ -6192,6 +6368,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     if (!userEmail) userEmail = "guest";
 
     const linkObj = {
+      ...l,
       id,
       code,
       originalUrl,
@@ -6239,6 +6416,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     let userId = String(c.userId || c.user_id || "guest");
     
     normalizedClicksLog.push({
+      ...c,
       id,
       linkId,
       userId,
@@ -6272,6 +6450,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     const isLegacyApproved = rawStatus === "approved" && !w.workflowV2;
     const resolvedCreatedAt = w.createdAt || w.requestedAt || w.requested_at || w.created_at || w.date || w.processedAt || new Date().toISOString();
     return {
+      ...w,
       id: String(w.id || w._id || `w-${idx + 1}`),
       userId: String(w.userId || w.user_id || "guest"),
       userEmail: w.userEmail || w.user_email || w.email || "guest",
@@ -6301,6 +6480,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
 
   // 8. Normalize TICKETS
   const normalizedTickets: any[] = rawTickets.map((t: any, idx: number) => ({
+    ...t,
     id: String(t.id || t._id || `t-${idx + 1}`),
     userId: String(t.userId || t.user_id || "guest"),
     userEmail: t.userEmail || t.user_email || t.email || "guest",
@@ -6313,6 +6493,7 @@ function normalizeAndMigrateDatabase(rawData: any): any {
 
   // 9. Normalize ADFLY SHORTENERS
   const normalizedAdFly: any[] = rawAdFly.map((a: any, idx: number) => ({
+    ...a,
     id: String(a.id || a._id || `adfly-${idx + 1}`),
     name: a.name || a.title || "External Shortener",
     apiUrl: a.apiUrl || a.api_url || a.url || "",
@@ -6323,51 +6504,72 @@ function normalizeAndMigrateDatabase(rawData: any): any {
     isFaucetApi: Boolean(a.isFaucetApi ?? a.is_faucet_api ?? false)
   })).filter(Boolean);
 
-  // 10. Normalize SETTINGS
+  // 10. Normalize PLANS (if any existed in the uploaded DB)
+  const normalizedPlans: any[] = rawPlans.map((p: any, idx: number) => ({
+    ...p,
+    id: String(p.id || `plan-${idx + 1}`),
+    name: String(p.name || `Plan ${idx + 1}`),
+    cpm: cleanNumber(p.cpm ?? 5, 5),
+    shortenerIds: Array.isArray(p.shortenerIds) ? p.shortenerIds : ["api-shortxlinks-1"],
+    blogPageUrl: p.blogPageUrl || "https://thunder-appz.eu.org",
+    description: p.description || "",
+    isDefault: Boolean(p.isDefault),
+    enabled: p.enabled !== undefined ? Boolean(p.enabled) : true,
+    isFaucetPlan: Boolean(p.isFaucetPlan),
+    requirements: p.requirements || "All traffic allowed. 100% completed view counting."
+  })).filter(Boolean);
+
+  // 11. Normalize SETTINGS (preserving all existing settings while ensuring new fields exist)
+  const currentLiveDb = cachedDbInMemory || tryReadJsonFile(DB_FILE) || {};
+  const fallbackSettings = currentLiveDb.settings || {};
   const normalizedSettings = {
-    siteName: rawSettings.siteName || rawSettings.site_name || rawSettings.title || "TG LINKS",
-    siteTitle: rawSettings.siteTitle || rawSettings.site_title || "TG Links - Shorten Links & Earn $10 CPM",
-    siteDescription: rawSettings.siteDescription || rawSettings.site_description || "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
-    globalCpm: cleanNumber(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? 10, 10),
-    minWithdrawal: cleanNumber(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? 0.25, 0.25),
-    withdrawalMethods: Array.isArray(rawSettings.withdrawalMethods) ? rawSettings.withdrawalMethods : ["PayPal", "Payeer", "Bitcoin", "Bank Transfer", "UPI"],
-    adPagesCount: cleanNumber(rawSettings.adPagesCount ?? rawSettings.ad_pages_count ?? 1, 1),
-    bannerAd728x90: rawSettings.bannerAd728x90 || rawSettings.banner_728x90 || `<div class="w-full h-24 bg-gradient-to-r from-blue-500 to-indigo-600 flex flex-col items-center justify-center border border-indigo-300 text-white rounded-lg shadow-sm px-4 text-center"><span class="text-xs uppercase tracking-widest font-bold opacity-75">Sponsor Banner (728x90)</span></div>`,
-    bannerAd300x250: rawSettings.bannerAd300x250 || rawSettings.banner_300x250 || `<div class="w-[300px] h-[250px] bg-gradient-to-br from-purple-500 to-pink-500 flex flex-col items-center justify-center border border-purple-300 text-white rounded-lg shadow-sm p-6 text-center mx-auto"><span class="text-xs uppercase tracking-widest font-bold opacity-75">Premium Space (300x250)</span></div>`,
-    bannerAd320x50: rawSettings.bannerAd320x50 || rawSettings.banner_320x50 || `<div class="w-80 h-12 bg-gradient-to-r from-teal-500 to-emerald-600 flex items-center justify-between border border-teal-300 text-white rounded-lg shadow-sm px-4 mx-auto"><span class="text-xs font-bold uppercase tracking-wide">Ad: Secure VPN</span></div>`,
-    popunderCode: rawSettings.popunderCode || rawSettings.popunder || "",
-    globalHeaderCode: rawSettings.globalHeaderCode || rawSettings.header_code || "",
-    faviconUrl: rawSettings.faviconUrl || rawSettings.favicon || "",
-    logoUrl: rawSettings.logoUrl || rawSettings.logo || "",
+    ...fallbackSettings,
+    ...rawSettings,
+    siteName: rawSettings.siteName || rawSettings.site_name || rawSettings.title || fallbackSettings.siteName || "TG LINKS",
+    siteTitle: rawSettings.siteTitle || rawSettings.site_title || fallbackSettings.siteTitle || "TG Links - Shorten Links & Earn $10 CPM",
+    siteDescription: rawSettings.siteDescription || rawSettings.site_description || fallbackSettings.siteDescription || "Unlock the power of shortened URLs. Monetize your traffic by sharing links with high-paying CPM rates.",
+    globalCpm: cleanNumber(rawSettings.globalCpm ?? rawSettings.global_cpm ?? rawSettings.cpm ?? rawSettings.default_cpm ?? fallbackSettings.globalCpm ?? 10, 10),
+    minWithdrawal: cleanNumber(rawSettings.minWithdrawal ?? rawSettings.min_withdrawal ?? rawSettings.min_withdraw ?? fallbackSettings.minWithdrawal ?? 0.25, 0.25),
+    withdrawalMethods: Array.isArray(rawSettings.withdrawalMethods) ? rawSettings.withdrawalMethods : (Array.isArray(fallbackSettings.withdrawalMethods) ? fallbackSettings.withdrawalMethods : ["UPI", "PayTM", "PhonePe", "FaucetPay", "Litecoin", "PayPal", "Bank Transfer", "USDT", "Payeer", "Bitcoin"]),
+    adPagesCount: cleanNumber(rawSettings.adPagesCount ?? rawSettings.ad_pages_count ?? fallbackSettings.adPagesCount ?? 1, 1),
     enableOwnAds: rawSettings.enableOwnAds !== undefined ? Boolean(rawSettings.enableOwnAds) : true,
     enableNeonAdGate: rawSettings.enableNeonAdGate !== undefined ? Boolean(rawSettings.enableNeonAdGate) : false,
-    neonTodayAdCode: rawSettings.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`,
+    neonTodayAdCode: rawSettings.neonTodayAdCode || fallbackSettings.neonTodayAdCode || `<iframe scrolling="no" src="https://neon.today/show/surf/21651" style="width: 100%; height: 250px; padding: 0; border: 1px dotted grey;" frameborder="0"></iframe>`,
     enableFaucetMode: rawSettings.enableFaucetMode !== undefined ? Boolean(rawSettings.enableFaucetMode) : false,
     enableFaucetPayDeposit: rawSettings.enableFaucetPayDeposit !== undefined ? Boolean(rawSettings.enableFaucetPayDeposit) : false,
-    faucetPayMerchant: rawSettings.faucetPayMerchant || "",
-    faucetPaySecret: rawSettings.faucetPaySecret || "",
+    faucetPayMerchant: rawSettings.faucetPayMerchant || fallbackSettings.faucetPayMerchant || "",
+    faucetPaySecret: rawSettings.faucetPaySecret || fallbackSettings.faucetPaySecret || "",
     enableFaucetPayAutoPay: rawSettings.enableFaucetPayAutoPay !== undefined ? Boolean(rawSettings.enableFaucetPayAutoPay) : true,
-    faucetPayAutoPayMode: rawSettings.faucetPayAutoPayMode || "manual_approval",
-    faucetPayApiKey: rawSettings.faucetPayApiKey || "",
-    faucetPayCurrency: rawSettings.faucetPayCurrency || "USDT",
-    smtpHost: rawSettings.smtpHost || "",
-    smtpPort: rawSettings.smtpPort || 587,
-    smtpUser: rawSettings.smtpUser || "",
-    smtpPass: rawSettings.smtpPass || "",
-    backupSenderEmail: rawSettings.backupSenderEmail || "",
-    backupReceiverEmail: rawSettings.backupReceiverEmail || ""
+    faucetPayAutoPayMode: rawSettings.faucetPayAutoPayMode || fallbackSettings.faucetPayAutoPayMode || "manual_approval",
+    faucetPayApiKey: rawSettings.faucetPayApiKey || fallbackSettings.faucetPayApiKey || "",
+    faucetPayCurrency: rawSettings.faucetPayCurrency || fallbackSettings.faucetPayCurrency || "LTC",
+    faucetPayLtcDefaultMigrated: true,
+    smtpHost: rawSettings.smtpHost || fallbackSettings.smtpHost || "",
+    smtpPort: rawSettings.smtpPort || fallbackSettings.smtpPort || 587,
+    smtpUser: rawSettings.smtpUser || fallbackSettings.smtpUser || "",
+    smtpPass: rawSettings.smtpPass || fallbackSettings.smtpPass || "",
+    backupSenderEmail: rawSettings.backupSenderEmail || fallbackSettings.backupSenderEmail || "",
+    backupReceiverEmail: rawSettings.backupReceiverEmail || fallbackSettings.backupReceiverEmail || ""
   };
 
-  return {
+  const upgradedDb: any = {
     users: normalizedUsers,
     links: normalizedLinks,
     clicksLog: normalizedClicksLog,
     withdrawals: normalizedWithdrawals,
     tickets: normalizedTickets,
     adFlyShorteners: normalizedAdFly,
+    plans: normalizedPlans,
+    depositRequests: rawDepositRequests.filter(Boolean),
+    advertiserCampaigns: rawAdvertiserCampaigns.filter(Boolean),
     settings: normalizedSettings,
     deletedLinksCount: cleanNumber(data.deletedLinksCount ?? data.deleted_links_count ?? 0, 0)
   };
+
+  // Automatically inject/merge all required shorteners (ShortXLinks, SoftURL, ShareDiskLinks, LinkDL) and all 4 Publisher Plans (Default Plan, PLAN 2, ELITE, PLAN 3 [$12 CPM])
+  ensureRequiredShortenersAndPlans(upgradedDb);
+
+  return upgradedDb;
 }
 
   // --- DATABASE EXPORT & RESTORE ENDPOINTS ---
@@ -6479,25 +6681,29 @@ function normalizeAndMigrateDatabase(rawData: any): any {
         return res.status(400).json({ error: "Extracted database backup content is empty." });
       }
 
-      // Normalize and migrate database from any legacy format
+      // Normalize and migrate database from any legacy format while injecting all 4 Plans + LinkDL + ShareDiskLinks
       const migratedDb = normalizeAndMigrateDatabase(rawString);
 
-      // Save database to memory and disk
-      saveDb(migratedDb);
+      // Save database to memory, primary DB_FILE, and all persistent anti-reset vaults
+      saveDb(migratedDb, true);
 
       const usersCount = migratedDb.users.length;
       const linksCount = migratedDb.links.length;
       const clicksCount = migratedDb.clicksLog.length;
+      const plansCount = (migratedDb.plans || []).length;
+      const shortenersCount = (migratedDb.adFlyShorteners || []).length;
 
-      console.log(`[Restore DB] Successfully restored and migrated database! Users: ${usersCount}, Links: ${linksCount}, Clicks: ${clicksCount}`);
+      console.log(`[Restore DB] Successfully restored & upgraded database! Users: ${usersCount}, Links: ${linksCount}, Clicks: ${clicksCount}, Plans: ${plansCount}, Shorteners: ${shortenersCount}`);
 
       return res.json({
         success: true,
-        message: `Database restored & migrated successfully! Loaded ${usersCount} users, ${linksCount} links, and ${clicksCount} click logs.`,
+        message: `Old database upgraded & restored! Preserved ${usersCount} users, ${linksCount} links, and ${clicksCount} click logs, and merged ${plansCount} Publisher Plans (including $12 CPM Plan with LinkDL) into the new protected DB.`,
         summary: {
           usersCount,
           linksCount,
-          clicksCount
+          clicksCount,
+          plansCount,
+          shortenersCount
         }
       });
     } catch (err: any) {
