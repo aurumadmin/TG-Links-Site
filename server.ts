@@ -1324,6 +1324,25 @@ const STORAGE_DIR = path.join(path.dirname(DB_FILE), "storage");
 const PERSISTENT_VAULT_FILE = path.join(STORAGE_DIR, "tglinks_live_db.json");
 const BACKUP_DB_FILE = path.join(path.dirname(DB_FILE), "data.backup.json");
 const PARENT_VAULT_FILE = path.join(path.dirname(DB_FILE), "..", "tglinks_live_db.json");
+const PAID_WITHDRAWALS_LEDGER_FILE = path.join(STORAGE_DIR, "paid_withdrawals_ledger.json");
+
+// In-memory + persistent append-only ledger of all paid/completed withdrawals so a completed withdrawal can NEVER revert to processing or be paid twice
+interface PaidWithdrawalRecord {
+  id: string;
+  status: "completed" | "cancelled" | "returned";
+  payoutId?: string | number;
+  payoutHash?: string;
+  payoutCurrency?: string;
+  payoutAmountSatoshis?: number;
+  payoutCryptoAmount?: number;
+  payoutExchangeRate?: number;
+  payoutNote?: string;
+  processedAt: string;
+}
+
+const paidWithdrawalsLedger = new Map<string, PaidWithdrawalRecord>();
+const inFlightFaucetPayWithdrawals = new Set<string>();
+let isFaucetPayQueueRunning = false;
 
 function atomicWriteFileSync(targetPath: string, content: string): boolean {
   try {
@@ -1345,11 +1364,134 @@ function atomicWriteFileSync(targetPath: string, content: string): boolean {
   }
 }
 
+function loadPaidWithdrawalsLedgerFromDisk() {
+  try {
+    if (fs.existsSync(PAID_WITHDRAWALS_LEDGER_FILE)) {
+      const raw = fs.readFileSync(PAID_WITHDRAWALS_LEDGER_FILE, "utf-8").trim();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          for (const [k, v] of Object.entries(parsed)) {
+            if (k && v && typeof v === "object") {
+              paidWithdrawalsLedger.set(k, v as PaidWithdrawalRecord);
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore initial read error
+  }
+}
+loadPaidWithdrawalsLedgerFromDisk();
+
+function savePaidWithdrawalsLedgerToDisk() {
+  try {
+    const obj: Record<string, PaidWithdrawalRecord> = {};
+    for (const [k, v] of paidWithdrawalsLedger.entries()) {
+      obj[k] = v;
+    }
+    atomicWriteFileSync(PAID_WITHDRAWALS_LEDGER_FILE, JSON.stringify(obj, null, 2));
+  } catch (e) {
+    console.error("[TG Links Ledger] Failed to persist paid withdrawals ledger:", e);
+  }
+}
+
+function recordTerminalWithdrawalInLedger(w: any) {
+  if (!w || !w.id) return;
+  const isCompletedOrPaid =
+    w.status === "completed" ||
+    w.payoutId !== undefined && w.payoutId !== null && String(w.payoutId) !== "" ||
+    w.completedEmailSent === true;
+  const isTerminalOther = w.status === "cancelled" || w.status === "returned";
+
+  if (!isCompletedOrPaid && !isTerminalOther) return;
+
+  const finalStatus: "completed" | "cancelled" | "returned" = isCompletedOrPaid ? "completed" : w.status;
+  const existing = paidWithdrawalsLedger.get(String(w.id));
+  const record: PaidWithdrawalRecord = {
+    id: String(w.id),
+    status: finalStatus,
+    payoutId: w.payoutId ?? existing?.payoutId,
+    payoutHash: w.payoutHash ?? existing?.payoutHash,
+    payoutCurrency: w.payoutCurrency ?? existing?.payoutCurrency,
+    payoutAmountSatoshis: w.payoutAmountSatoshis ?? existing?.payoutAmountSatoshis,
+    payoutCryptoAmount: w.payoutCryptoAmount ?? existing?.payoutCryptoAmount,
+    payoutExchangeRate: w.payoutExchangeRate ?? existing?.payoutExchangeRate,
+    payoutNote: w.payoutNote ?? existing?.payoutNote,
+    processedAt: w.processedAt || existing?.processedAt || new Date().toISOString()
+  };
+
+  const changed = !existing || existing.status !== record.status || existing.payoutId !== record.payoutId;
+  paidWithdrawalsLedger.set(String(w.id), record);
+  if (changed) {
+    savePaidWithdrawalsLedgerToDisk();
+  }
+}
+
+// Enforce that any withdrawal that has ever been paid/completed can NEVER revert to "processing", "pending", or "approved"
+function enforcePaidWithdrawalsLedgerOnDb(dbObj: any): boolean {
+  if (!dbObj || !Array.isArray(dbObj.withdrawals)) return false;
+  let modified = false;
+
+  for (const w of dbObj.withdrawals) {
+    if (!w || !w.id) continue;
+
+    // First, if the withdrawal itself has payoutId or completedEmailSent or status==="completed", register it in the ledger
+    if (
+      w.status === "completed" ||
+      (w.payoutId !== undefined && w.payoutId !== null && String(w.payoutId) !== "") ||
+      w.completedEmailSent === true ||
+      w.status === "cancelled" ||
+      w.status === "returned"
+    ) {
+      recordTerminalWithdrawalInLedger(w);
+    }
+
+    // Second, if this withdrawal ID is in the ledger, force its status to the terminal status (e.g. "completed") so it NEVER reverts to "processing"
+    const ledgerEntry = paidWithdrawalsLedger.get(String(w.id));
+    if (ledgerEntry) {
+      if (w.status !== ledgerEntry.status) {
+        console.warn(`[TG Links Ledger Guard] Prevented withdrawal ${w.id} from reverting from "${ledgerEntry.status}" to "${w.status}"!`);
+        w.status = ledgerEntry.status;
+        modified = true;
+      }
+      if (ledgerEntry.status === "completed") {
+        w.workflowV2 = true;
+        w.completedEmailSent = true;
+        w.approvedEmailSent = true;
+        w.payoutError = undefined;
+        if (ledgerEntry.payoutId !== undefined && !w.payoutId) w.payoutId = ledgerEntry.payoutId;
+        if (ledgerEntry.payoutHash && !w.payoutHash) w.payoutHash = ledgerEntry.payoutHash;
+        if (ledgerEntry.payoutCurrency && !w.payoutCurrency) w.payoutCurrency = ledgerEntry.payoutCurrency;
+        if (ledgerEntry.payoutAmountSatoshis && !w.payoutAmountSatoshis) w.payoutAmountSatoshis = ledgerEntry.payoutAmountSatoshis;
+        if (ledgerEntry.payoutCryptoAmount && !w.payoutCryptoAmount) w.payoutCryptoAmount = ledgerEntry.payoutCryptoAmount;
+        if (ledgerEntry.payoutExchangeRate && !w.payoutExchangeRate) w.payoutExchangeRate = ledgerEntry.payoutExchangeRate;
+        if (ledgerEntry.payoutNote && (!w.payoutNote || w.payoutNote.includes("Waiting for FaucetPay"))) w.payoutNote = ledgerEntry.payoutNote;
+        if (!w.processedAt) w.processedAt = ledgerEntry.processedAt;
+      }
+    }
+  }
+
+  return modified;
+}
+
+function isEmptySeedDb(dbObj: any): boolean {
+  if (!dbObj || typeof dbObj !== "object") return true;
+  const nonAdminUsers = Array.isArray(dbObj.users)
+    ? dbObj.users.filter((u: any) => u && u.id !== "admin-1" && u.id !== "admin-2").length
+    : 0;
+  const linksCount = Array.isArray(dbObj.links) ? dbObj.links.length : 0;
+  const withdrawalsCount = Array.isArray(dbObj.withdrawals) ? dbObj.withdrawals.length : 0;
+  const clicksCount = Array.isArray(dbObj.clicksLog) ? dbObj.clicksLog.length : 0;
+  return nonAdminUsers === 0 && linksCount === 0 && withdrawalsCount === 0 && clicksCount === 0;
+}
+
 // Compute a richness score for a parsed database object so we never overwrite a real populated DB with an empty seed template
 function getDbRichnessScore(dbObj: any): number {
   if (!dbObj || typeof dbObj !== "object") return -1;
   const usersCount = Array.isArray(dbObj.users) ? dbObj.users.length : 0;
-  const linksCount = Array.isArray(dbObj.links) ? dbObj.links.length : 0;
+  const linksCount = (Array.isArray(dbObj.links) ? dbObj.links.length : 0) + Number(dbObj.deletedLinksCount || 0);
   const clicksCount = Array.isArray(dbObj.clicksLog) ? dbObj.clicksLog.length : 0;
   const withdrawalsCount = Array.isArray(dbObj.withdrawals) ? dbObj.withdrawals.length : 0;
   const ticketsCount = Array.isArray(dbObj.tickets) ? dbObj.tickets.length : 0;
@@ -1594,32 +1736,36 @@ function loadDb(forceReload = false): any {
   if (!forceReload && cachedDbInMemory && currentMtime > 0 && currentMtime <= lastDbFileMtime) {
     db = cachedDbInMemory;
   } else {
-    // Read primary DB_FILE and all persistent backup vaults so we never lose data if data.json was overwritten by a code upload or truncated
     const primaryDb = tryReadJsonFile(DB_FILE);
-    const vaultDb = tryReadJsonFile(PERSISTENT_VAULT_FILE);
-    const backupDb = tryReadJsonFile(BACKUP_DB_FILE);
-    const parentVaultDb = tryReadJsonFile(PARENT_VAULT_FILE);
 
-    const candidates: { source: string; data: any; score: number }[] = [];
-    if (primaryDb) candidates.push({ source: "DB_FILE", data: primaryDb, score: getDbRichnessScore(primaryDb) });
-    if (vaultDb) candidates.push({ source: "PERSISTENT_VAULT_FILE", data: vaultDb, score: getDbRichnessScore(vaultDb) });
-    if (backupDb) candidates.push({ source: "BACKUP_DB_FILE", data: backupDb, score: getDbRichnessScore(backupDb) });
-    if (parentVaultDb) candidates.push({ source: "PARENT_VAULT_FILE", data: parentVaultDb, score: getDbRichnessScore(parentVaultDb) });
-    if (cachedDbInMemory) candidates.push({ source: "MEMORY_CACHE", data: cachedDbInMemory, score: getDbRichnessScore(cachedDbInMemory) });
+    // If primaryDb is valid and NOT wiped to the empty seed template, always use primaryDb as the authoritative source!
+    // Only fall back to the persistent vaults if primaryDb is missing, corrupted, or was reset to the empty 2-admin seed template.
+    if (primaryDb && !isEmptySeedDb(primaryDb)) {
+      db = primaryDb;
+    } else {
+      const vaultDb = tryReadJsonFile(PERSISTENT_VAULT_FILE);
+      const backupDb = tryReadJsonFile(BACKUP_DB_FILE);
+      const parentVaultDb = tryReadJsonFile(PARENT_VAULT_FILE);
 
-    if (candidates.length > 0) {
-      // If DB_FILE is valid and at least as rich as any backup vault, use DB_FILE; otherwise recover from the richest vault!
-      candidates.sort((a, b) => b.score - a.score);
-      const bestCandidate = candidates[0];
-      const primaryScore = primaryDb ? getDbRichnessScore(primaryDb) : -1;
+      const candidates: { source: string; data: any; score: number }[] = [];
+      if (primaryDb) candidates.push({ source: "DB_FILE", data: primaryDb, score: getDbRichnessScore(primaryDb) });
+      if (vaultDb) candidates.push({ source: "PERSISTENT_VAULT_FILE", data: vaultDb, score: getDbRichnessScore(vaultDb) });
+      if (backupDb) candidates.push({ source: "BACKUP_DB_FILE", data: backupDb, score: getDbRichnessScore(backupDb) });
+      if (parentVaultDb) candidates.push({ source: "PARENT_VAULT_FILE", data: parentVaultDb, score: getDbRichnessScore(parentVaultDb) });
+      if (cachedDbInMemory) candidates.push({ source: "MEMORY_CACHE", data: cachedDbInMemory, score: getDbRichnessScore(cachedDbInMemory) });
 
-      if (primaryDb && primaryScore >= bestCandidate.score) {
-        db = primaryDb;
-      } else {
-        console.warn(`[TG Links DB Guard] Auto-recovering database from ${bestCandidate.source} (score ${bestCandidate.score} vs primary score ${primaryScore}) to prevent data loss!`);
-        db = JSON.parse(JSON.stringify(bestCandidate.data));
-        // Immediately restore primary DB_FILE from the recovered rich database
-        atomicWriteFileSync(DB_FILE, JSON.stringify(db, null, 2));
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => b.score - a.score);
+        const bestCandidate = candidates[0];
+        const primaryScore = primaryDb ? getDbRichnessScore(primaryDb) : -1;
+
+        if (primaryDb && primaryScore >= bestCandidate.score) {
+          db = primaryDb;
+        } else {
+          console.warn(`[TG Links DB Guard] Auto-recovering database from ${bestCandidate.source} (score ${bestCandidate.score} vs primary score ${primaryScore}) to prevent data loss!`);
+          db = JSON.parse(JSON.stringify(bestCandidate.data));
+          atomicWriteFileSync(DB_FILE, JSON.stringify(db, null, 2));
+        }
       }
     }
   }
@@ -1826,6 +1972,21 @@ function loadDb(forceReload = false): any {
         w.completedEmailSent = true;
         changed = true;
       }
+
+      // If any withdrawal already has a FaucetPay payoutId or completedEmailSent=true, it has ALREADY been paid and MUST be "completed" (never "processing"!)
+      if ((w.payoutId !== undefined && w.payoutId !== null && String(w.payoutId) !== "") || w.completedEmailSent === true) {
+        if (w.status !== "completed" && w.status !== "cancelled" && w.status !== "returned") {
+          w.status = "completed";
+          w.workflowV2 = true;
+          w.payoutError = undefined;
+          w.processedAt = w.processedAt || new Date().toISOString();
+          changed = true;
+        }
+      }
+    }
+
+    if (enforcePaidWithdrawalsLedgerOnDb(db)) {
+      changed = true;
     }
   }
   if (!db.tickets) {
@@ -2022,6 +2183,32 @@ function saveDb(data: any, forceOverwrite = false) {
       return;
     }
   }
+
+  // Merge protection: if `data` is a slightly older reference from an async route that awaited before calling saveDb,
+  // ensure any withdrawals in `cachedDbInMemory` that are already completed/paid or newly created are NEVER reverted or lost!
+  if (!forceOverwrite && cachedDbInMemory && cachedDbInMemory !== data && Array.isArray(cachedDbInMemory.withdrawals)) {
+    if (!Array.isArray(data.withdrawals)) data.withdrawals = [];
+    for (const memW of cachedDbInMemory.withdrawals) {
+      if (!memW || !memW.id) continue;
+      const targetW = data.withdrawals.find((w: any) => w && w.id === memW.id);
+      if (!targetW) {
+        // Preserve newly requested withdrawal that wasn't in the older `data` snapshot
+        data.withdrawals.push(memW);
+      } else if (
+        memW.status === "completed" ||
+        memW.status === "cancelled" ||
+        memW.status === "returned" ||
+        (memW.payoutId !== undefined && memW.payoutId !== null && String(memW.payoutId) !== "") ||
+        memW.completedEmailSent === true
+      ) {
+        // Never allow an older snapshot to overwrite a completed/paid withdrawal back to "processing" or "pending"!
+        Object.assign(targetW, memW);
+      }
+    }
+  }
+
+  // Always enforce the permanent Paid Withdrawals Ledger before writing to disk
+  enforcePaidWithdrawalsLedgerOnDb(data);
 
   try {
     const serialized = JSON.stringify(data, null, 2);
@@ -2563,8 +2750,10 @@ function setupRoutes() {
       adFlyShortenedUrl
     };
 
-    db.links.push(newLink);
-    saveDb(db);
+    // Re-fetch latest DB after await so we never overwrite concurrent withdrawal updates
+    const latestDb = loadDb();
+    latestDb.links.push(newLink);
+    saveDb(latestDb);
 
     const shortenedUrl = `${protocol}://${host}/go/${code}`;
 
@@ -2806,8 +2995,10 @@ Sitemap: ${baseUrl}/sitemap.xml`
       expiresAt: expiresAt || undefined
     };
 
-    db.links.push(newLink);
-    saveDb(db);
+    // Re-fetch latest DB after await so we never overwrite concurrent withdrawal updates
+    const latestDb = loadDb();
+    latestDb.links.push(newLink);
+    saveDb(latestDb);
 
     res.json({ link: newLink });
   });
@@ -4599,99 +4790,202 @@ Sitemap: ${baseUrl}/sitemap.xml`
     db: any,
     ip: string = "127.0.0.1"
   ): Promise<{ success: boolean; isInsufficient: boolean; error?: string; result?: FaucetPaySendResult }> {
-    const apiKey = db.settings?.faucetPayApiKey || db.settings?.faucetPaySecret || "";
-    const currency = db.settings?.faucetPayCurrency || "LTC";
-
-    if (!apiKey) {
-      withdrawal.payoutError = "FaucetPay API key is not configured in Admin Settings.";
-      saveDb(db);
-      return { success: false, isInsufficient: false, error: withdrawal.payoutError };
+    if (!withdrawal || !withdrawal.id) {
+      return { success: false, isInsufficient: false, error: "Invalid withdrawal object" };
     }
 
-    const result = await sendFaucetPayPayout(apiKey, withdrawal.account, withdrawal.amount, currency, ip);
+    const wId = String(withdrawal.id);
 
-    if (result.success) {
-      withdrawal.status = "completed";
-      withdrawal.workflowV2 = true;
-      withdrawal.processedAt = new Date().toISOString();
-      withdrawal.payoutId = result.payoutId;
-      withdrawal.payoutHash = result.payoutUserHash;
-      withdrawal.payoutCurrency = result.currency;
-      withdrawal.payoutAmountSatoshis = result.amountSatoshis;
-      withdrawal.payoutCryptoAmount = result.cryptoAmount;
-      withdrawal.payoutExchangeRate = result.exchangeRate;
-      withdrawal.payoutError = undefined;
-      withdrawal.payoutNote = `Sent ${result.cryptoAmount?.toFixed(8)} ${result.currency} (${result.amountSatoshis?.toLocaleString()} litoshis) at $${result.exchangeRate?.toFixed(2)}/USD via FaucetPay API (Payout ID: #${result.payoutId})`;
-
-      const shouldSendCompleteEmail = Boolean(withdrawal.userEmail && !withdrawal.completedEmailSent);
-      withdrawal.completedEmailSent = true;
-      withdrawal.approvedEmailSent = true;
+    // 1. Strict Idempotency Guard: If already paid/completed in the ledger or on the withdrawal object, NEVER pay again!
+    if (
+      paidWithdrawalsLedger.has(wId) ||
+      withdrawal.status === "completed" ||
+      withdrawal.status === "cancelled" ||
+      withdrawal.status === "returned" ||
+      (withdrawal.payoutId !== undefined && withdrawal.payoutId !== null && String(withdrawal.payoutId) !== "") ||
+      withdrawal.completedEmailSent === true
+    ) {
+      console.warn(`[FaucetPay Guard] Blocked duplicate payout execution for already-processed withdrawal ${wId}`);
+      recordTerminalWithdrawalInLedger(withdrawal);
+      enforcePaidWithdrawalsLedgerOnDb(db);
       saveDb(db);
+      return { success: false, isInsufficient: false, error: "This withdrawal has already been paid and completed." };
+    }
 
-      if (shouldSendCompleteEmail) {
-        sendSmtpEmail({
-          to: withdrawal.userEmail,
-          subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Paid via FaucetPay ($${withdrawal.amount.toFixed(2)})`,
-          text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via FaucetPay (${withdrawal.account}) has been completed!\n\nPayout ID: ${result.payoutId}\nCurrency: ${result.currency} (${result.cryptoAmount?.toFixed(8)} ${result.currency})\nDate: ${withdrawal.processedAt}\n\nThank you for using ${db.settings?.siteName || "TG Links"}!`,
-          html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-            <h2 style="color: #16a34a; margin-top: 0;">🎉 Payout Sent via FaucetPay!</h2>
-            <p>Your withdrawal has been successfully transferred to your FaucetPay account:</p>
-            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
-              <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)} (${result.cryptoAmount?.toFixed(8)} ${result.currency})</p>
-              <p style="margin: 4px 0;"><strong>FaucetPay Destination:</strong> ${withdrawal.account}</p>
-              <p style="margin: 4px 0;"><strong>Payout ID:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-weight: bold;">#${result.payoutId}</code></p>
-              <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">COMPLETED & TRANSFERRED</span></p>
-            </div>
-            <p style="font-size: 13px; color: #64748b;">The payment is now available in your FaucetPay balance.</p>
-          </div>`
-        }).catch((e: any) => console.error("[SMTP Error] FaucetPay completion email:", e));
+    // 2. In-Flight Mutex Guard: If this withdrawal is currently being processed by another request/timer, block immediately!
+    if (inFlightFaucetPayWithdrawals.has(wId)) {
+      console.warn(`[FaucetPay Guard] Blocked concurrent in-flight payout execution for withdrawal ${wId}`);
+      return { success: false, isInsufficient: false, error: "Payout for this withdrawal is already in progress." };
+    }
+
+    inFlightFaucetPayWithdrawals.add(wId);
+
+    try {
+      // Re-verify against latest DB right before calling external FaucetPay API
+      const preCheckDb = loadDb();
+      const preCheckW = (preCheckDb.withdrawals || []).find((x: any) => x && x.id === wId);
+      if (
+        preCheckW &&
+        (
+          preCheckW.status === "completed" ||
+          preCheckW.status === "cancelled" ||
+          preCheckW.status === "returned" ||
+          (preCheckW.payoutId !== undefined && preCheckW.payoutId !== null && String(preCheckW.payoutId) !== "") ||
+          preCheckW.completedEmailSent === true
+        )
+      ) {
+        recordTerminalWithdrawalInLedger(preCheckW);
+        Object.assign(withdrawal, preCheckW);
+        return { success: false, isInsufficient: false, error: "This withdrawal has already been paid and completed." };
       }
 
-      return { success: true, isInsufficient: false, result };
-    } else if (result.isInsufficientBalance) {
-      // Insufficient balance on FaucetPay faucet -> put under "processing" state.
-      // CRITICAL: Do NOT send any email when a withdrawal is under "processing" so periodic retries never spam the user!
-      withdrawal.status = "processing";
-      withdrawal.workflowV2 = true;
-      withdrawal.payoutError = `FaucetPay faucet balance low. Queued for automatic payout once funds arrive (Status 402: ${result.message})`;
-      withdrawal.payoutNote = "Processing: Waiting for FaucetPay funds replenishment";
-      saveDb(db);
+      const apiKey = preCheckDb.settings?.faucetPayApiKey || preCheckDb.settings?.faucetPaySecret || db.settings?.faucetPayApiKey || db.settings?.faucetPaySecret || "";
+      const currency = preCheckDb.settings?.faucetPayCurrency || db.settings?.faucetPayCurrency || "LTC";
 
-      return { success: false, isInsufficient: true, error: withdrawal.payoutError, result };
-    } else {
-      withdrawal.payoutError = `FaucetPay transfer failed (${result.status}): ${result.message}`;
-      saveDb(db);
-      return { success: false, isInsufficient: false, error: withdrawal.payoutError, result };
+      if (!apiKey) {
+        withdrawal.payoutError = "FaucetPay API key is not configured in Admin Settings.";
+        saveDb(preCheckDb);
+        return { success: false, isInsufficient: false, error: withdrawal.payoutError };
+      }
+
+      const result = await sendFaucetPayPayout(apiKey, withdrawal.account, withdrawal.amount, currency, ip);
+
+      // Re-load the freshest DB after the network await so we never overwrite concurrent state
+      const latestDb = loadDb();
+      const targetW = (latestDb.withdrawals || []).find((x: any) => x && x.id === wId) || withdrawal;
+
+      if (result.success) {
+        const nowIso = new Date().toISOString();
+        const resolvedPayoutId = result.payoutId || `fp-${Date.now()}`;
+        const noteText = `Sent ${result.cryptoAmount?.toFixed(8)} ${result.currency} (${result.amountSatoshis?.toLocaleString()} litoshis) at $${result.exchangeRate?.toFixed(2)}/USD via FaucetPay API (Payout ID: #${resolvedPayoutId})`;
+
+        const shouldSendCompleteEmail = Boolean((targetW.userEmail || withdrawal.userEmail) && !targetW.completedEmailSent && !withdrawal.completedEmailSent);
+
+        const completedFields = {
+          status: "completed" as const,
+          workflowV2: true,
+          processedAt: nowIso,
+          payoutId: resolvedPayoutId,
+          payoutHash: result.payoutUserHash,
+          payoutCurrency: result.currency,
+          payoutAmountSatoshis: result.amountSatoshis,
+          payoutCryptoAmount: result.cryptoAmount,
+          payoutExchangeRate: result.exchangeRate,
+          payoutError: undefined,
+          payoutNote: noteText,
+          completedEmailSent: true,
+          approvedEmailSent: true
+        };
+
+        Object.assign(withdrawal, completedFields);
+        Object.assign(targetW, completedFields);
+
+        // Immediately lock this withdrawal in the permanent disk ledger so it can NEVER become "processing" again!
+        recordTerminalWithdrawalInLedger(targetW);
+        saveDb(latestDb);
+
+        if (shouldSendCompleteEmail) {
+          sendSmtpEmail({
+            to: targetW.userEmail || withdrawal.userEmail,
+            subject: `[${latestDb.settings?.siteName || "TG Links"}] Withdrawal Paid via FaucetPay ($${withdrawal.amount.toFixed(2)})`,
+            text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via FaucetPay (${withdrawal.account}) has been completed!\n\nPayout ID: ${resolvedPayoutId}\nCurrency: ${result.currency} (${result.cryptoAmount?.toFixed(8)} ${result.currency})\nDate: ${nowIso}\n\nThank you for using ${latestDb.settings?.siteName || "TG Links"}!`,
+            html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+              <h2 style="color: #16a34a; margin-top: 0;">🎉 Payout Sent via FaucetPay!</h2>
+              <p>Your withdrawal has been successfully transferred to your FaucetPay account:</p>
+              <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
+                <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)} (${result.cryptoAmount?.toFixed(8)} ${result.currency})</p>
+                <p style="margin: 4px 0;"><strong>FaucetPay Destination:</strong> ${withdrawal.account}</p>
+                <p style="margin: 4px 0;"><strong>Payout ID:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-weight: bold;">#${resolvedPayoutId}</code></p>
+                <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">COMPLETED & TRANSFERRED</span></p>
+              </div>
+              <p style="font-size: 13px; color: #64748b;">The payment is now available in your FaucetPay balance.</p>
+            </div>`
+          }).catch((e: any) => console.error("[SMTP Error] FaucetPay completion email:", e));
+        }
+
+        return { success: true, isInsufficient: false, result };
+      } else if (result.isInsufficientBalance) {
+        // CRITICAL: Never set status to "processing" if this withdrawal was already completed!
+        if (paidWithdrawalsLedger.has(wId) || targetW.status === "completed" || targetW.payoutId || targetW.completedEmailSent) {
+          enforcePaidWithdrawalsLedgerOnDb(latestDb);
+          saveDb(latestDb);
+          return { success: false, isInsufficient: false, error: "Withdrawal was already completed." };
+        }
+
+        // Insufficient balance on FaucetPay faucet -> put under "processing" state.
+        // CRITICAL: Do NOT send any email when a withdrawal is under "processing" so periodic retries never spam the user!
+        const errText = `FaucetPay faucet balance low. Queued for automatic payout once funds arrive (Status 402: ${result.message})`;
+        const noteText = "Processing: Waiting for FaucetPay funds replenishment";
+        withdrawal.status = "processing";
+        withdrawal.workflowV2 = true;
+        withdrawal.payoutError = errText;
+        withdrawal.payoutNote = noteText;
+
+        targetW.status = "processing";
+        targetW.workflowV2 = true;
+        targetW.payoutError = errText;
+        targetW.payoutNote = noteText;
+        saveDb(latestDb);
+
+        return { success: false, isInsufficient: true, error: errText, result };
+      } else {
+        const errText = `FaucetPay transfer failed (${result.status}): ${result.message}`;
+        withdrawal.payoutError = errText;
+        targetW.payoutError = errText;
+        saveDb(latestDb);
+        return { success: false, isInsufficient: false, error: errText, result };
+      }
+    } finally {
+      inFlightFaucetPayWithdrawals.delete(wId);
     }
   }
 
   async function checkAndProcessQueuedFaucetPayWithdrawals() {
-    const db = loadDb();
-    const apiKey = db.settings?.faucetPayApiKey || db.settings?.faucetPaySecret || "";
-    if (!apiKey || db.settings?.enableFaucetPayAutoPay === false) return;
+    if (isFaucetPayQueueRunning) return;
+    isFaucetPayQueueRunning = true;
 
-    const queued = (db.withdrawals || []).filter((w: any) => 
-      w && w.status === "processing" && isFaucetPayMethod(w.method)
-    );
+    try {
+      const db = loadDb();
+      const apiKey = db.settings?.faucetPayApiKey || db.settings?.faucetPaySecret || "";
+      if (!apiKey || db.settings?.enableFaucetPayAutoPay === false) return;
 
-    if (queued.length === 0) return;
-
-    for (const w of queued) {
-      try {
-        const res = await executeFaucetPayWithdrawal(w, db);
-        if (res.success) {
-          console.log(`[FaucetPay Auto-Pay] Queued withdrawal ${w.id} successfully processed! Payout ID: #${w.payoutId}`);
-        } else if (res.isInsufficient) {
-          // Faucet balance still insufficient, pause queue check to avoid rate-limiting
-          break;
-        }
-      } catch (e) {
-        console.error(`[FaucetPay Auto-Pay] Error processing queued withdrawal ${w.id}:`, e);
+      // First enforce ledger so any withdrawal that was already paid is immediately marked "completed"
+      if (enforcePaidWithdrawalsLedgerOnDb(db)) {
+        saveDb(db);
       }
+
+      const queued = (db.withdrawals || []).filter((w: any) =>
+        w &&
+        w.status === "processing" &&
+        isFaucetPayMethod(w.method) &&
+        !paidWithdrawalsLedger.has(String(w.id)) &&
+        !inFlightFaucetPayWithdrawals.has(String(w.id)) &&
+        !w.payoutId &&
+        !w.completedEmailSent &&
+        !w.processedAt
+      );
+
+      if (queued.length === 0) return;
+
+      for (const w of queued) {
+        try {
+          const res = await executeFaucetPayWithdrawal(w, db);
+          if (res.success) {
+            console.log(`[FaucetPay Auto-Pay] Queued withdrawal ${w.id} successfully processed! Payout ID: #${w.payoutId}`);
+          } else if (res.isInsufficient) {
+            // Faucet balance still insufficient, pause queue check to avoid rate-limiting
+            break;
+          }
+        } catch (e) {
+          console.error(`[FaucetPay Auto-Pay] Error processing queued withdrawal ${w.id}:`, e);
+        }
+      }
+    } finally {
+      isFaucetPayQueueRunning = false;
     }
   }
 
-  // Periodic processor: check queued processing withdrawals every 60 seconds
+  // Periodic processor: check genuinely unpaid queued processing withdrawals every 60 seconds
   setInterval(() => {
     checkAndProcessQueuedFaucetPayWithdrawals().catch(e => console.error("[FaucetPay Interval Error]", e));
   }, 60000);
@@ -4754,16 +5048,18 @@ Sitemap: ${baseUrl}/sitemap.xml`
     db.withdrawals.push(newWithdrawal);
     saveDb(db);
 
-    // If FaucetPay method and Auto-Pay is set to "instant", process immediately!
+    // If FaucetPay method and Auto-Pay is set to "instant", process synchronously with await so it completes cleanly once!
     const isFaucet = isFaucetPayMethod(method);
     const autoPayEnabled = db.settings?.enableFaucetPayAutoPay !== false;
     const isInstantMode = db.settings?.faucetPayAutoPayMode === "instant";
 
     if (isFaucet && autoPayEnabled && isInstantMode) {
       const clientIp = getClientIp(req);
-      executeFaucetPayWithdrawal(newWithdrawal, db, clientIp).catch((err) => {
+      try {
+        await executeFaucetPayWithdrawal(newWithdrawal, db, clientIp);
+      } catch (err) {
         console.error("[Instant FaucetPay Execution Error]", err);
-      });
+      }
     }
 
     // 1. Send confirmation email to user
@@ -5731,27 +6027,50 @@ ${ticket.adminReply}
     const clientIp = getClientIp(req);
     const resolvedAction = String(action || status || "").toLowerCase();
 
+    // Prevent re-approving or retrying a withdrawal that has already been paid/completed
+    const isAlreadyPaidOrCompleted =
+      paidWithdrawalsLedger.has(String(withdrawal.id)) ||
+      withdrawal.status === "completed" ||
+      (withdrawal.payoutId !== undefined && withdrawal.payoutId !== null && String(withdrawal.payoutId) !== "") ||
+      withdrawal.completedEmailSent === true;
+
     if (resolvedAction === "approve" || resolvedAction === "approved") {
+      if (isAlreadyPaidOrCompleted) {
+        withdrawal.status = "completed";
+        recordTerminalWithdrawalInLedger(withdrawal);
+        saveDb(db);
+        return res.json({
+          success: true,
+          withdrawal,
+          autoPaid: false,
+          message: "This withdrawal has already been paid and completed."
+        });
+      }
+
       withdrawal.status = "approved";
       withdrawal.workflowV2 = true;
       withdrawal.approvedAt = new Date().toISOString();
       withdrawal.payoutError = undefined;
+      saveDb(db);
 
       const sendApprovedNotificationOnce = () => {
-        if (withdrawal.userEmail && !withdrawal.approvedEmailSent) {
+        const freshDb = loadDb();
+        const freshW = (freshDb.withdrawals || []).find((x: any) => x && x.id === withdrawal.id) || withdrawal;
+        if (freshW.userEmail && !freshW.approvedEmailSent) {
+          freshW.approvedEmailSent = true;
           withdrawal.approvedEmailSent = true;
-          saveDb(db);
+          saveDb(freshDb);
           sendSmtpEmail({
-            to: withdrawal.userEmail,
-            subject: `[${db.settings?.siteName || "TG Links"}] Withdrawal Request Approved ($${withdrawal.amount.toFixed(2)})`,
-            text: `Hello,\n\nYour withdrawal request of $${withdrawal.amount.toFixed(2)} via ${withdrawal.method} (${withdrawal.account}) has been APPROVED!\n\nOur payment team is processing the disbursement.`,
+            to: freshW.userEmail,
+            subject: `[${freshDb.settings?.siteName || "TG Links"}] Withdrawal Request Approved ($${freshW.amount.toFixed(2)})`,
+            text: `Hello,\n\nYour withdrawal request of $${freshW.amount.toFixed(2)} via ${freshW.method} (${freshW.account}) has been APPROVED!\n\nOur payment team is processing the disbursement.`,
             html: `<div style="font-family: system-ui, sans-serif; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
               <h2 style="color: #16a34a; margin-top: 0;">✅ Withdrawal Approved!</h2>
-              <p>Your withdrawal on <strong>${db.settings?.siteName || "TG Links"}</strong> has been reviewed and approved:</p>
+              <p>Your withdrawal on <strong>${freshDb.settings?.siteName || "TG Links"}</strong> has been reviewed and approved:</p>
               <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0;">
-                <p style="margin: 4px 0;"><strong>Amount:</strong> $${withdrawal.amount.toFixed(2)}</p>
-                <p style="margin: 4px 0;"><strong>Method:</strong> ${withdrawal.method}</p>
-                <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${withdrawal.account}</p>
+                <p style="margin: 4px 0;"><strong>Amount:</strong> $${freshW.amount.toFixed(2)}</p>
+                <p style="margin: 4px 0;"><strong>Method:</strong> ${freshW.method}</p>
+                <p style="margin: 4px 0;"><strong>Payout Account:</strong> ${freshW.account}</p>
                 <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">APPROVED</span></p>
               </div>
               <p style="font-size: 13px; color: #334155;">Disbursement is in progress.</p>
@@ -5766,13 +6085,12 @@ ${ticket.adminReply}
       const autoPayMode = db.settings?.faucetPayAutoPayMode || "manual_approval";
 
       if (isFaucet && autoPayEnabled && autoPayMode !== "disabled") {
-        // Automatically execute FaucetPay payout
+        // Automatically execute FaucetPay payout (saves fresh DB internally)
         const execRes = await executeFaucetPayWithdrawal(withdrawal, db, clientIp);
         if (!execRes.success) {
           // Send the single Approved email once when approved (never repeated during processing retries)
           sendApprovedNotificationOnce();
         }
-        saveDb(db);
         return res.json({ 
           success: true, 
           withdrawal,
@@ -5786,7 +6104,6 @@ ${ticket.adminReply}
         });
       }
 
-      saveDb(db);
       sendApprovedNotificationOnce();
 
       return res.json({ success: true, withdrawal, message: "Withdrawal approved successfully." });
@@ -5794,11 +6111,12 @@ ${ticket.adminReply}
     } else if (resolvedAction === "complete" || resolvedAction === "completed") {
       withdrawal.status = "completed";
       withdrawal.workflowV2 = true;
-      withdrawal.processedAt = new Date().toISOString();
+      withdrawal.processedAt = withdrawal.processedAt || new Date().toISOString();
       withdrawal.payoutError = undefined;
       const shouldSendCompleteEmail = Boolean(withdrawal.userEmail && !withdrawal.completedEmailSent);
       withdrawal.completedEmailSent = true;
       withdrawal.approvedEmailSent = true;
+      recordTerminalWithdrawalInLedger(withdrawal);
       saveDb(db);
 
       if (shouldSendCompleteEmail) {
@@ -5822,6 +6140,9 @@ ${ticket.adminReply}
       return res.json({ success: true, withdrawal, message: "Withdrawal marked as completed." });
 
     } else if (resolvedAction === "return" || resolvedAction === "returned") {
+      if (withdrawal.status === "returned") {
+        return res.status(400).json({ error: "Withdrawal has already been returned to user balance." });
+      }
       // User gets refunded back into their TG Links account balance!
       withdrawal.status = "returned";
       withdrawal.returnedAt = new Date().toISOString();
@@ -5831,6 +6152,7 @@ ${ticket.adminReply}
       if (user) {
         user.balance = Number((user.balance + withdrawal.amount).toFixed(6));
       }
+      recordTerminalWithdrawalInLedger(withdrawal);
       saveDb(db);
 
       if (withdrawal.userEmail) {
@@ -5858,6 +6180,7 @@ ${ticket.adminReply}
       withdrawal.status = "cancelled";
       withdrawal.processedAt = new Date().toISOString();
       withdrawal.payoutNote = reason || "Cancelled by admin";
+      recordTerminalWithdrawalInLedger(withdrawal);
       saveDb(db);
 
       if (withdrawal.userEmail) {
@@ -5875,9 +6198,19 @@ ${ticket.adminReply}
       return res.json({ success: true, withdrawal, message: "Withdrawal cancelled." });
 
     } else if (resolvedAction === "retry_faucetpay") {
-      // Re-attempt FaucetPay transfer
+      if (isAlreadyPaidOrCompleted) {
+        withdrawal.status = "completed";
+        recordTerminalWithdrawalInLedger(withdrawal);
+        saveDb(db);
+        return res.json({
+          success: false,
+          withdrawal,
+          insufficientFunds: false,
+          message: "This withdrawal has already been paid and completed."
+        });
+      }
+      // Re-attempt FaucetPay transfer (saves fresh DB internally)
       const execRes = await executeFaucetPayWithdrawal(withdrawal, db, clientIp);
-      saveDb(db);
       return res.json({
         success: execRes.success,
         withdrawal,
