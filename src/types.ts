@@ -159,6 +159,14 @@ export interface SystemSettings {
   adBottomCenterCode?: string;
   adRightCode?: string;
   ad300x600Code?: string;
+  // Final Destination Page ("Your Destination is Ready!") Banner Ad Zones
+  enableFinalPageBanners?: boolean;
+  finalPageHeaderCode?: string;
+  finalPageTopBanner?: string;
+  finalPageMiddleBanner?: string;
+  finalPageBottomBanner?: string;
+  finalPageLeftBanner?: string;
+  finalPageRightBanner?: string;
   enableSponsoredAd1?: boolean;
   sponsoredAd1Url?: string;
   sponsoredAd1Timer?: number;

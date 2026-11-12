@@ -871,7 +871,16 @@ function verifyAndConsumeTokenResult(
 }
 
 // Helper to render on-domain TG Links destination ready completion page
-function renderTgLinksCompletionPage(code: string, targetUrl: string): string {
+function renderTgLinksCompletionPage(code: string, targetUrl: string, settingsArg?: any): string {
+  const settings = settingsArg || (loadDb()?.settings || {});
+  const bannersEnabled = settings?.enableFinalPageBanners !== false;
+  const headerCode = bannersEnabled ? String(settings?.finalPageHeaderCode || "").trim() : "";
+  const topBanner = bannersEnabled ? String(settings?.finalPageTopBanner || "").trim() : "";
+  const middleBanner = bannersEnabled ? String(settings?.finalPageMiddleBanner || "").trim() : "";
+  const bottomBanner = bannersEnabled ? String(settings?.finalPageBottomBanner || "").trim() : "";
+  const leftBanner = bannersEnabled ? String(settings?.finalPageLeftBanner || "").trim() : "";
+  const rightBanner = bannersEnabled ? String(settings?.finalPageRightBanner || "").trim() : "";
+
   let displayUrl = targetUrl;
   try {
     const u = new URL(targetUrl);
@@ -896,7 +905,9 @@ function renderTgLinksCompletionPage(code: string, targetUrl: string): string {
       50% { opacity: 0.55; transform: scale(1.05); }
     }
     .pulse-glow { animation: pulseGlow 4s ease-in-out infinite; }
+    .tg-ad-slot iframe, .tg-ad-slot img { max-width: 100%; margin: 0 auto; display: block; border-radius: 0.75rem; }
   </style>
+  ${headerCode ? `<!-- Final Destination Page Header Ad / Script -->\n  ${headerCode}` : ""}
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white font-sans antialiased">
 
@@ -914,56 +925,98 @@ function renderTgLinksCompletionPage(code: string, targetUrl: string): string {
     </div>
   </header>
 
-  <!-- Main Content Card -->
-  <main class="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
+  <!-- Main Content & Banner Ad Zones -->
+  <main class="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden gap-6">
     <!-- Ambient Background Glow -->
     <div class="absolute w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none pulse-glow"></div>
     <div class="absolute -bottom-10 -right-10 w-80 h-80 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none"></div>
 
-    <div class="relative w-full max-w-md bg-slate-900/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl shadow-indigo-950/50 backdrop-blur-xl text-center space-y-6">
-      
-      <!-- Verified Badge Icon -->
-      <div class="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-indigo-500/20 border border-emerald-500/30 flex items-center justify-center shadow-lg shadow-emerald-500/10">
-        <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
-        </svg>
+    ${topBanner ? `
+    <!-- Top Banner Ad Slot -->
+    <div class="relative z-10 w-full max-w-4xl flex flex-col items-center justify-center">
+      <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/60 border border-slate-800/80 p-2 shadow-lg">
+        ${topBanner}
       </div>
+    </div>
+    ` : ""}
 
-      <!-- Title & Description -->
-      <div class="space-y-2">
-        <h1 class="text-2xl font-black text-white tracking-tight">Your Destination is Ready!</h1>
-        <p class="text-slate-400 text-sm leading-relaxed">
-          Shortlink step completed successfully. Click the button below to open your target link.
-        </p>
+    <div class="relative z-10 w-full max-w-6xl flex flex-col lg:flex-row items-center justify-center gap-6">
+      ${leftBanner ? `
+      <!-- Left Sidebar Banner Ad Slot -->
+      <div class="tg-ad-slot w-full lg:w-auto lg:min-w-[160px] lg:max-w-[320px] flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/60 border border-slate-800/80 p-2 shadow-lg order-2 lg:order-1">
+        ${leftBanner}
       </div>
+      ` : ""}
 
-      <!-- Target URL Box -->
-      <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-left space-y-1">
-        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Destination URL</div>
-        <div class="font-mono text-xs text-indigo-300 truncate font-semibold">
-          ${safeDisplayUrl}
+      <!-- Center Destination Ready Card -->
+      <div class="relative w-full max-w-md bg-slate-900/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl shadow-indigo-950/50 backdrop-blur-xl text-center space-y-6 order-1 lg:order-2">
+        
+        <!-- Verified Badge Icon -->
+        <div class="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-indigo-500/20 border border-emerald-500/30 flex items-center justify-center shadow-lg shadow-emerald-500/10">
+          <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+          </svg>
+        </div>
+
+        <!-- Title & Description -->
+        <div class="space-y-2">
+          <h1 class="text-2xl font-black text-white tracking-tight">Your Destination is Ready!</h1>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            Shortlink step completed successfully. Click the button below to open your target link.
+          </p>
+        </div>
+
+        <!-- Target URL Box -->
+        <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-left space-y-1">
+          <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Destination URL</div>
+          <div class="font-mono text-xs text-indigo-300 truncate font-semibold">
+            ${safeDisplayUrl}
+          </div>
+        </div>
+
+        ${middleBanner ? `
+        <!-- Center Inside-Card Banner Ad Slot (Above Open Destination Button) -->
+        <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-2xl bg-slate-950/80 border border-slate-800/90 p-2">
+          ${middleBanner}
+        </div>
+        ` : ""}
+
+        <!-- Open Destination Button -->
+        <div class="pt-2">
+          <a 
+            id="destBtn"
+            href="${safeTargetUrl}" 
+            rel="noreferrer noopener"
+            class="w-full inline-flex items-center justify-center gap-2.5 px-6 py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-bold text-base shadow-xl shadow-indigo-500/25 hover:shadow-indigo-500/40 transform active:scale-[0.98] transition-all cursor-pointer group"
+          >
+            <span>Open Destination</span>
+            <svg class="w-5 h-5 text-indigo-200 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+            </svg>
+          </a>
+        </div>
+
+        <div class="text-[11px] text-slate-500 font-medium">
+          Powered by <span class="text-slate-400 font-semibold">TG Links Network</span> &bull; 100% Verified
         </div>
       </div>
 
-      <!-- Open Destination Button -->
-      <div class="pt-2">
-        <a 
-          id="destBtn"
-          href="${safeTargetUrl}" 
-          rel="noreferrer noopener"
-          class="w-full inline-flex items-center justify-center gap-2.5 px-6 py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-bold text-base shadow-xl shadow-indigo-500/25 hover:shadow-indigo-500/40 transform active:scale-[0.98] transition-all cursor-pointer group"
-        >
-          <span>Open Destination</span>
-          <svg class="w-5 h-5 text-indigo-200 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-          </svg>
-        </a>
+      ${rightBanner ? `
+      <!-- Right Sidebar Banner Ad Slot -->
+      <div class="tg-ad-slot w-full lg:w-auto lg:min-w-[160px] lg:max-w-[320px] flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/60 border border-slate-800/80 p-2 shadow-lg order-3">
+        ${rightBanner}
       </div>
+      ` : ""}
+    </div>
 
-      <div class="text-[11px] text-slate-500 font-medium">
-        Powered by <span class="text-slate-400 font-semibold">TG Links Network</span> &bull; 100% Verified
+    ${bottomBanner ? `
+    <!-- Bottom Banner Ad Slot -->
+    <div class="relative z-10 w-full max-w-4xl flex flex-col items-center justify-center">
+      <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/60 border border-slate-800/80 p-2 shadow-lg">
+        ${bottomBanner}
       </div>
     </div>
+    ` : ""}
   </main>
 
   <!-- Footer -->
@@ -3614,7 +3667,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl} (CPM: $${getCurrentCpmForLink(link, db)})`);
-      return res.send(renderTgLinksCompletionPage(code, targetUrl));
+      return res.send(renderTgLinksCompletionPage(code, targetUrl, db.settings));
     }
 
     const ip = getClientIp(req);
@@ -4128,7 +4181,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
-      return res.send(renderTgLinksCompletionPage(code, targetUrl));
+      return res.send(renderTgLinksCompletionPage(code, targetUrl, db.settings));
     }
 
     // Direct HTTP 302 redirect to original destination URL (for faucet mode)
@@ -6545,6 +6598,13 @@ ${ticket.adminReply}
       advCpmBanner300x600: s.advCpmBanner300x600 ?? 2.5,
       advCpmBannerLeft: s.advCpmBannerLeft ?? 1.5,
       advCpmBannerRight: s.advCpmBannerRight ?? 1.5,
+      enableFinalPageBanners: s.enableFinalPageBanners !== false,
+      finalPageHeaderCode: s.finalPageHeaderCode || "",
+      finalPageTopBanner: s.finalPageTopBanner || "",
+      finalPageMiddleBanner: s.finalPageMiddleBanner || "",
+      finalPageBottomBanner: s.finalPageBottomBanner || "",
+      finalPageLeftBanner: s.finalPageLeftBanner || "",
+      finalPageRightBanner: s.finalPageRightBanner || "",
       homeTheme: s.homeTheme || "default",
       activeAdvertiserAds: activeAds
     });
