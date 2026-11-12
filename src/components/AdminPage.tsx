@@ -63,7 +63,10 @@ import {
   RotateCcw,
   Key,
   Wallet,
-  Coins
+  Coins,
+  Pause,
+  Play,
+  Clock
 } from "lucide-react";
 import { motion } from "motion/react";
 import SiteLogo, { getCachedSettings, saveCachedSettings } from "./SiteLogo";
@@ -206,6 +209,8 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [planSaveLoading, setPlanSaveLoading] = useState(false);
   const [planSaveMsg, setPlanSaveMsg] = useState("");
+  const [planPauseDurations, setPlanPauseDurations] = useState<Record<string, string>>({});
+  const [pauseLoadingPlanId, setPauseLoadingPlanId] = useState<string | null>(null);
   const [planFormData, setPlanFormData] = useState<any>({
     id: "",
     name: "",
@@ -215,6 +220,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
     description: "",
     isDefault: false,
     enabled: true,
+    paused: false,
     isFaucetPlan: false,
     requirements: ""
   });
@@ -975,8 +981,14 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       if (res?.success && res.plans) {
         setAdminPlansList(res.plans);
         if (res.shorteners) setExternalApis(res.shorteners);
-        setPlanSaveMsg("Publisher plan saved successfully!");
-        setTimeout(() => setPlanSaveMsg(""), 3000);
+        const migratedNote = res.migratedUsersCount
+          ? ` (${res.migratedUsersCount} user(s) switched to Default Plan)`
+          : "";
+        setPlanSaveMsg(`Publisher plan saved successfully!${migratedNote}`);
+        if (res.migratedUsersCount) {
+          loadAdminData();
+        }
+        setTimeout(() => setPlanSaveMsg(""), 4000);
         setEditingPlanId(null);
         setPlanFormData({
           id: "",
@@ -987,6 +999,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
           description: "",
           isDefault: false,
           enabled: true,
+          paused: false,
           requirements: ""
         });
       } else {
@@ -1011,9 +1024,46 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       description: plan.description || "",
       isDefault: !!plan.isDefault,
       enabled: plan.enabled !== undefined ? !!plan.enabled : true,
+      paused: !!plan.paused,
       isFaucetPlan: plan.isFaucetPlan || plan.faucetMode || false,
       requirements: plan.requirements || ""
     });
+  };
+
+  const handleTogglePausePlan = async (plan: any, nextPaused: boolean) => {
+    if (plan.isDefault || String(plan.id || "").toLowerCase() === "default") {
+      alert("The Default Plan cannot be paused because users on paused plans are automatically reassigned to the Default Plan.");
+      return;
+    }
+
+    const durationVal = Number(planPauseDurations[plan.id] || 0);
+    setPauseLoadingPlanId(plan.id);
+    try {
+      const res = await fetchApi(`/admin/plans/${plan.id}/pause`, {
+        method: "POST",
+        body: JSON.stringify({
+          paused: nextPaused,
+          durationHours: nextPaused && durationVal > 0 ? durationVal : null
+        })
+      });
+      if (res?.success && res.plans) {
+        setAdminPlansList(res.plans);
+        setPlanSaveMsg(
+          res.message ||
+            (nextPaused
+              ? `Plan "${plan.name}" paused. ${res.migratedUsersCount || 0} user(s) automatically switched to Default Plan.`
+              : `Plan "${plan.name}" resumed!`)
+        );
+        setTimeout(() => setPlanSaveMsg(""), 5000);
+        loadAdminData();
+      } else {
+        alert(res?.error || "Failed to update plan pause state.");
+      }
+    } catch (err: any) {
+      alert("Error updating plan pause status: " + (err?.message || "Unknown error"));
+    } finally {
+      setPauseLoadingPlanId(null);
+    }
   };
 
   const handleDeletePlan = async (planId: string) => {
@@ -6461,6 +6511,18 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                       />
                       <span>🚰 Faucet Mode Plan (/faucet/ routing)</span>
                     </label>
+
+                    {!planFormData.isDefault && String(planFormData.id || "").toLowerCase() !== "default" && (
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-orange-400">
+                        <input
+                          type="checkbox"
+                          checked={!!planFormData.paused}
+                          onChange={(e) => setPlanFormData({ ...planFormData, paused: e.target.checked })}
+                          className="rounded border-slate-700 text-orange-500 focus:ring-0"
+                        />
+                        <span>⏸ Pause Plan (Move active users to Default Plan)</span>
+                      </label>
+                    )}
                   </div>
 
                   <div className="pt-2 flex gap-3">
@@ -6486,6 +6548,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                             description: "",
                             isDefault: false,
                             enabled: true,
+                            paused: false,
                             requirements: ""
                           });
                         }}
@@ -6503,7 +6566,7 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden backdrop-blur-md shadow-xl">
                   <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
                     <h3 className="font-extrabold text-white text-sm">Configured Publisher Plans ({adminPlansList.length})</h3>
-                    <span className="text-[11px] text-slate-400">Users select plans in dashboard</span>
+                    <span className="text-[11px] text-slate-400">Paused plans move active users to Default Plan</span>
                   </div>
 
                   <div className="divide-y divide-slate-800">
@@ -6521,14 +6584,25 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                         shareDiskApiObj.enabled !== false &&
                         (plan.shortenerIds || []).includes(shareDiskApiObj.id)
                       );
+                      const isPaused = Boolean(plan.paused && !plan.isDefault && String(plan.id || "").toLowerCase() !== "default");
+                      const usersOnPlanCount = usersList.filter((u) => {
+                        const uPlanId = u.planId || "default";
+                        return uPlanId === plan.id;
+                      }).length;
                       return (
-                        <div key={plan.id} className="p-4 hover:bg-slate-850/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div key={plan.id} className={`p-4 hover:bg-slate-850/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${isPaused ? "bg-amber-950/10" : ""}`}>
                           <div className="space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-black text-white text-base">{plan.name}</span>
+                              <span className={`font-black text-base ${isPaused ? "text-slate-300" : "text-white"}`}>{plan.name}</span>
                               {plan.isDefault && (
                                 <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
                                   Default
+                                </span>
+                              )}
+                              {isPaused && (
+                                <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                                  <Pause className="w-3 h-3" />
+                                  Paused {plan.pausedUntil ? `(Until ${new Date(plan.pausedUntil).toLocaleString()})` : "(Until Resumed)"}
                                 </span>
                               )}
                               {plan.isFaucetPlan && (
@@ -6541,6 +6615,9 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                                   Disabled
                                 </span>
                               )}
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800/80 text-slate-400 border border-slate-700/60">
+                                {usersOnPlanCount} active user{usersOnPlanCount === 1 ? "" : "s"}
+                              </span>
                             </div>
 
                             <p className="text-xs text-emerald-400 font-extrabold font-mono tabular-nums">
@@ -6570,6 +6647,64 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                            {!plan.isDefault && String(plan.id || "").toLowerCase() !== "default" && (
+                              isPaused ? (
+                                <button
+                                  type="button"
+                                  disabled={pauseLoadingPlanId === plan.id}
+                                  onClick={() => handleTogglePausePlan(plan, false)}
+                                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                                  title="Resume this plan so publishers can select and use it again"
+                                >
+                                  {pauseLoadingPlanId === plan.id ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Play className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>Resume Plan</span>
+                                </button>
+                              ) : (
+                                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 gap-1">
+                                  <div className="flex items-center gap-1 pl-2 text-slate-400">
+                                    <Clock className="w-3 h-3 text-amber-400 shrink-0" />
+                                    <select
+                                      value={planPauseDurations[plan.id] || "0"}
+                                      onChange={(e) =>
+                                        setPlanPauseDurations((prev) => ({
+                                          ...prev,
+                                          [plan.id]: e.target.value
+                                        }))
+                                      }
+                                      className="bg-transparent text-[11px] font-bold text-slate-300 outline-none cursor-pointer pr-1 py-1"
+                                      title="Choose how long to pause this plan"
+                                    >
+                                      <option value="0" className="bg-slate-900 text-slate-200">Until Resumed</option>
+                                      <option value="1" className="bg-slate-900 text-slate-200">For 1 Hour</option>
+                                      <option value="6" className="bg-slate-900 text-slate-200">For 6 Hours</option>
+                                      <option value="12" className="bg-slate-900 text-slate-200">For 12 Hours</option>
+                                      <option value="24" className="bg-slate-900 text-slate-200">For 24 Hours</option>
+                                      <option value="72" className="bg-slate-900 text-slate-200">For 3 Days</option>
+                                      <option value="168" className="bg-slate-900 text-slate-200">For 7 Days</option>
+                                    </select>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={pauseLoadingPlanId === plan.id}
+                                    onClick={() => handleTogglePausePlan(plan, true)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 text-xs font-extrabold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                    title="Pause this plan and automatically switch all users currently on this plan to Default Plan"
+                                  >
+                                    {pauseLoadingPlanId === plan.id ? (
+                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <Pause className="w-3.5 h-3.5" />
+                                    )}
+                                    <span>Pause</span>
+                                  </button>
+                                </div>
+                              )
+                            )}
+
                             {isElitePlan && (
                               <button
                                 type="button"

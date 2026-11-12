@@ -212,23 +212,115 @@ function findUserInDb(db: any, rawIdentifier: any): any {
   }) || null;
 }
 
+function isPlanCurrentlyPaused(plan: any): boolean {
+  if (!plan) return false;
+  if (plan.isDefault || String(plan.id || "").toLowerCase() === "default") {
+    plan.paused = false;
+    plan.pausedUntil = null;
+    return false;
+  }
+  if (!plan.paused) return false;
+  if (plan.pausedUntil) {
+    const untilTs = new Date(plan.pausedUntil).getTime();
+    if (!isNaN(untilTs) && untilTs <= Date.now()) {
+      plan.paused = false;
+      plan.pausedUntil = null;
+      return false;
+    }
+  }
+  return true;
+}
+
+function enforcePausedPlansAndMigrateUsers(db: any, specificPausedPlanId?: string): { changed: boolean; migratedUsersCount: number } {
+  if (!db || typeof db !== "object") return { changed: false, migratedUsersCount: 0 };
+  let changed = false;
+  let migratedUsersCount = 0;
+
+  const plans = Array.isArray(db.plans) ? db.plans : [];
+  for (const p of plans) {
+    if (!p) continue;
+    if (p.isDefault || String(p.id || "").toLowerCase() === "default") {
+      if (p.paused || p.pausedUntil) {
+        p.paused = false;
+        p.pausedUntil = null;
+        changed = true;
+      }
+      continue;
+    }
+    if (p.paused && p.pausedUntil) {
+      const untilTs = new Date(p.pausedUntil).getTime();
+      if (!isNaN(untilTs) && untilTs <= Date.now()) {
+        p.paused = false;
+        p.pausedUntil = null;
+        changed = true;
+      }
+    }
+  }
+
+  const defaultPlan =
+    plans.find((p: any) => p && p.isDefault && p.enabled && !isPlanCurrentlyPaused(p)) ||
+    plans.find((p: any) => p && String(p.id || "").toLowerCase() === "default") ||
+    plans.find((p: any) => p && p.enabled && !isPlanCurrentlyPaused(p)) ||
+    plans[0];
+  const defaultPlanId = defaultPlan?.id || "default";
+  const isDefaultFaucet = Boolean(defaultPlan && (defaultPlan.isFaucetPlan || defaultPlan.faucetMode || defaultPlan.id === "faucet"));
+
+  const validActivePlanIds = new Set(
+    plans
+      .filter((p: any) => p && p.enabled && !isPlanCurrentlyPaused(p))
+      .map((p: any) => String(p.id))
+  );
+
+  if (Array.isArray(db.users)) {
+    for (const u of db.users) {
+      if (!u) continue;
+      const uPlanId = u.planId ? String(u.planId) : defaultPlanId;
+      const shouldMigrate =
+        (specificPausedPlanId && uPlanId === specificPausedPlanId) ||
+        !validActivePlanIds.has(uPlanId);
+
+      if (shouldMigrate && uPlanId !== defaultPlanId) {
+        u.planId = defaultPlanId;
+        u.enableFaucetMode = isDefaultFaucet;
+        migratedUsersCount++;
+        changed = true;
+      }
+    }
+  }
+
+  return { changed, migratedUsersCount };
+}
+
 function getPlanForUser(user: any, db: any): any {
   const plans = db.plans || [];
   const userObj = typeof user === "string" ? findUserInDb(db, user) : user;
-  const userPlanId = userObj?.planId || "default";
-  const found = plans.find((p: any) => p.id === userPlanId && p.enabled);
+  const defaultPlan =
+    plans.find((p: any) => p && p.isDefault && p.enabled && !isPlanCurrentlyPaused(p)) ||
+    plans.find((p: any) => p && p.id === "default") ||
+    plans.find((p: any) => p && p.enabled && !isPlanCurrentlyPaused(p)) ||
+    plans[0] || {
+      id: "default",
+      name: "Default Plan",
+      cpm: 5.0,
+      shortenerIds: ["api-shortxlinks-1"],
+      blogPageUrl: "https://thunder-appz.eu.org",
+      description: "Default high-converting shortener pipeline.",
+      isDefault: true,
+      enabled: true,
+      paused: false
+    };
+
+  const userPlanId = userObj?.planId || defaultPlan.id || "default";
+  const found = plans.find((p: any) => p && p.id === userPlanId && p.enabled && !isPlanCurrentlyPaused(p));
   if (found) return found;
-  const defaultPlan = plans.find((p: any) => p.isDefault && p.enabled) || plans.find((p: any) => p.id === "default") || plans[0];
-  return defaultPlan || {
-    id: "default",
-    name: "Default Plan",
-    cpm: 10.0,
-    shortenerIds: [],
-    blogPageUrl: "https://thunder-appz.eu.org",
-    description: "Default high-converting shortener pipeline.",
-    isDefault: true,
-    enabled: true
-  };
+
+  // If the user's current plan is paused or disabled, immediately reassign the user to the Default Plan
+  if (userObj && userObj.planId !== defaultPlan.id) {
+    userObj.planId = defaultPlan.id;
+    userObj.enableFaucetMode = Boolean(defaultPlan.isFaucetPlan || defaultPlan.faucetMode || defaultPlan.id === "faucet");
+  }
+
+  return defaultPlan;
 }
 
 function checkIsFaucetMode(user: any, link: any, db: any): boolean {
@@ -1723,6 +1815,11 @@ function ensureRequiredShortenersAndPlans(db: any): boolean {
         changed = true;
       }
     }
+  }
+
+  const pauseEnforcement = enforcePausedPlansAndMigrateUsers(db);
+  if (pauseEnforcement.changed) {
+    changed = true;
   }
 
   return changed;
@@ -5176,6 +5273,8 @@ Sitemap: ${baseUrl}/sitemap.xml`
   // GET /api/plans - Public / User Plans List
   app.get("/api/plans", (req, res) => {
     const db = loadDb();
+    const { changed } = enforcePausedPlansAndMigrateUsers(db);
+    if (changed) saveDb(db);
     res.json({
       plans: db.plans || [],
       shorteners: (db.adFlyShorteners || []).map((s: any) => ({
@@ -5194,12 +5293,19 @@ Sitemap: ${baseUrl}/sitemap.xml`
     }
 
     const db = loadDb();
+    enforcePausedPlansAndMigrateUsers(db);
     const { user } = getUserIdentifiers(db, userId);
     if (!user || user.banned) return res.status(404).json({ error: "User not found" });
 
     const plan = (db.plans || []).find((p: any) => p.id === planId && p.enabled);
     if (!plan) {
       return res.status(400).json({ error: "Selected plan is invalid or disabled" });
+    }
+
+    if (isPlanCurrentlyPaused(plan)) {
+      return res.status(400).json({
+        error: `The "${plan.name}" plan is currently paused by the administrator and cannot be selected right now.`
+      });
     }
 
     user.planId = plan.id;
@@ -5216,7 +5322,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
   // POST /api/admin/plans - Admin create/update plan
   app.post("/api/admin/plans", requireAdmin, (req, res) => {
-    const { id, name, cpm, shortenerIds, blogPageUrl, description, isDefault, enabled, requirements, isFaucetPlan } = req.body;
+    const { id, name, cpm, shortenerIds, blogPageUrl, description, isDefault, enabled, requirements, isFaucetPlan, paused, pausedUntil } = req.body;
     if (!name || cpm === undefined || Number(cpm) < 0) {
       return res.status(400).json({ error: "Valid plan name and non-negative CPM are required" });
     }
@@ -5231,16 +5337,25 @@ Sitemap: ${baseUrl}/sitemap.xml`
       db.plans.forEach((p: any) => { p.isDefault = false; });
     }
 
+    const isDefaultTarget = Boolean(isDefault || String(planId).toLowerCase() === "default");
+
     if (plan) {
       plan.name = name;
       plan.cpm = Number(cpm);
       plan.shortenerIds = Array.isArray(shortenerIds) ? shortenerIds : [];
       plan.blogPageUrl = blogPageUrl || "https://thunder-appz.eu.org";
       plan.description = description || "";
-      plan.isDefault = !!isDefault;
+      plan.isDefault = isDefaultTarget ? true : !!isDefault;
       plan.enabled = enabled !== undefined ? !!enabled : true;
       plan.requirements = requirements || "";
       plan.isFaucetPlan = !!isFaucetPlan;
+      if (isDefaultTarget) {
+        plan.paused = false;
+        plan.pausedUntil = null;
+      } else if (paused !== undefined) {
+        plan.paused = Boolean(paused);
+        plan.pausedUntil = plan.paused && pausedUntil ? String(pausedUntil) : null;
+      }
     } else {
       plan = {
         id: planId,
@@ -5249,10 +5364,12 @@ Sitemap: ${baseUrl}/sitemap.xml`
         shortenerIds: Array.isArray(shortenerIds) ? shortenerIds : [],
         blogPageUrl: blogPageUrl || "https://thunder-appz.eu.org",
         description: description || "",
-        isDefault: !!isDefault,
+        isDefault: isDefaultTarget ? true : !!isDefault,
         enabled: enabled !== undefined ? !!enabled : true,
         requirements: requirements || "",
-        isFaucetPlan: !!isFaucetPlan
+        isFaucetPlan: !!isFaucetPlan,
+        paused: isDefaultTarget ? false : Boolean(paused),
+        pausedUntil: !isDefaultTarget && paused && pausedUntil ? String(pausedUntil) : null
       };
       db.plans.push(plan);
     }
@@ -5281,8 +5398,51 @@ Sitemap: ${baseUrl}/sitemap.xml`
       shareDiskApi.enabled = true;
     }
 
+    const { migratedUsersCount } = enforcePausedPlansAndMigrateUsers(db, plan.paused ? plan.id : undefined);
     saveDb(db);
-    res.json({ success: true, plan, plans: db.plans, shorteners: db.adFlyShorteners });
+    res.json({ success: true, plan, plans: db.plans, shorteners: db.adFlyShorteners, migratedUsersCount });
+  });
+
+  // POST /api/admin/plans/:id/pause - Pause a plan (indefinitely or for a specific duration) and move active users to Default Plan, or Resume a paused plan
+  app.post("/api/admin/plans/:id/pause", requireAdmin, (req, res) => {
+    const planId = req.params.id;
+    const { paused, durationHours } = req.body || {};
+
+    const db = loadDb();
+    if (!db.plans) db.plans = [];
+
+    const plan = db.plans.find((p: any) => p && p.id === planId);
+    if (!plan) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+
+    if (plan.isDefault || String(plan.id || "").toLowerCase() === "default") {
+      return res.status(400).json({
+        error: "The Default Plan cannot be paused because users on paused plans are automatically reassigned to the Default Plan."
+      });
+    }
+
+    const nextPaused = paused !== undefined ? Boolean(paused) : !plan.paused;
+    plan.paused = nextPaused;
+
+    if (nextPaused && durationHours !== undefined && durationHours !== null && Number(durationHours) > 0) {
+      plan.pausedUntil = new Date(Date.now() + Number(durationHours) * 3600 * 1000).toISOString();
+    } else {
+      plan.pausedUntil = null;
+    }
+
+    const { migratedUsersCount } = enforcePausedPlansAndMigrateUsers(db, nextPaused ? plan.id : undefined);
+    saveDb(db);
+
+    res.json({
+      success: true,
+      plan,
+      plans: db.plans,
+      migratedUsersCount,
+      message: nextPaused
+        ? `Plan "${plan.name}" is now paused${plan.pausedUntil ? ` until ${new Date(plan.pausedUntil).toLocaleString()}` : ""}. ${migratedUsersCount} user(s) using this plan were automatically switched to the Default Plan.`
+        : `Plan "${plan.name}" has been resumed and is now available for publishers.`
+    });
   });
 
   // POST /api/admin/plans/elite/toggle-sharedisklinks - Quick toggle ShareDiskLinks in ELITE Plan (ShortXLinks -> SoftURL -> ShareDiskLinks)
@@ -5362,6 +5522,7 @@ Sitemap: ${baseUrl}/sitemap.xml`
       return res.status(400).json({ error: "Cannot delete the default plan" });
     }
     db.plans.splice(planIndex, 1);
+    enforcePausedPlansAndMigrateUsers(db, planId);
     saveDb(db);
     res.json({ success: true, plans: db.plans });
   });
@@ -5753,18 +5914,23 @@ ${ticket.message}
     const { id } = req.params;
     const { role, balance, customCpm, banned, enableFaucetMode, planId } = req.body;
     const db = loadDb();
+    enforcePausedPlansAndMigrateUsers(db);
 
     const user = db.users.find((u: any) => u && u.id === id);
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    if (planId !== undefined) {
+      const targetPlan = (db.plans || []).find((p: any) => p && p.id === planId);
+      if (targetPlan && isPlanCurrentlyPaused(targetPlan)) {
+        return res.status(400).json({ error: `Cannot assign "${targetPlan.name}" because that plan is currently paused.` });
+      }
+      user.planId = planId || "default";
+    }
     if (role !== undefined) user.role = role;
     if (balance !== undefined) user.balance = Number(balance);
     if (customCpm !== undefined) user.customCpm = customCpm === null ? undefined : Number(customCpm);
     if (banned !== undefined) user.banned = banned;
     if (enableFaucetMode !== undefined) user.enableFaucetMode = Boolean(enableFaucetMode);
-    if (planId !== undefined) {
-      user.planId = planId || "default";
-    }
 
     saveDb(db);
     const { password: _, ...userSafe } = user;
@@ -5775,11 +5941,15 @@ ${ticket.message}
     const { id } = req.params;
     const { planId } = req.body;
     const db = loadDb();
+    enforcePausedPlansAndMigrateUsers(db);
 
     const user = db.users.find((u: any) => u && u.id === id);
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const targetPlan = (db.plans || []).find((p: any) => p.id === planId && p.enabled);
+    if (targetPlan && isPlanCurrentlyPaused(targetPlan)) {
+      return res.status(400).json({ error: `Cannot assign "${targetPlan.name}" because that plan is currently paused.` });
+    }
     user.planId = targetPlan ? targetPlan.id : (planId || "default");
     saveDb(db);
     const { password: _, ...userSafe } = user;

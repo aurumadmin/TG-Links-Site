@@ -258,9 +258,11 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate, 
         if (plansRes?.plans) {
           setPlansList(plansRes.plans);
           const userPlanId = freshUser?.user?.planId || currentUser?.planId || "default";
-          const currentPlanObj = plansRes.plans.find((p: any) => p.id === userPlanId && p.enabled)
-            || plansRes.plans.find((p: any) => p.isDefault)
-            || plansRes.plans[0];
+          const currentPlanObj =
+            plansRes.plans.find((p: any) => p.id === userPlanId && p.enabled && !p.paused) ||
+            plansRes.plans.find((p: any) => p.isDefault) ||
+            plansRes.plans.find((p: any) => !p.paused) ||
+            plansRes.plans[0];
           setActivePlan(currentPlanObj);
         }
       } catch (userErr) {
@@ -1593,8 +1595,8 @@ export default function DashboardPage({ user, initialTab, onLogout, onNavigate, 
                     className="bg-slate-900 border border-slate-700 text-white font-bold text-xs rounded-xl px-4 py-2.5 outline-none focus:border-indigo-500 transition cursor-pointer"
                   >
                     {plansList.map((plan) => (
-                      <option key={plan.id} value={plan.id}>
-                        {plan.name} — ${plan.cpm.toFixed(2)} CPM {plan.isDefault ? "(Default)" : ""}
+                      <option key={plan.id} value={plan.id} disabled={Boolean(plan.paused)}>
+                        {plan.name} — ${plan.cpm.toFixed(2)} CPM {plan.isDefault ? "(Default)" : ""} {plan.paused ? "(PAUSED - Unavailable)" : ""}
                       </option>
                     ))}
                   </select>

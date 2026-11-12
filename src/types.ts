@@ -23,6 +23,8 @@ export interface PublisherPlan {
   enabled: boolean;
   requirements?: string;
   isFaucetPlan?: boolean;
+  paused?: boolean;
+  pausedUntil?: string | null;
 }
 
 export interface User {

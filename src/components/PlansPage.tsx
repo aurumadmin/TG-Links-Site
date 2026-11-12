@@ -113,8 +113,9 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8 items-stretch max-w-6xl mx-auto">
           {plans.map((plan) => {
+            const isPaused = Boolean(plan.paused && !plan.isDefault);
             const isCurrentPlan = user
-              ? (user.planId === plan.id || (!user.planId && plan.isDefault))
+              ? !isPaused && (user.planId === plan.id || (!user.planId && plan.isDefault))
               : false;
 
             const isSwitching = switchingId === plan.id;
@@ -123,7 +124,9 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
               <div
                 key={plan.id}
                 className={`relative bg-slate-900/80 border rounded-3xl p-6 md:p-8 flex flex-col justify-between transition-all duration-300 ${
-                  isCurrentPlan
+                  isPaused
+                    ? "border-amber-500/30 bg-slate-950/80 opacity-85"
+                    : isCurrentPlan
                     ? "border-indigo-500/80 shadow-2xl shadow-indigo-500/20 bg-slate-900 ring-2 ring-indigo-500/30"
                     : plan.isDefault
                     ? "border-slate-700 hover:border-slate-600 shadow-xl"
@@ -134,7 +137,9 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
                   {/* Badges */}
                   <div className="flex items-center justify-between gap-2 mb-4">
                     <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider ${
-                      isCurrentPlan
+                      isPaused
+                        ? "bg-amber-500/10 text-amber-400 border border-amber-500/30"
+                        : isCurrentPlan
                         ? "bg-indigo-600 text-white"
                         : plan.isDefault
                         ? "bg-slate-800 text-slate-300 border border-slate-700"
@@ -143,13 +148,19 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
                       {plan.name}
                     </span>
 
-                    {isCurrentPlan && (
+                    {isPaused && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                        ⏸ Temporarily Paused
+                      </span>
+                    )}
+
+                    {!isPaused && isCurrentPlan && (
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
                         <Check className="w-3 h-3" /> Active Plan
                       </span>
                     )}
 
-                    {!isCurrentPlan && plan.isDefault && (
+                    {!isPaused && !isCurrentPlan && plan.isDefault && (
                       <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-800 text-slate-400">
                         Default Plan
                       </span>
@@ -198,7 +209,14 @@ export default function PlansPage({ user, onUserUpdated, onOpenAuth, onNavigate 
 
                 {/* Action Button */}
                 <div className="mt-4">
-                  {isCurrentPlan ? (
+                  {isPaused ? (
+                    <button
+                      disabled
+                      className="w-full py-3 px-4 rounded-xl font-bold text-xs bg-amber-950/40 text-amber-400 border border-amber-500/30 flex items-center justify-center gap-2 cursor-not-allowed"
+                    >
+                      <span>Plan Paused (Unavailable)</span>
+                    </button>
+                  ) : isCurrentPlan ? (
                     <button
                       disabled
                       className="w-full py-3 px-4 rounded-xl font-bold text-xs bg-indigo-950/60 text-indigo-300 border border-indigo-500/30 flex items-center justify-center gap-2 cursor-default"
