@@ -882,8 +882,158 @@ function verifyAndConsumeTokenResult(
   return { valid: false, isAlreadyConsumed: false };
 }
 
-// Helper to render on-domain TG Links destination ready completion page
-function renderTgLinksCompletionPage(code: string, targetUrl: string, settingsArg?: any): string {
+const consumedMeinPpcTokensMap = new Map<string, { code: string; ip: string; consumedAt: number }>();
+
+function createMeinPpcBypassToken(code: string, ip: string): string {
+  const cleanCode = (code || "").trim();
+  const ts = Date.now();
+  const nonce = crypto.randomBytes(4).toString("hex");
+  const sig = crypto.createHmac("sha256", VTOK_SECRET).update(`meinppc_bypass:${cleanCode}:${ip}:${ts}:${nonce}`).digest("hex").substring(0, 16);
+  return `${ts}~${nonce}~${sig}`;
+}
+
+function verifyMeinPpcBypassToken(token: string | undefined, code: string, ip: string): boolean {
+  if (!token || typeof token !== "string") return false;
+  const parts = token.trim().split("~");
+  if (parts.length !== 3) return false;
+  const [tsStr, nonce, sig] = parts;
+  const ts = parseInt(tsStr, 10);
+  if (isNaN(ts) || Date.now() - ts > 3 * 60 * 1000) return false;
+  const cleanCode = (code || "").trim();
+  const expectedSig = crypto.createHmac("sha256", VTOK_SECRET).update(`meinppc_bypass:${cleanCode}:${ip}:${ts}:${nonce}`).digest("hex").substring(0, 16);
+  return sig === expectedSig;
+}
+
+async function createMeinPpcCaptchaChallenge(options: {
+  apiKey: string;
+  targetUrl: string;
+  failureUrl?: string;
+  strict?: number;
+  ads?: number;
+  visitorIp?: string;
+  type?: string;
+  lang?: string;
+}): Promise<{ ok: boolean; code?: string; url?: string; expiresAt?: string; error?: string; networkError?: boolean }> {
+  const apiKey = String(options.apiKey || "").trim();
+  if (!apiKey) {
+    return { ok: false, error: "Mein-PPC API key is missing", networkError: false };
+  }
+
+  const strictVal = Math.max(1, Math.min(10, Math.floor(Number(options.strict) || 5)));
+  const adsVal = Math.max(1, Math.min(5, Math.floor(Number(options.ads) || 1)));
+
+  const params = new URLSearchParams();
+  params.set("api", apiKey);
+  params.set("url", options.targetUrl);
+  if (options.failureUrl) {
+    params.set("furl", options.failureUrl);
+  }
+  params.set("strict", String(strictVal));
+  params.set("ads", String(adsVal));
+  if (options.visitorIp) {
+    params.set("uip", String(options.visitorIp).trim());
+  }
+  if (options.type) {
+    params.set("type", String(options.type).trim());
+  }
+  if (options.lang) {
+    params.set("lang", String(options.lang).trim());
+  }
+  params.set("format", "json");
+
+  const endpoint = `https://mein-ppc.com/api/captcha.php?${params.toString()}`;
+  try {
+    const resp = await fetchWithTimeout(endpoint, { method: "GET" }, 6500);
+    const text = await resp.text();
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+
+    if (resp.ok && parsed && parsed.status === "success" && (parsed.code || parsed.url)) {
+      return {
+        ok: true,
+        code: parsed.code ? String(parsed.code) : undefined,
+        url: parsed.url ? String(parsed.url) : undefined,
+        expiresAt: parsed.expires_at ? String(parsed.expires_at) : undefined
+      };
+    }
+
+    const errMsg = parsed?.message || parsed?.error || `HTTP ${resp.status}`;
+    console.warn(`[Mein-PPC Create] Failed (${resp.status}):`, errMsg);
+    return { ok: false, error: String(errMsg), networkError: resp.status >= 500 || resp.status === 429 };
+  } catch (err: any) {
+    console.warn("[Mein-PPC Create] Network/timeout error:", err?.message || err);
+    return { ok: false, error: String(err?.message || "Network error"), networkError: true };
+  }
+}
+
+async function verifyMeinPpcCaptchaToken(options: {
+  apiKey: string;
+  solveToken: string;
+  visitorIp?: string;
+}): Promise<{ valid: boolean; replay?: boolean; networkError?: boolean; error?: string; data?: any }> {
+  const apiKey = String(options.apiKey || "").trim();
+  const solveToken = String(options.solveToken || "").trim();
+  if (!apiKey || !solveToken) {
+    return { valid: false, error: "Missing captcha token" };
+  }
+
+  const now = Date.now();
+  for (const [k, v] of consumedMeinPpcTokensMap.entries()) {
+    if (now - v.consumedAt > 15 * 60 * 1000) {
+      consumedMeinPpcTokensMap.delete(k);
+    }
+  }
+
+  if (consumedMeinPpcTokensMap.has(solveToken)) {
+    return { valid: false, replay: true, error: "Captcha token has already been used" };
+  }
+
+  const params = new URLSearchParams();
+  params.set("api", apiKey);
+  params.set("token", solveToken);
+  if (options.visitorIp) {
+    params.set("ip", String(options.visitorIp).trim());
+  }
+
+  const endpoint = `https://mein-ppc.com/api/captcha-verify.php?${params.toString()}`;
+  try {
+    const resp = await fetchWithTimeout(endpoint, { method: "GET" }, 6500);
+    const text = await resp.text();
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+
+    if (resp.ok && parsed && parsed.valid === true) {
+      consumedMeinPpcTokensMap.set(solveToken, {
+        code: "",
+        ip: String(options.visitorIp || ""),
+        consumedAt: now
+      });
+      return { valid: true, data: parsed };
+    }
+
+    const errMsg = parsed?.message || parsed?.error || `Verification returned HTTP ${resp.status}`;
+    console.warn(`[Mein-PPC Verify] Invalid token (${resp.status}):`, errMsg);
+    return { valid: false, error: String(errMsg), networkError: resp.status >= 500 };
+  } catch (err: any) {
+    console.warn("[Mein-PPC Verify] Network/timeout error:", err?.message || err);
+    return { valid: false, networkError: true, error: String(err?.message || "Network error") };
+  }
+}
+
+// Helper to render on-domain TG Links Start Gate Page (with configured banner ads, timer, and Mein-PPC captcha — NO destination URL shown)
+function renderTgLinksStartPage(
+  code: string,
+  settingsArg?: any,
+  options?: { captchaFailed?: boolean; errorMessage?: string }
+): string {
   const settings = settingsArg || (loadDb()?.settings || {});
   const bannersEnabled = settings?.enableFinalPageBanners !== false;
   const headerCode = bannersEnabled ? String(settings?.finalPageHeaderCode || "").trim() : "";
@@ -893,60 +1043,56 @@ function renderTgLinksCompletionPage(code: string, targetUrl: string, settingsAr
   const leftBanner = bannersEnabled ? String(settings?.finalPageLeftBanner || "").trim() : "";
   const rightBanner = bannersEnabled ? String(settings?.finalPageRightBanner || "").trim() : "";
 
-  let displayUrl = targetUrl;
-  try {
-    const u = new URL(targetUrl);
-    displayUrl = u.hostname + (u.pathname !== "/" ? u.pathname : "");
-  } catch {}
+  const timerSeconds = Math.max(0, Math.min(120, Math.floor(Number(settings?.startPageTimerSeconds ?? 5) || 0)));
+  const captchaEnabled = settings?.enableMeinPpcCaptcha !== false;
+  const captchaMode = settings?.meinPpcMode === "redirect" ? "redirect" : "overlay";
+  const captchaType = ["rotate", "quiz", "oddone"].includes(String(settings?.meinPpcType)) ? String(settings.meinPpcType) : "rotate";
+  const captchaLang = settings?.meinPpcLang === "de" ? "de" : "en";
 
-  const safeTargetUrl = targetUrl.replace(/"/g, "&quot;");
-  const safeDisplayUrl = displayUrl.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const safeCode = String(code || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  const encodedCode = encodeURIComponent(code || "");
   const year = new Date().getFullYear();
+  const errorMessage = options?.errorMessage
+    ? String(options.errorMessage).replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    : options?.captchaFailed
+    ? "Verification was not completed or expired. Please try again."
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Your Link is Ready! - TG Links</title>
+  <title>Verify Link - TG Links</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    @keyframes pulseGlow {
-      0%, 100% { opacity: 0.25; transform: scale(1); }
-      50% { opacity: 0.55; transform: scale(1.05); }
-    }
-    .pulse-glow { animation: pulseGlow 4s ease-in-out infinite; }
     .tg-ad-slot iframe, .tg-ad-slot img { max-width: 100%; margin: 0 auto; display: block; border-radius: 0.75rem; }
   </style>
-  ${headerCode ? `<!-- Final Destination Page Header Ad / Script -->\n  ${headerCode}` : ""}
+  ${captchaEnabled && captchaMode === "overlay" ? `<script src="https://mein-ppc.com/captcha-widget.js"></script>` : ""}
+  ${headerCode ? `<!-- TG Links Start Page Header Ad / Script -->\n  ${headerCode}` : ""}
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white font-sans antialiased">
 
   <!-- Header -->
-  <header class="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md px-6 py-4 flex items-center justify-between">
-    <div class="flex items-center gap-2.5">
-      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center text-white font-black text-sm shadow-lg shadow-indigo-500/30">
+  <header class="border-b border-slate-800 bg-slate-950/90 px-6 py-4 flex items-center justify-between gap-6">
+    <div class="flex items-center gap-2.5 shrink-0">
+      <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
         TG
       </div>
-      <span class="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">TG Links</span>
+      <span class="font-bold text-lg tracking-tight text-white whitespace-nowrap">TG Links</span>
     </div>
-    <div class="flex items-center gap-2 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-      <span>Link Verified</span>
+    <div class="text-xs font-medium text-slate-400 whitespace-nowrap shrink-0">
+      Link Gate · Human Verification
     </div>
   </header>
 
   <!-- Main Content & Banner Ad Zones -->
-  <main class="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden gap-6">
-    <!-- Ambient Background Glow -->
-    <div class="absolute w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none pulse-glow"></div>
-    <div class="absolute -bottom-10 -right-10 w-80 h-80 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none"></div>
-
+  <main class="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 relative gap-6">
     ${topBanner ? `
     <!-- Top Banner Ad Slot -->
     <div class="relative z-10 w-full max-w-4xl flex flex-col items-center justify-center">
-      <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/60 border border-slate-800/80 p-2 shadow-lg">
+      <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/70 border border-slate-800 p-2">
         ${topBanner}
       </div>
     </div>
@@ -955,67 +1101,75 @@ function renderTgLinksCompletionPage(code: string, targetUrl: string, settingsAr
     <div class="relative z-10 w-full max-w-6xl flex flex-col lg:flex-row items-center justify-center gap-6">
       ${leftBanner ? `
       <!-- Left Sidebar Banner Ad Slot -->
-      <div class="tg-ad-slot w-full lg:w-auto lg:min-w-[160px] lg:max-w-[320px] flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/60 border border-slate-800/80 p-2 shadow-lg order-2 lg:order-1">
+      <div class="tg-ad-slot w-full lg:w-auto lg:min-w-[160px] lg:max-w-[320px] flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/70 border border-slate-800 p-2 order-2 lg:order-1">
         ${leftBanner}
       </div>
       ` : ""}
 
-      <!-- Center Destination Ready Card -->
-      <div class="relative w-full max-w-md bg-slate-900/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl shadow-indigo-950/50 backdrop-blur-xl text-center space-y-6 order-1 lg:order-2">
-        
-        <!-- Verified Badge Icon -->
-        <div class="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-indigo-500/20 border border-emerald-500/30 flex items-center justify-center shadow-lg shadow-emerald-500/10">
-          <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+      <!-- Center Start Gate Card (Destination URL Intentionally Hidden) -->
+      <div class="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-7 sm:p-8 shadow-2xl text-center space-y-6 order-1 lg:order-2">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center">
+          <svg class="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
           </svg>
         </div>
 
-        <!-- Title & Description -->
         <div class="space-y-2">
-          <h1 class="text-2xl font-black text-white tracking-tight">Your Destination is Ready!</h1>
+          <div class="text-xs font-medium text-slate-400">
+            Step 1${captchaEnabled ? " · Captcha Protection" : " · Link Preparation"}
+          </div>
+          <h1 class="text-2xl font-bold text-white tracking-tight">Verify to Continue</h1>
           <p class="text-slate-400 text-sm leading-relaxed">
-            Shortlink step completed successfully. Click the button below to open your target link.
+            ${timerSeconds > 0
+              ? `Please wait for the countdown timer below and click Continue to proceed.`
+              : `Click Continue below to complete verification and proceed to your link.`}
           </p>
         </div>
 
-        <!-- Target URL Box -->
-        <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-left space-y-1">
-          <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Destination URL</div>
-          <div class="font-mono text-xs text-indigo-300 truncate font-semibold">
-            ${safeDisplayUrl}
-          </div>
+        ${errorMessage ? `
+        <div id="gateAlert" class="rounded-xl bg-rose-500/10 border border-rose-500/30 px-4 py-3 text-xs text-rose-300 text-left">
+          ${errorMessage}
         </div>
+        ` : `<div id="gateAlert" class="hidden rounded-xl bg-rose-500/10 border border-rose-500/30 px-4 py-3 text-xs text-rose-300 text-left"></div>`}
 
         ${middleBanner ? `
-        <!-- Center Inside-Card Banner Ad Slot (Above Open Destination Button) -->
-        <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-2xl bg-slate-950/80 border border-slate-800/90 p-2">
+        <!-- Center Inside-Card Banner Ad Slot (Above Continue Button) -->
+        <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-xl bg-slate-950/80 border border-slate-800 p-2">
           ${middleBanner}
         </div>
         ` : ""}
 
-        <!-- Open Destination Button -->
-        <div class="pt-2">
-          <a 
-            id="destBtn"
-            href="${safeTargetUrl}" 
-            rel="noreferrer noopener"
-            class="w-full inline-flex items-center justify-center gap-2.5 px-6 py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-bold text-base shadow-xl shadow-indigo-500/25 hover:shadow-indigo-500/40 transform active:scale-[0.98] transition-all cursor-pointer group"
+        <!-- Countdown / Continue Button -->
+        <div class="pt-1">
+          <button
+            id="continueBtn"
+            type="button"
+            ${timerSeconds > 0 ? "disabled" : ""}
+            class="w-full min-h-[48px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl font-bold text-base transition-all ${
+              timerSeconds > 0
+                ? "bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700"
+                : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25 cursor-pointer"
+            }"
           >
-            <span>Open Destination</span>
-            <svg class="w-5 h-5 text-indigo-200 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+            <span id="continueBtnLabel">${
+              timerSeconds > 0
+                ? `Please wait <span id="countdownNum" class="font-mono tabular-nums text-indigo-300">${String(timerSeconds).padStart(2, "0")}</span>s...`
+                : "Continue"
+            }</span>
+            <svg id="continueArrow" class="w-5 h-5 ${timerSeconds > 0 ? "hidden" : ""}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
             </svg>
-          </a>
+          </button>
         </div>
 
         <div class="text-[11px] text-slate-500 font-medium">
-          Powered by <span class="text-slate-400 font-semibold">TG Links Network</span> &bull; 100% Verified
+          TG Links Network · Code <span class="font-mono text-slate-400">${safeCode}</span>
         </div>
       </div>
 
       ${rightBanner ? `
       <!-- Right Sidebar Banner Ad Slot -->
-      <div class="tg-ad-slot w-full lg:w-auto lg:min-w-[160px] lg:max-w-[320px] flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/60 border border-slate-800/80 p-2 shadow-lg order-3">
+      <div class="tg-ad-slot w-full lg:w-auto lg:min-w-[160px] lg:max-w-[320px] flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/70 border border-slate-800 p-2 order-3">
         ${rightBanner}
       </div>
       ` : ""}
@@ -1024,7 +1178,7 @@ function renderTgLinksCompletionPage(code: string, targetUrl: string, settingsAr
     ${bottomBanner ? `
     <!-- Bottom Banner Ad Slot -->
     <div class="relative z-10 w-full max-w-4xl flex flex-col items-center justify-center">
-      <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/60 border border-slate-800/80 p-2 shadow-lg">
+      <div class="tg-ad-slot w-full flex items-center justify-center overflow-hidden rounded-2xl bg-slate-900/70 border border-slate-800 p-2">
         ${bottomBanner}
       </div>
     </div>
@@ -1032,9 +1186,123 @@ function renderTgLinksCompletionPage(code: string, targetUrl: string, settingsAr
   </main>
 
   <!-- Footer -->
-  <footer class="border-t border-slate-900/80 px-6 py-4 text-center text-xs text-slate-500">
+  <footer class="border-t border-slate-900 px-6 py-4 text-center text-xs text-slate-500">
     &copy; ${year} TG Links. All rights reserved.
   </footer>
+
+  <script>
+    (function() {
+      var linkCode = ${JSON.stringify(code || "")};
+      var encodedCode = ${JSON.stringify(encodedCode)};
+      var remaining = ${timerSeconds};
+      var captchaEnabled = ${captchaEnabled ? "true" : "false"};
+      var captchaMode = ${JSON.stringify(captchaMode)};
+      var captchaType = ${JSON.stringify(captchaType)};
+      var captchaLang = ${JSON.stringify(captchaLang)};
+
+      var btn = document.getElementById("continueBtn");
+      var label = document.getElementById("continueBtnLabel");
+      var arrow = document.getElementById("continueArrow");
+      var alertBox = document.getElementById("gateAlert");
+      var busy = false;
+
+      function unlockButton() {
+        if (!btn) return;
+        btn.disabled = false;
+        btn.className = "w-full min-h-[48px] inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl font-bold text-base transition-all bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25 cursor-pointer";
+        if (label) label.textContent = "Continue";
+        if (arrow) arrow.classList.remove("hidden");
+      }
+
+      if (remaining > 0) {
+        var timerId = setInterval(function() {
+          remaining -= 1;
+          var numEl = document.getElementById("countdownNum");
+          if (remaining <= 0) {
+            clearInterval(timerId);
+            unlockButton();
+          } else if (numEl) {
+            numEl.textContent = String(remaining).padStart(2, "0");
+          }
+        }, 1000);
+      }
+
+      function showError(msg) {
+        if (alertBox) {
+          alertBox.textContent = msg;
+          alertBox.classList.remove("hidden");
+        }
+        busy = false;
+        unlockButton();
+      }
+
+      if (btn) {
+        btn.addEventListener("click", function() {
+          if (btn.disabled || busy) return;
+          busy = true;
+          btn.disabled = true;
+          if (alertBox) alertBox.classList.add("hidden");
+          if (arrow) arrow.classList.add("hidden");
+
+          if (!captchaEnabled) {
+            if (label) label.textContent = "Redirecting...";
+            window.location.href = "/go-verify/" + encodedCode;
+            return;
+          }
+
+          if (captchaMode === "redirect") {
+            if (label) label.textContent = "Loading Captcha...";
+            window.location.href = "/go-verify/" + encodedCode + "?action=launch";
+            return;
+          }
+
+          if (label) label.textContent = "Preparing Captcha...";
+          fetch("/api/go-captcha-challenge/" + encodedCode, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+          })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data && data.upstreamBypassToken) {
+                if (label) label.textContent = "Proceeding...";
+                window.location.href = "/go-verify/" + encodedCode + "?upstream_bypass=" + encodeURIComponent(data.upstreamBypassToken);
+                return;
+              }
+              if (data && data.ok && data.code && window.MeinPPCCaptcha && typeof window.MeinPPCCaptcha.show === "function") {
+                if (label) label.textContent = "Complete Captcha...";
+                var solved = false;
+                try {
+                  window.MeinPPCCaptcha.show({
+                    code: data.code,
+                    type: data.type || captchaType,
+                    lang: data.lang || captchaLang,
+                    mode: "callback",
+                    onsolve: function(token) {
+                      solved = true;
+                      if (label) label.textContent = "Verifying...";
+                      window.location.href = "/go-verify/" + encodedCode + "?solve_token=" + encodeURIComponent(token);
+                    }
+                  });
+                  setTimeout(function() {
+                    if (!solved) {
+                      busy = false;
+                      unlockButton();
+                    }
+                  }, 4000);
+                } catch (widgetErr) {
+                  window.location.href = "/go-verify/" + encodedCode + "?action=launch";
+                }
+              } else {
+                window.location.href = "/go-verify/" + encodedCode + "?action=launch";
+              }
+            })
+            .catch(function() {
+              window.location.href = "/go-verify/" + encodedCode + "?action=launch";
+            });
+        });
+      }
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -1405,6 +1673,7 @@ function isInternalLoopUrl(targetUrl: string, hostHeader?: string): boolean {
     // It's on an internal host - check if pathname points to redirect/landing routes
     if (
       pathname.startsWith("/go/") ||
+      pathname.startsWith("/go-verify/") ||
       pathname.startsWith("/p/") ||
       pathname.startsWith("/faucet") ||
       pathname.startsWith("/go-final") ||
@@ -1416,6 +1685,7 @@ function isInternalLoopUrl(targetUrl: string, hostHeader?: string): boolean {
   } catch (e) {
     if (
       trimmed.startsWith("/go/") ||
+      trimmed.startsWith("/go-verify/") ||
       trimmed.startsWith("/p/") ||
       trimmed.startsWith("/faucet") ||
       trimmed.startsWith("/go-final") ||
@@ -2047,6 +2317,15 @@ function loadDb(forceReload = false): any {
       adslabCaptchaApiKey: "QAjfJLFhc9pfDOlZAg6lAdc7qpdt5ctE0FgquqNr",
       adslabCaptchaSecretKey: "IUzRsZbtL4JmR197MRVUn5vIcavB8ksX",
       adslabRegisteredDomain: "https://thunder-appz.eu.org",
+      startPageTimerSeconds: 5,
+      enableMeinPpcCaptcha: true,
+      meinPpcApiKey: "0e2eaa6a251c49c9dca6ae547a61d074",
+      meinPpcMode: "overlay",
+      meinPpcType: "rotate",
+      meinPpcLang: "en",
+      meinPpcStrict: 5,
+      meinPpcAds: 1,
+      meinPpcDomain: "tglinks.tech",
       enablePtcGate: true,
       ptcRequiredCount: 1,
       ptcTimerSeconds: 10,
@@ -2237,6 +2516,15 @@ function loadDb(forceReload = false): any {
     if (db.settings.fakeExtraUsers === undefined) { db.settings.fakeExtraUsers = 0; changed = true; }
     if (db.settings.fakeExtraLinks === undefined) { db.settings.fakeExtraLinks = 0; changed = true; }
     if (db.settings.enableEmailBackup === undefined) { db.settings.enableEmailBackup = false; changed = true; }
+    if (db.settings.startPageTimerSeconds === undefined) { db.settings.startPageTimerSeconds = 5; changed = true; }
+    if (db.settings.enableMeinPpcCaptcha === undefined) { db.settings.enableMeinPpcCaptcha = true; changed = true; }
+    if (!db.settings.meinPpcApiKey) { db.settings.meinPpcApiKey = "0e2eaa6a251c49c9dca6ae547a61d074"; changed = true; }
+    if (!db.settings.meinPpcMode) { db.settings.meinPpcMode = "overlay"; changed = true; }
+    if (!db.settings.meinPpcType) { db.settings.meinPpcType = "rotate"; changed = true; }
+    if (!db.settings.meinPpcLang) { db.settings.meinPpcLang = "en"; changed = true; }
+    if (db.settings.meinPpcStrict === undefined) { db.settings.meinPpcStrict = 5; changed = true; }
+    if (db.settings.meinPpcAds === undefined) { db.settings.meinPpcAds = 1; changed = true; }
+    if (!db.settings.meinPpcDomain) { db.settings.meinPpcDomain = "tglinks.tech"; changed = true; }
     if (!db.settings.faucetPayLtcDefaultMigrated) {
       db.settings.faucetPayCurrency = "LTC";
       db.settings.faucetPayLtcDefaultMigrated = true;
@@ -3716,9 +4004,9 @@ Sitemap: ${baseUrl}/sitemap.xml`
       }
 
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl} (CPM: $${getCurrentCpmForLink(link, db)})`);
-      return res.send(renderTgLinksCompletionPage(code, targetUrl, db.settings));
+      res.setHeader("Referrer-Policy", "no-referrer");
+      console.log(`[Direct Destination Exit] /p/${code} completed all steps -> 302 redirect to ${targetUrl} (CPM: $${getCurrentCpmForLink(link, db)})`);
+      return res.redirect(302, targetUrl);
     }
 
     const ip = getClientIp(req);
@@ -3777,70 +4065,14 @@ Sitemap: ${baseUrl}/sitemap.xml`
     const userPlan = getPlanForUser(linkOwner, db);
     const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
 
-    // DIRECT REDIRECT FOR NON-FAUCET PLAN:
-    // When a user visits a non-faucet short link (e.g. /go/:code), immediately redirect (302)
-    // straight to the assigned shortener (ShortXLinks for Default Plan, SoftURL for Plan 2, ShortXLinks -> SoftURL for ELITE)
-    // without loading thunder-appz blog page or any other intermediate page!
+    // NON-FAUCET START GATE:
+    // Show on-domain TG Links Start Page first (with all configured banner ads, timer, and Mein-PPC Captcha trigger — no destination URL shown)
     if (!isFaucetMode && (req.path.startsWith("/go/") || req.path === `/go/${code}`)) {
-      const platformBase = getPlatformBaseUrl(req, db);
-      const enabledApis = getEnabledApisForPlan(userPlan, isFaucetMode, db);
-      const requiredSteps = enabledApis.length;
-      const newVtok = createVerificationToken(code, String(ip), requiredSteps);
-
-      // If multi-step plan (requiredSteps > 1), step 1 completes into /p/:code?step=2
-      // If single-step plan (requiredSteps <= 1), step 1 directly lands on /go-final/:code
-      const completionUrl = requiredSteps > 1
-        ? `${platformBase}/p/${code}?vtok=${encodeURIComponent(newVtok)}&step=2`
-        : `${platformBase}/go-final/${code}?vtok=${newVtok}`;
-
-      const assignedApi = (enabledApis && enabledApis.length > 0) ? enabledApis[0] : null;
-
-      let directShortUrl = "";
-      if (assignedApi) {
-        const apiUrlLower = String(assignedApi.apiUrl || "").toLowerCase();
-        const apiNameLower = String(assignedApi.name || "").toLowerCase();
-        const apiIdLower = String(assignedApi.id || "").toLowerCase();
-        const isJsonApiShortener =
-          apiUrlLower.includes("linkdl.net") ||
-          apiNameLower.includes("linkdl") ||
-          apiIdLower.includes("linkdl") ||
-          apiUrlLower.includes("earnlinks.in") ||
-          apiNameLower.includes("earnlinks") ||
-          apiIdLower.includes("earnlinks");
-
-        if (isJsonApiShortener) {
-          directShortUrl = (await getSingleExternalShortenedUrl(assignedApi, completionUrl)) || "";
-          if (!directShortUrl) {
-            directShortUrl = (await getSingleExternalShortenedUrl(assignedApi, completionUrl)) || "";
-          }
-          if (!directShortUrl) {
-            directShortUrl = completionUrl;
-          }
-        } else {
-          let rawApiUrl = String(assignedApi.apiUrl || "").trim();
-          let baseDomain = rawApiUrl.replace(/\/+$/, "");
-          if (baseDomain.endsWith("/api")) {
-            baseDomain = baseDomain.slice(0, -4);
-          } else if (baseDomain.endsWith("/st")) {
-            baseDomain = baseDomain.slice(0, -3);
-          }
-          if (!baseDomain.startsWith("http://") && !baseDomain.startsWith("https://")) {
-            baseDomain = "https://" + baseDomain;
-          }
-          const token = assignedApi.apiToken || "";
-          // Raw :// URL parameter (AdLinkFly strictly requires :// instead of %3A%2F%2F)
-          directShortUrl = `${baseDomain}/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
-        }
-        console.log(`[Non-Faucet Direct] Direct 302 redirect for /go/${code} using plan "${userPlan?.name || 'Default'}" (${assignedApi.name}): ${directShortUrl}`);
-      } else {
-        const token = "b6ac095e9373906c9e461860400e64a7de4536f1";
-        directShortUrl = `https://shortxlinks.com/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
-        console.log(`[Non-Faucet Direct] Fallback direct 302 redirect for /go/${code} to ShortXLinks: ${directShortUrl}`);
-      }
-
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Referrer-Policy", "no-referrer");
-      return res.redirect(302, directShortUrl);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.send(renderTgLinksStartPage(code, db.settings, {
+        captchaFailed: req.query.captcha_failed === "1"
+      }));
     }
 
     // If no verification token and no step param is in the URL, pass to next() for faucet mode handling
@@ -4248,17 +4480,299 @@ Sitemap: ${baseUrl}/sitemap.xml`
       saveDb(db);
     }
 
-    // For non-faucet links, serve the branded TG Links completion page on-domain
-    if (!isFaucetMode) {
+    // Direct HTTP 302 redirect to original destination URL (no trailing TG Links page)
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    console.log(`[Direct Destination Exit] /go-final/${code} -> 302 redirect directly to ${targetUrl}`);
+    return res.redirect(302, targetUrl);
+  });
+
+  // Helper to resolve canonical callback base for Mein-PPC and shortener return URLs
+  function getShortenerPlatformBase(req: express.Request, db: any): string {
+    const reqHost = getRequestHost(req);
+    const configuredDomain = String(db?.settings?.meinPpcDomain || "tglinks.tech")
+      .trim()
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/+$/, "");
+    const isPreviewOrLocal =
+      !reqHost ||
+      reqHost.includes("localhost") ||
+      reqHost.includes("127.0.0.1") ||
+      reqHost.includes("ais-dev") ||
+      reqHost.includes("ais-pre");
+    if (!isPreviewOrLocal && configuredDomain && reqHost.includes(configuredDomain.toLowerCase())) {
+      return `https://${configuredDomain}`;
+    }
+    return getPlatformBaseUrl(req, db);
+  }
+
+  // Helper to dispatch a verified non-faucet visitor into Shortener #1 (or directly to target if plan has 0 shorteners)
+  async function dispatchNonFaucetToFirstShortener(
+    req: express.Request,
+    res: express.Response,
+    db: any,
+    link: any,
+    ip: string
+  ) {
+    const code = link.code;
+    const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
+    const userPlan = getPlanForUser(linkOwner, db);
+    const platformBase = getPlatformBaseUrl(req, db);
+    const enabledApis = getEnabledApisForPlan(userPlan, false, db);
+    const requiredSteps = enabledApis.length;
+
+    if (requiredSteps === 0) {
+      let targetUrl = link.originalUrl || "https://google.com";
+      if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+        targetUrl = "https://" + targetUrl;
+      }
+      if (isInternalLoopUrl(targetUrl, req.headers.host)) {
+        targetUrl = "https://google.com";
+      }
+
+      const todayIST = getISTDateString();
+      const hasPaidClickToday = db.clicksLog.some((c: any) => {
+        let loggedIp = c.ip;
+        if (typeof loggedIp === "string" && loggedIp.includes(",")) {
+          loggedIp = loggedIp.split(",")[0].trim();
+        }
+        return c.linkId === link.id && loggedIp === ip && getISTDateString(c.timestamp) === todayIST && c.earning > 0;
+      });
+      const currentCpm = getCurrentCpmForLink(link, db);
+      const earningAmount = hasPaidClickToday ? 0 : currentCpm / 1000;
+      const rawReferrer = (req.headers["referer"] || req.headers["referrer"] || req.query.ref || "TG Links Gate") as string;
+      db.clicksLog.push({
+        id: "c-" + Math.random().toString(36).substring(2, 9),
+        linkId: link.id,
+        userId: link.userId,
+        timestamp: new Date().toISOString(),
+        ip: String(ip),
+        earning: earningAmount,
+        country: "Global",
+        referrer: rawReferrer
+      });
+      link.clicks += 1;
+      link.earnings += earningAmount;
+      if (link.userId && link.userId !== "guest") {
+        const { user } = getUserIdentifiers(db, link.userId);
+        if (user && !user.banned) {
+          user.balance = Number(((user.balance || 0) + earningAmount).toFixed(6));
+          user.totalEarned = Number(((user.totalEarned || 0) + earningAmount).toFixed(6));
+        }
+      }
+      saveDb(db);
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      console.log(`[TG Links Completion Page] Serving completion page on tglinks.tech for code ${code} -> ${targetUrl}`);
-      return res.send(renderTgLinksCompletionPage(code, targetUrl, db.settings));
+      res.setHeader("Referrer-Policy", "no-referrer");
+      return res.redirect(302, targetUrl);
     }
 
-    // Direct HTTP 302 redirect to original destination URL (for faucet mode)
+    const newVtok = createVerificationToken(code, String(ip), requiredSteps);
+    const completionUrl =
+      requiredSteps > 1
+        ? `${platformBase}/p/${code}?vtok=${encodeURIComponent(newVtok)}&step=2`
+        : `${platformBase}/go-final/${code}?vtok=${newVtok}`;
+
+    const assignedApi = enabledApis[0];
+    let directShortUrl = "";
+
+    if (assignedApi) {
+      const apiUrlLower = String(assignedApi.apiUrl || "").toLowerCase();
+      const apiNameLower = String(assignedApi.name || "").toLowerCase();
+      const apiIdLower = String(assignedApi.id || "").toLowerCase();
+      const isJsonApiShortener =
+        apiUrlLower.includes("linkdl.net") ||
+        apiNameLower.includes("linkdl") ||
+        apiIdLower.includes("linkdl") ||
+        apiUrlLower.includes("earnlinks.in") ||
+        apiNameLower.includes("earnlinks") ||
+        apiIdLower.includes("earnlinks");
+
+      if (isJsonApiShortener) {
+        directShortUrl = (await getSingleExternalShortenedUrl(assignedApi, completionUrl)) || "";
+        if (!directShortUrl) {
+          directShortUrl = (await getSingleExternalShortenedUrl(assignedApi, completionUrl)) || "";
+        }
+        if (!directShortUrl) {
+          directShortUrl = completionUrl;
+        }
+      } else {
+        let rawApiUrl = String(assignedApi.apiUrl || "").trim();
+        let baseDomain = rawApiUrl.replace(/\/+$/, "");
+        if (baseDomain.endsWith("/api")) {
+          baseDomain = baseDomain.slice(0, -4);
+        } else if (baseDomain.endsWith("/st")) {
+          baseDomain = baseDomain.slice(0, -3);
+        }
+        if (!baseDomain.startsWith("http://") && !baseDomain.startsWith("https://")) {
+          baseDomain = "https://" + baseDomain;
+        }
+        const token = assignedApi.apiToken || "";
+        directShortUrl = `${baseDomain}/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
+      }
+      console.log(`[Post-Gate Shortener #1] Dispatching /go/${code} via plan "${userPlan?.name || "Default"}" (${assignedApi.name}): ${directShortUrl}`);
+    } else {
+      const token = "b6ac095e9373906c9e461860400e64a7de4536f1";
+      directShortUrl = `https://shortxlinks.com/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
+    }
+
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Referrer-Policy", "no-referrer");
-    return res.redirect(302, targetUrl);
+    return res.redirect(302, directShortUrl);
+  }
+
+  // Server-side Mein-PPC Captcha Challenge Creation (keeps API key hidden from browser)
+  app.post("/api/go-captcha-challenge/:code", async (req, res) => {
+    const { code } = req.params;
+    const ip = getClientIp(req);
+    let db = loadDb();
+    let link = findLinkByCode(db, code);
+    if (!link) {
+      db = loadDb(true);
+      link = findLinkByCode(db, code);
+    }
+    if (!link) {
+      let fallbackUrl = db.settings?.homepageTargetUrl || "https://google.com";
+      if (isInternalLoopUrl(fallbackUrl, req.headers.host)) fallbackUrl = "https://google.com";
+      link = { id: "demo-" + code, code, originalUrl: fallbackUrl, userId: "guest", cpm: 10, clicks: 0, earnings: 0, status: "active" };
+    }
+    if (link.status === "suspended") {
+      return res.status(403).json({ ok: false, error: "Link suspended" });
+    }
+    if (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now()) {
+      return res.status(410).json({ ok: false, error: "Link expired" });
+    }
+
+    const s = db.settings || {};
+    if (s.enableMeinPpcCaptcha === false) {
+      return res.json({ ok: true, disabled: true, upstreamBypassToken: createMeinPpcBypassToken(code, ip) });
+    }
+
+    const apiKey = String(s.meinPpcApiKey || "0e2eaa6a251c49c9dca6ae547a61d074").trim();
+    const captchaType = ["rotate", "quiz", "oddone"].includes(String(s.meinPpcType)) ? String(s.meinPpcType) : "rotate";
+    const captchaLang = s.meinPpcLang === "de" ? "de" : "en";
+    const strict = Number(s.meinPpcStrict ?? 5) || 5;
+    const ads = Number(s.meinPpcAds ?? 1) || 1;
+
+    const created = await createMeinPpcCaptchaChallenge({
+      apiKey,
+      targetUrl: "callback",
+      strict,
+      ads,
+      visitorIp: ip,
+      type: captchaType,
+      lang: captchaLang
+    });
+
+    if (created.ok && created.code) {
+      return res.json({
+        ok: true,
+        code: created.code,
+        type: captchaType,
+        lang: captchaLang
+      });
+    }
+
+    // Fail-open safeguard on upstream Mein-PPC outage or rate limit so user links never stall
+    return res.json({
+      ok: false,
+      error: created.error || "Captcha service temporarily unavailable",
+      upstreamBypassToken: createMeinPpcBypassToken(code, ip)
+    });
+  });
+
+  // Mein-PPC Captcha Launch (Redirect Mode) & Server-Side Verification Endpoint
+  app.get("/go-verify/:code", async (req, res) => {
+    const { code } = req.params;
+    const ip = getClientIp(req);
+    let db = loadDb();
+    let link = findLinkByCode(db, code);
+    if (!link) {
+      db = loadDb(true);
+      link = findLinkByCode(db, code);
+    }
+    if (!link) {
+      let fallbackUrl = db.settings?.homepageTargetUrl || "https://google.com";
+      if (isInternalLoopUrl(fallbackUrl, req.headers.host)) fallbackUrl = "https://google.com";
+      link = { id: "demo-" + code, code, originalUrl: fallbackUrl, userId: "guest", cpm: 10, clicks: 0, earnings: 0, status: "active" };
+    }
+    if (link.status === "suspended") {
+      return res.status(403).send("This link has been suspended");
+    }
+    if (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now()) {
+      return res.status(410).send("This shortened link has expired and is no longer active.");
+    }
+
+    const linkOwner = findUserInDb(db, link.userId) || findUserInDb(db, link.userEmail);
+    const isFaucetMode = checkIsFaucetMode(linkOwner, link, db);
+    if (isFaucetMode) {
+      return res.redirect(302, `/faucet/${encodeURIComponent(code)}`);
+    }
+
+    const s = db.settings || {};
+    if (s.enableMeinPpcCaptcha === false) {
+      return dispatchNonFaucetToFirstShortener(req, res, db, link, ip);
+    }
+
+    const upstreamBypass = String(req.query.upstream_bypass || "").trim();
+    if (upstreamBypass && verifyMeinPpcBypassToken(upstreamBypass, code, ip)) {
+      return dispatchNonFaucetToFirstShortener(req, res, db, link, ip);
+    }
+
+    const apiKey = String(s.meinPpcApiKey || "0e2eaa6a251c49c9dca6ae547a61d074").trim();
+    const captchaType = ["rotate", "quiz", "oddone"].includes(String(s.meinPpcType)) ? String(s.meinPpcType) : "rotate";
+    const captchaLang = s.meinPpcLang === "de" ? "de" : "en";
+    const strict = Number(s.meinPpcStrict ?? 5) || 5;
+    const ads = Number(s.meinPpcAds ?? 1) || 1;
+    const returnBase = getShortenerPlatformBase(req, db);
+
+    // 1. Hosted Redirect Launch -> Create captcha on mein-ppc.com and redirect visitor to mein-ppc.com/c/CODE
+    if (req.query.action === "launch") {
+      const successUrl = `${returnBase}/go-verify/${encodeURIComponent(code)}`;
+      const failureUrl = `${returnBase}/go/${encodeURIComponent(code)}?captcha_failed=1`;
+      const created = await createMeinPpcCaptchaChallenge({
+        apiKey,
+        targetUrl: successUrl,
+        failureUrl,
+        strict,
+        ads,
+        visitorIp: ip,
+        type: captchaType,
+        lang: captchaLang
+      });
+
+      if (created.ok && created.url) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        return res.redirect(302, created.url);
+      }
+
+      console.warn(`[Mein-PPC Launch] Fallback dispatch for /go-verify/${code} due to upstream error:`, created.error);
+      return dispatchNonFaucetToFirstShortener(req, res, db, link, ip);
+    }
+
+    // 2. Verify Solve Token from Overlay Callback or Hosted Redirect
+    const solveToken = String(req.query.solve_token || req.query.token || "").trim();
+    if (solveToken) {
+      const verified = await verifyMeinPpcCaptchaToken({
+        apiKey,
+        solveToken,
+        visitorIp: ip
+      });
+
+      if (verified.valid || verified.networkError) {
+        return dispatchNonFaucetToFirstShortener(req, res, db, link, ip);
+      }
+
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(403).send(renderTgLinksStartPage(code, s, {
+        errorMessage: verified.replay
+          ? "This verification token was already used. Please solve the captcha again to continue."
+          : "Captcha verification failed or expired. Please complete the captcha again."
+      }));
+    }
+
+    // Direct access without solve_token -> return to start gate
+    return res.redirect(302, `/go/${encodeURIComponent(code)}`);
   });
 
   // --- ADSLAB CAPTCHA MONETIZATION & VERIFICATION S2S API ---
@@ -6779,6 +7293,14 @@ ${ticket.adminReply}
       finalPageBottomBanner: s.finalPageBottomBanner || "",
       finalPageLeftBanner: s.finalPageLeftBanner || "",
       finalPageRightBanner: s.finalPageRightBanner || "",
+      startPageTimerSeconds: s.startPageTimerSeconds !== undefined ? Number(s.startPageTimerSeconds) : 5,
+      enableMeinPpcCaptcha: s.enableMeinPpcCaptcha !== false,
+      meinPpcMode: s.meinPpcMode === "redirect" ? "redirect" : "overlay",
+      meinPpcType: s.meinPpcType || "rotate",
+      meinPpcLang: s.meinPpcLang || "en",
+      meinPpcStrict: s.meinPpcStrict !== undefined ? Number(s.meinPpcStrict) : 5,
+      meinPpcAds: s.meinPpcAds !== undefined ? Number(s.meinPpcAds) : 1,
+      meinPpcDomain: s.meinPpcDomain || "tglinks.tech",
       homeTheme: s.homeTheme || "default",
       activeAdvertiserAds: activeAds
     });

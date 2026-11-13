@@ -101,6 +101,15 @@ const DEFAULT_ADMIN_SETTINGS: SystemSettings = {
   finalPageBottomBanner: "",
   finalPageLeftBanner: "",
   finalPageRightBanner: "",
+  startPageTimerSeconds: 5,
+  enableMeinPpcCaptcha: true,
+  meinPpcApiKey: "0e2eaa6a251c49c9dca6ae547a61d074",
+  meinPpcMode: "overlay",
+  meinPpcType: "rotate",
+  meinPpcLang: "en",
+  meinPpcStrict: 5,
+  meinPpcAds: 1,
+  meinPpcDomain: "tglinks.tech",
   popunderCode: "",
   globalHeaderCode: "",
   faviconUrl: "",
@@ -4756,6 +4765,32 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 </div>
               </div>
 
+              {/* Configurable Countdown Timer on Starting TG Links Page */}
+              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-200 uppercase">
+                    TG Links Start Page Countdown Timer (Seconds)
+                  </label>
+                  <p className="text-[11px] text-slate-400">
+                    Wait time before the Continue button unlocks on the starting TG Links page (set to <span className="font-mono text-slate-200">0</span> for instant Continue).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <input
+                    type="number"
+                    min={0}
+                    max={120}
+                    value={sysSettings.startPageTimerSeconds ?? 5}
+                    onChange={(e) => {
+                      const val = Math.max(0, Math.min(120, parseInt(e.target.value || "0", 10) || 0));
+                      setSysSettings({ ...sysSettings, startPageTimerSeconds: val });
+                    }}
+                    className="w-24 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-sm font-mono tabular-nums font-bold text-emerald-400 text-center outline-none focus:border-emerald-500"
+                  />
+                  <span className="text-xs text-slate-400 font-medium">sec</span>
+                </div>
+              </div>
+
               <div className="flex justify-end pt-2 border-t border-slate-800/80">
                 <button
                   type="submit"
@@ -4763,6 +4798,148 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                 >
                   <Save className="w-4 h-4" />
                   <span>Save Final Page Banner Ads</span>
+                </button>
+              </div>
+            </div>
+
+            {/* MEIN-PPC CAPTCHA AD GATE (BEFORE FIRST SHORTENER) */}
+            <div className="bg-slate-900/50 p-6 rounded-2xl border border-indigo-500/30 space-y-5 mt-6 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-white text-base">
+                      Mein-PPC Captcha Ad Gate (Before First Shortener)
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Verifies visitors via Mein-PPC banner puzzle &amp; server-side solve token before opening Shortener #1 on <span className="font-mono text-slate-200">{sysSettings.meinPpcDomain || "tglinks.tech"}</span>.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer bg-slate-950/90 px-3.5 py-2 rounded-xl border border-slate-800 shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={sysSettings.enableMeinPpcCaptcha !== false}
+                    onChange={(e) => setSysSettings({ ...sysSettings, enableMeinPpcCaptcha: e.target.checked })}
+                    className="w-4 h-4 text-indigo-500 rounded border-slate-700 bg-slate-900 focus:ring-indigo-500"
+                  />
+                  <span className="text-xs font-bold text-white whitespace-nowrap">
+                    {sysSettings.enableMeinPpcCaptcha !== false ? "Enabled" : "Disabled"}
+                  </span>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Mein-PPC API Key
+                  </label>
+                  <input
+                    type="text"
+                    value={sysSettings.meinPpcApiKey ?? "0e2eaa6a251c49c9dca6ae547a61d074"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, meinPpcApiKey: e.target.value })}
+                    placeholder="0e2eaa6a251c49c9dca6ae547a61d074"
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono text-indigo-300 outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-[10px] text-slate-500">Kept strictly server-side; used for create &amp; verify API calls.</p>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Shortener Domain
+                  </label>
+                  <input
+                    type="text"
+                    value={sysSettings.meinPpcDomain ?? "tglinks.tech"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, meinPpcDomain: e.target.value })}
+                    placeholder="tglinks.tech"
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono text-slate-200 outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-[10px] text-slate-500">Domain used for verification callbacks in production.</p>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Verification Mode
+                  </label>
+                  <select
+                    value={sysSettings.meinPpcMode === "redirect" ? "redirect" : "overlay"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, meinPpcMode: e.target.value as "overlay" | "redirect" })}
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-200 outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="overlay">On-Page Overlay (Stays on TG Links Page)</option>
+                    <option value="redirect">Hosted Redirect (mein-ppc.com/c/CODE)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500">Overlay keeps banner ads visible; redirects gracefully if blocked.</p>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Puzzle Type
+                  </label>
+                  <select
+                    value={sysSettings.meinPpcType || "rotate"}
+                    onChange={(e) => setSysSettings({ ...sysSettings, meinPpcType: e.target.value as "rotate" | "quiz" | "oddone" })}
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-200 outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="rotate">rotate (2x2 Rotated Banner Puzzle)</option>
+                    <option value="quiz">quiz (Knowledge Question)</option>
+                    <option value="oddone">oddone (Odd One Out)</option>
+                  </select>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Language &amp; Strictness
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={sysSettings.meinPpcLang === "de" ? "de" : "en"}
+                      onChange={(e) => setSysSettings({ ...sysSettings, meinPpcLang: e.target.value as "en" | "de" })}
+                      className="flex-1 px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-200 outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="en">English (en)</option>
+                      <option value="de">Deutsch (de)</option>
+                    </select>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      title="Max failed attempts (1-10)"
+                      value={sysSettings.meinPpcStrict ?? 5}
+                      onChange={(e) => setSysSettings({ ...sysSettings, meinPpcStrict: Math.max(1, Math.min(10, parseInt(e.target.value || "5", 10) || 5)) })}
+                      className="w-20 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono tabular-nums text-center text-slate-200 outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-500">Language + max attempts (1–10 strict parameter).</p>
+                </div>
+
+                <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300 uppercase">
+                    Ad Screens (1–5)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    value={sysSettings.meinPpcAds ?? 1}
+                    onChange={(e) => setSysSettings({ ...sysSettings, meinPpcAds: Math.max(1, Math.min(5, parseInt(e.target.value || "1", 10) || 1)) })}
+                    className="block w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono tabular-nums text-slate-200 outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-[10px] text-slate-500">Number of sponsor ad screens shown (`ads` param, default 1).</p>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-slate-800/80">
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save Captcha Settings</span>
                 </button>
               </div>
             </div>

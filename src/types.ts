@@ -167,6 +167,16 @@ export interface SystemSettings {
   finalPageBottomBanner?: string;
   finalPageLeftBanner?: string;
   finalPageRightBanner?: string;
+  // TG Links Start Page Timer & Mein-PPC Captcha (Before First Shortener)
+  startPageTimerSeconds?: number;
+  enableMeinPpcCaptcha?: boolean;
+  meinPpcApiKey?: string;
+  meinPpcMode?: 'overlay' | 'redirect';
+  meinPpcType?: 'rotate' | 'quiz' | 'oddone';
+  meinPpcLang?: 'en' | 'de';
+  meinPpcStrict?: number;
+  meinPpcAds?: number;
+  meinPpcDomain?: string;
   enableSponsoredAd1?: boolean;
   sponsoredAd1Url?: string;
   sponsoredAd1Timer?: number;
