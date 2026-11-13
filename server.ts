@@ -409,6 +409,9 @@ function getEnabledApisForPlan(plan: any, isFaucetMode: boolean, db: any): any[]
       if (!found && (target.includes("linkdl") || target === "api-linkdl-4")) {
         found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("linkdl") && !s.isFaucetApi);
       }
+      if (!found && (target.includes("earnlinks") || target === "api-earnlinks-5")) {
+        found = activeShorteners.find((s: any) => String(s.name || "").toLowerCase().includes("earnlinks") && !s.isFaucetApi);
+      }
 
       if (found) {
         result.push({ ...found, stepKey: `${found.id}-${idx}` });
@@ -515,15 +518,18 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
   }
   rawUrl = rawUrl.replace(/\/+$/, "");
 
-  // Check if this shortener is LinkDL (which uses GET https://linkdl.net/api?api=TOKEN&url=URL JSON/text API)
-  const isLinkDl =
+  // Check if this shortener is LinkDL or EarnLinks (which use GET https://.../api?api=TOKEN&url=URL JSON/text API instead of QuickLink /st)
+  const isJsonOnlyShortener =
     rawUrl.toLowerCase().includes("linkdl.net") ||
     String(selectedApi.name || "").toLowerCase().includes("linkdl") ||
-    String(selectedApi.id || "").toLowerCase().includes("linkdl");
+    String(selectedApi.id || "").toLowerCase().includes("linkdl") ||
+    rawUrl.toLowerCase().includes("earnlinks.in") ||
+    String(selectedApi.name || "").toLowerCase().includes("earnlinks") ||
+    String(selectedApi.id || "").toLowerCase().includes("earnlinks");
 
   // Generate official AdLinkFly QuickLink API URL directly (/st?api=...&url=https://...) for standard QuickLink shorteners
   let baseDomain = rawUrl.endsWith("/api") ? rawUrl.slice(0, -4) : rawUrl.replace(/\/st$/, "");
-  if (!isLinkDl && baseDomain && apiToken) {
+  if (!isJsonOnlyShortener && baseDomain && apiToken) {
     // AdLinkFly QuickLinks strictly require raw :// in url= (rejects %3A%2F%2F with "URL is invalid.")
     const quickLink = `${baseDomain}/st?api=${encodeURIComponent(apiToken)}&url=${targetUrl}`;
     console.log(`[Shortener API] Direct QuickLink API URL generated for ${selectedApi.name}: ${quickLink}`);
@@ -551,7 +557,7 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
       };
 
   for (const endpoint of candidateEndpoints) {
-    // Try both JSON API request and format=text API request for maximum compatibility (including LinkDL.Net)
+    // Try both JSON API request and format=text API request for maximum compatibility (including LinkDL.Net & EarnLinks.in)
     const urlVariants = [
       `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}`,
       `${endpoint}?api=${encodeURIComponent(apiToken)}&url=${encodeURIComponent(targetUrl)}&format=text`
@@ -579,7 +585,8 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
 
         if (!isHtml) {
           try {
-            const json = JSON.parse(text);
+            const normalizedJsonText = text.replace(/""(https?:\\?\/\\?\/[^"]+)""/g, '"$1"');
+            const json = JSON.parse(normalizedJsonText);
             if (json && (json.status === "success" || (json.status !== "error" && json.status !== "fail"))) {
               shortenedUrl = 
                 json.shortenedUrl || 
@@ -598,10 +605,15 @@ async function getSingleExternalShortenedUrl(selectedApi: any, targetUrl: string
                 "";
             }
           } catch (e) {
-            // Plain text response (only if plain string starting with http:// and not HTML)
+            // Plain text or malformed JSON fallback
             const trimmedText = text.trim();
             if (/^https?:\/\/[^\s"']+/i.test(trimmedText) && !trimmedText.includes("<")) {
               shortenedUrl = trimmedText;
+            } else {
+              const urlMatch = trimmedText.match(/"shortenedUrl"\s*:\s*"*(https?:(?:\\\/|\/){2}[^"\\]+(?:\\\/[^"\\]*)*)"*/i);
+              if (urlMatch && urlMatch[1]) {
+                shortenedUrl = urlMatch[1];
+              }
             }
           }
         }
@@ -1710,6 +1722,15 @@ function ensureRequiredShortenersAndPlans(db: any): boolean {
       isFaucetApi: false
     },
     {
+      id: "api-earnlinks-5",
+      name: "EarnLinks",
+      apiUrl: "https://earnlinks.in/api",
+      apiToken: "c9a8b1733dbf489f3757d15c04ecaf29044ca251",
+      enabled: true,
+      priority: 5,
+      isFaucetApi: false
+    },
+    {
       id: "api-shortxlinks-faucet-3",
       name: "ShortXLinks-Faucet",
       apiUrl: "https://shortxlinks.com/",
@@ -1755,7 +1776,7 @@ function ensureRequiredShortenersAndPlans(db: any): boolean {
     db.adFlyShorteners = db.adFlyShorteners.filter(Boolean);
     if (db.adFlyShorteners.length !== originalLength) changed = true;
 
-    // Ensure ShortXLinks, SoftURL, ShareDiskLinks, and LinkDL exist with valid tokens
+    // Ensure ShortXLinks, SoftURL, ShareDiskLinks, LinkDL, and EarnLinks exist with valid tokens
     for (const reqShortener of defaultShorteners) {
       const existing = db.adFlyShorteners.find((s: any) =>
         s && (
@@ -1767,7 +1788,7 @@ function ensureRequiredShortenersAndPlans(db: any): boolean {
         db.adFlyShorteners.push({ ...reqShortener });
         changed = true;
       } else {
-        // Normalize canonical IDs for the 4 core non-faucet shorteners so plan shortenerIds always resolve cleanly
+        // Normalize canonical IDs for the core non-faucet shorteners so plan shortenerIds always resolve cleanly
         if (!reqShortener.isFaucetApi && existing.id !== reqShortener.id) {
           existing.id = reqShortener.id;
           changed = true;
@@ -1783,6 +1804,12 @@ function ensureRequiredShortenersAndPlans(db: any): boolean {
         if (reqShortener.id === "api-linkdl-4" && existing.apiToken !== "b57c6334f1fa259c3e4f0826548ebcee0ef1dbea") {
           existing.apiToken = "b57c6334f1fa259c3e4f0826548ebcee0ef1dbea";
           existing.apiUrl = "https://linkdl.net/api";
+          existing.enabled = true;
+          changed = true;
+        }
+        if (reqShortener.id === "api-earnlinks-5" && existing.apiToken !== "c9a8b1733dbf489f3757d15c04ecaf29044ca251") {
+          existing.apiToken = "c9a8b1733dbf489f3757d15c04ecaf29044ca251";
+          existing.apiUrl = "https://earnlinks.in/api";
           existing.enabled = true;
           changed = true;
         }
@@ -3591,18 +3618,42 @@ Sitemap: ${baseUrl}/sitemap.xml`
           const nextStep = currentStep + 1;
           const nextTargetUrl = `${platformBase}/p/${code}?vtok=${encodeURIComponent(vtok)}&step=${nextStep}`;
 
-          let rawApiUrl = String(currentApi.apiUrl || "").trim();
-          let baseDomain = rawApiUrl.replace(/\/+$/, "");
-          if (baseDomain.endsWith("/api")) {
-            baseDomain = baseDomain.slice(0, -4);
-          } else if (baseDomain.endsWith("/st")) {
-            baseDomain = baseDomain.slice(0, -3);
+          const apiUrlLower = String(currentApi.apiUrl || "").toLowerCase();
+          const apiNameLower = String(currentApi.name || "").toLowerCase();
+          const apiIdLower = String(currentApi.id || "").toLowerCase();
+          const isJsonApiShortener =
+            apiUrlLower.includes("linkdl.net") ||
+            apiNameLower.includes("linkdl") ||
+            apiIdLower.includes("linkdl") ||
+            apiUrlLower.includes("earnlinks.in") ||
+            apiNameLower.includes("earnlinks") ||
+            apiIdLower.includes("earnlinks");
+
+          let directShortUrl = "";
+          if (isJsonApiShortener) {
+            directShortUrl = (await getSingleExternalShortenedUrl(currentApi, nextTargetUrl)) || "";
+            if (!directShortUrl) {
+              directShortUrl = (await getSingleExternalShortenedUrl(currentApi, nextTargetUrl)) || "";
+            }
+            if (!directShortUrl) {
+              console.warn(`[Multi-Step Chain] JSON API failed for ${currentApi.name}, forwarding to next step`);
+              directShortUrl = nextTargetUrl;
+            }
+          } else {
+            let rawApiUrl = String(currentApi.apiUrl || "").trim();
+            let baseDomain = rawApiUrl.replace(/\/+$/, "");
+            if (baseDomain.endsWith("/api")) {
+              baseDomain = baseDomain.slice(0, -4);
+            } else if (baseDomain.endsWith("/st")) {
+              baseDomain = baseDomain.slice(0, -3);
+            }
+            if (!baseDomain.startsWith("http://") && !baseDomain.startsWith("https://")) {
+              baseDomain = "https://" + baseDomain;
+            }
+            const token = currentApi.apiToken || "";
+            directShortUrl = `${baseDomain}/st?api=${encodeURIComponent(token)}&url=${nextTargetUrl}`;
           }
-          if (!baseDomain.startsWith("http://") && !baseDomain.startsWith("https://")) {
-            baseDomain = "https://" + baseDomain;
-          }
-          const token = currentApi.apiToken || "";
-          const directShortUrl = `${baseDomain}/st?api=${encodeURIComponent(token)}&url=${nextTargetUrl}`;
+
           console.log(`[Multi-Step Chain] Step ${currentStep} of ${totalRequiredSteps} routing via ${currentApi.name}: ${directShortUrl}`);
 
           res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -3746,19 +3797,40 @@ Sitemap: ${baseUrl}/sitemap.xml`
 
       let directShortUrl = "";
       if (assignedApi) {
-        let rawApiUrl = String(assignedApi.apiUrl || "").trim();
-        let baseDomain = rawApiUrl.replace(/\/+$/, "");
-        if (baseDomain.endsWith("/api")) {
-          baseDomain = baseDomain.slice(0, -4);
-        } else if (baseDomain.endsWith("/st")) {
-          baseDomain = baseDomain.slice(0, -3);
+        const apiUrlLower = String(assignedApi.apiUrl || "").toLowerCase();
+        const apiNameLower = String(assignedApi.name || "").toLowerCase();
+        const apiIdLower = String(assignedApi.id || "").toLowerCase();
+        const isJsonApiShortener =
+          apiUrlLower.includes("linkdl.net") ||
+          apiNameLower.includes("linkdl") ||
+          apiIdLower.includes("linkdl") ||
+          apiUrlLower.includes("earnlinks.in") ||
+          apiNameLower.includes("earnlinks") ||
+          apiIdLower.includes("earnlinks");
+
+        if (isJsonApiShortener) {
+          directShortUrl = (await getSingleExternalShortenedUrl(assignedApi, completionUrl)) || "";
+          if (!directShortUrl) {
+            directShortUrl = (await getSingleExternalShortenedUrl(assignedApi, completionUrl)) || "";
+          }
+          if (!directShortUrl) {
+            directShortUrl = completionUrl;
+          }
+        } else {
+          let rawApiUrl = String(assignedApi.apiUrl || "").trim();
+          let baseDomain = rawApiUrl.replace(/\/+$/, "");
+          if (baseDomain.endsWith("/api")) {
+            baseDomain = baseDomain.slice(0, -4);
+          } else if (baseDomain.endsWith("/st")) {
+            baseDomain = baseDomain.slice(0, -3);
+          }
+          if (!baseDomain.startsWith("http://") && !baseDomain.startsWith("https://")) {
+            baseDomain = "https://" + baseDomain;
+          }
+          const token = assignedApi.apiToken || "";
+          // Raw :// URL parameter (AdLinkFly strictly requires :// instead of %3A%2F%2F)
+          directShortUrl = `${baseDomain}/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
         }
-        if (!baseDomain.startsWith("http://") && !baseDomain.startsWith("https://")) {
-          baseDomain = "https://" + baseDomain;
-        }
-        const token = assignedApi.apiToken || "";
-        // Raw :// URL parameter (AdLinkFly strictly requires :// instead of %3A%2F%2F)
-        directShortUrl = `${baseDomain}/st?api=${encodeURIComponent(token)}&url=${completionUrl}`;
         console.log(`[Non-Faucet Direct] Direct 302 redirect for /go/${code} using plan "${userPlan?.name || 'Default'}" (${assignedApi.name}): ${directShortUrl}`);
       } else {
         const token = "b6ac095e9373906c9e461860400e64a7de4536f1";
@@ -5556,6 +5628,108 @@ Sitemap: ${baseUrl}/sitemap.xml`
     res.json({
       success: true,
       shareDiskEnabled: nextEnabled,
+      plan: elitePlan,
+      plans: db.plans,
+      shorteners: db.adFlyShorteners
+    });
+  });
+
+  // POST /api/admin/plans/elite/toggle-earnlinks - Replace SoftURL with EarnLinks.in (or restore SoftURL) in ELITE Plan
+  app.post("/api/admin/plans/elite/toggle-earnlinks", requireAdmin, (req, res) => {
+    const { useEarnLinks, cpm } = req.body || {};
+    const db = loadDb();
+    if (!db.plans) db.plans = [];
+    if (!db.adFlyShorteners) db.adFlyShorteners = [];
+
+    let earnLinksApi = db.adFlyShorteners.find((s: any) =>
+      s && (s.id === "api-earnlinks-5" || String(s.name || "").toLowerCase().includes("earnlinks"))
+    );
+    if (!earnLinksApi) {
+      earnLinksApi = {
+        id: "api-earnlinks-5",
+        name: "EarnLinks",
+        apiUrl: "https://earnlinks.in/api",
+        apiToken: "c9a8b1733dbf489f3757d15c04ecaf29044ca251",
+        enabled: true,
+        priority: 5,
+        isFaucetApi: false
+      };
+      db.adFlyShorteners.push(earnLinksApi);
+    } else {
+      earnLinksApi.apiToken = "c9a8b1733dbf489f3757d15c04ecaf29044ca251";
+      earnLinksApi.apiUrl = "https://earnlinks.in/api";
+      earnLinksApi.enabled = true;
+    }
+
+    let softUrlApi = db.adFlyShorteners.find((s: any) =>
+      s && (s.id === "api-softurl-2" || String(s.name || "").toLowerCase().includes("softurl"))
+    );
+    if (!softUrlApi) {
+      softUrlApi = {
+        id: "api-softurl-2",
+        name: "SoftURL",
+        apiUrl: "https://softurl.in/api",
+        apiToken: "609c875b96d61f0592bfe5ae036b2db1df673680",
+        enabled: true,
+        priority: 5,
+        isFaucetApi: false
+      };
+      db.adFlyShorteners.push(softUrlApi);
+    } else {
+      softUrlApi.enabled = true;
+    }
+
+    const elitePlan = db.plans.find((p: any) => p && (p.id === "elite" || String(p.name || "").toUpperCase() === "ELITE"));
+    if (!elitePlan) {
+      return res.status(404).json({ error: "ELITE plan not found" });
+    }
+
+    const earnId = earnLinksApi.id;
+    const softId = softUrlApi.id;
+    const currentIds: string[] = Array.isArray(elitePlan.shortenerIds) ? [...elitePlan.shortenerIds] : ["api-shortxlinks-1", softId];
+    const currentlyUsingEarnLinks = currentIds.some((id: string) => id === earnId || String(id).toLowerCase().includes("earnlinks"));
+    const nextUseEarnLinks = useEarnLinks !== undefined ? Boolean(useEarnLinks) : !currentlyUsingEarnLinks;
+
+    const targetReplacementId = nextUseEarnLinks ? earnId : softId;
+    const isStep2Match = (sid: string) => {
+      const low = String(sid || "").toLowerCase();
+      return low === softId.toLowerCase() || low === earnId.toLowerCase() || low.includes("softurl") || low.includes("earnlinks");
+    };
+
+    let replaced = false;
+    const updatedIds: string[] = [];
+    for (const sid of currentIds) {
+      if (isStep2Match(sid)) {
+        if (!replaced) {
+          updatedIds.push(targetReplacementId);
+          replaced = true;
+        }
+      } else if (!updatedIds.includes(sid)) {
+        updatedIds.push(sid);
+      }
+    }
+
+    if (!replaced) {
+      // Insert right before ShareDiskLinks if present, or at the end (after ShortXLinks)
+      const shareIdx = updatedIds.findIndex((sid) => sid === "api-sharedisklinks-3" || String(sid).toLowerCase().includes("sharedisk"));
+      if (shareIdx !== -1) {
+        updatedIds.splice(shareIdx, 0, targetReplacementId);
+      } else {
+        if (updatedIds.length === 0) updatedIds.push("api-shortxlinks-1");
+        updatedIds.push(targetReplacementId);
+      }
+    }
+
+    elitePlan.shortenerIds = updatedIds;
+
+    if (cpm !== undefined && cpm !== null && !isNaN(Number(cpm)) && Number(cpm) >= 0) {
+      elitePlan.cpm = Number(cpm);
+    }
+
+    saveDb(db);
+    res.json({
+      success: true,
+      useEarnLinks: nextUseEarnLinks,
       plan: elitePlan,
       plans: db.plans,
       shorteners: db.adFlyShorteners

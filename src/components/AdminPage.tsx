@@ -1114,10 +1114,13 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       if (res?.success) {
         if (res.plans) setAdminPlansList(res.plans);
         if (res.shorteners) setExternalApis(res.shorteners);
+        const step2Label = (res.plan?.shortenerIds || []).some((id: string) => id === "api-earnlinks-5" || String(id).toLowerCase().includes("earnlinks"))
+          ? "EarnLinks"
+          : "SoftURL";
         setPlanSaveMsg(
           res.shareDiskEnabled
-            ? "ShareDiskLinks enabled in ELITE Plan (ShortXLinks → SoftURL → ShareDiskLinks)!"
-            : "ShareDiskLinks disabled in ELITE Plan (ShortXLinks → SoftURL)."
+            ? `ShareDiskLinks enabled in ELITE Plan (ShortXLinks → ${step2Label} → ShareDiskLinks)!`
+            : `ShareDiskLinks disabled in ELITE Plan (ShortXLinks → ${step2Label}).`
         );
         setTimeout(() => setPlanSaveMsg(""), 3500);
         if (editingPlanId === "elite" && res.plan) {
@@ -1131,6 +1134,36 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
       }
     } catch (err: any) {
       alert("Error toggling ShareDiskLinks: " + (err?.message || "Unknown error"));
+    }
+  };
+
+  const handleToggleEliteEarnLinks = async (currentlyUsingEarnLinks: boolean) => {
+    try {
+      const res = await fetchApi("/admin/plans/elite/toggle-earnlinks", {
+        method: "POST",
+        body: JSON.stringify({ useEarnLinks: !currentlyUsingEarnLinks })
+      });
+      if (res?.success) {
+        if (res.plans) setAdminPlansList(res.plans);
+        if (res.shorteners) setExternalApis(res.shorteners);
+        const hasShareDisk = (res.plan?.shortenerIds || []).some((id: string) => id === "api-sharedisklinks-3" || String(id).toLowerCase().includes("sharedisk"));
+        setPlanSaveMsg(
+          res.useEarnLinks
+            ? `Replaced SoftURL with EarnLinks.in in ELITE Plan (ShortXLinks → EarnLinks${hasShareDisk ? " → ShareDiskLinks" : ""})!`
+            : `Restored SoftURL in ELITE Plan (ShortXLinks → SoftURL${hasShareDisk ? " → ShareDiskLinks" : ""}).`
+        );
+        setTimeout(() => setPlanSaveMsg(""), 3500);
+        if (editingPlanId === "elite" && res.plan) {
+          setPlanFormData((prev: any) => ({
+            ...prev,
+            shortenerIds: res.plan.shortenerIds || []
+          }));
+        }
+      } else {
+        alert(res?.error || "Failed to switch Step #2 shortener in ELITE Plan.");
+      }
+    } catch (err: any) {
+      alert("Error switching EarnLinks in ELITE Plan: " + (err?.message || "Unknown error"));
     }
   };
 
@@ -6779,6 +6812,15 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                         shareDiskApiObj.enabled !== false &&
                         (plan.shortenerIds || []).includes(shareDiskApiObj.id)
                       );
+                      const earnLinksApiObj = externalApis.find(
+                        api => api.id === "api-earnlinks-5" || String(api.name || "").toLowerCase().includes("earnlinks")
+                      );
+                      const isEarnLinksActiveInElite = Boolean(
+                        isElitePlan &&
+                        (plan.shortenerIds || []).some((sid: string) =>
+                          sid === (earnLinksApiObj?.id || "api-earnlinks-5") || String(sid).toLowerCase().includes("earnlinks")
+                        )
+                      );
                       const isPaused = Boolean(plan.paused && !plan.isDefault && String(plan.id || "").toLowerCase() !== "default");
                       const usersOnPlanCount = usersList.filter((u) => {
                         const uPlanId = u.planId || "default";
@@ -6901,27 +6943,51 @@ export default function AdminPage({ initialTab, onBackToDashboard }: AdminPagePr
                             )}
 
                             {isElitePlan && (
-                              <button
-                                type="button"
-                                onClick={() => handleToggleEliteShareDiskLinks(isShareDiskEnabledInElite)}
-                                className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer ${
-                                  isShareDiskEnabledInElite
-                                    ? "bg-emerald-950/50 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/50"
-                                    : "bg-slate-900 border-slate-700 text-slate-300 hover:border-indigo-500/40 hover:text-white"
-                                }`}
-                                title={
-                                  isShareDiskEnabledInElite
-                                    ? "Disable ShareDiskLinks (Step #3) in ELITE Plan"
-                                    : "Enable ShareDiskLinks (Step #3 after SoftURL) in ELITE Plan"
-                                }
-                              >
-                                {isShareDiskEnabledInElite ? (
-                                  <ToggleRight className="w-4 h-4 text-emerald-400" />
-                                ) : (
-                                  <ToggleLeft className="w-4 h-4 text-slate-400" />
-                                )}
-                                <span>ShareDiskLinks: {isShareDiskEnabledInElite ? "ON" : "OFF"}</span>
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleEliteEarnLinks(isEarnLinksActiveInElite)}
+                                  className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer ${
+                                    isEarnLinksActiveInElite
+                                      ? "bg-indigo-950/60 border-indigo-400/50 text-indigo-300 hover:bg-indigo-900/60"
+                                      : "bg-slate-900 border-slate-700 text-slate-300 hover:border-indigo-500/40 hover:text-white"
+                                  }`}
+                                  title={
+                                    isEarnLinksActiveInElite
+                                      ? "Currently using EarnLinks.in instead of SoftURL. Click to switch back to SoftURL."
+                                      : "Replace SoftURL with EarnLinks.in (earnlinks.in) in ELITE Plan"
+                                  }
+                                >
+                                  {isEarnLinksActiveInElite ? (
+                                    <ToggleRight className="w-4 h-4 text-indigo-400" />
+                                  ) : (
+                                    <ToggleLeft className="w-4 h-4 text-slate-400" />
+                                  )}
+                                  <span>{isEarnLinksActiveInElite ? "EarnLinks.in: ON" : "Use EarnLinks.in (Replace SoftURL)"}</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleEliteShareDiskLinks(isShareDiskEnabledInElite)}
+                                  className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer ${
+                                    isShareDiskEnabledInElite
+                                      ? "bg-emerald-950/50 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/50"
+                                      : "bg-slate-900 border-slate-700 text-slate-300 hover:border-indigo-500/40 hover:text-white"
+                                  }`}
+                                  title={
+                                    isShareDiskEnabledInElite
+                                      ? "Disable ShareDiskLinks (Step #3) in ELITE Plan"
+                                      : "Enable ShareDiskLinks (Step #3 after Step #2) in ELITE Plan"
+                                  }
+                                >
+                                  {isShareDiskEnabledInElite ? (
+                                    <ToggleRight className="w-4 h-4 text-emerald-400" />
+                                  ) : (
+                                    <ToggleLeft className="w-4 h-4 text-slate-400" />
+                                  )}
+                                  <span>ShareDiskLinks: {isShareDiskEnabledInElite ? "ON" : "OFF"}</span>
+                                </button>
+                              </>
                             )}
 
                             <button
